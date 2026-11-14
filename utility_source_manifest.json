@@ -332,5 +332,5 @@
  ],
  "snapshot_file_list": "tools\\steam-upstream\\COPY_MANIFEST.json",
  "upstream_repo": "github.com/dejunai/morrowind-conflict-tools",
- "upstream_commit": "2f5249c"
+ "upstream_commit": "f094ef6"
 }

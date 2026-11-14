@@ -232,7 +232,7 @@ Behaviour changes:
   deferred), mwwarnsuppression (patch sites are found in the running executable, so GOG, Steam and code-patched
   builds are handled or left alone), mwguard, and the settings saving of mwteleportguard, mwmouseguard,
   mweffectinspector and mwpluginpatches. `mwespreplacements` is the user's own replacement for plugins in one
-  load order: it is in the upstream snapshot (the public repo has it) but not in MWManager's suite, and
+  load order: it was removed from the public repo (@f094ef6) and from the upstream snapshot, it is not in MWManager's suite, and
   `--init` does not install it.
 - One Mod Config Menu entry. `reference\mwmanager-menu\` holds MWManager's own `mwmanagermenu` mod. It loads
   before the suite, keeps back each suite mod's settings-page registration, and registers one entry,

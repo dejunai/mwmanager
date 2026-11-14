@@ -2,7 +2,7 @@
   "SyncedAt": "2026-11-14T11:28:48",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
-  "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @2f5249c: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
+  "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @f094ef6: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
   "Excluded": "game data, plans, logs, backups, caches, Morrowind.ini, mlox, tools\\luajit binaries; user-state records (load order, rules, answers, added masters, cell winners, generated lists, mwguard.json) keep their earlier snapshot; chargen_ship_patch.py and stranded_doors_patch.py were retired upstream and are not in the snapshot",
   "Files": [
     {
@@ -25,13 +25,6 @@
       "SHA256": "a880ba4265135d0e1e5590d5617aecac2240aee9e58ba4982672e5449c85b044",
       "Source": "<Steam Morrowind>\\Data Files\\mweffectinspector-metadata.toml",
       "SourceModified": "2026-11-14T09:33:58"
-    },
-    {
-      "RelativePath": "Data Files\\mwespreplacements-metadata.toml",
-      "Bytes": 233,
-      "SHA256": "6d150d415c946d7abcbe5708f90e99c890fb33448e62feff931224d436387c4d",
-      "Source": "<Steam Morrowind>\\Data Files\\mwespreplacements-metadata.toml",
-      "SourceModified": "2026-11-14T10:03:50"
     },
     {
       "RelativePath": "Data Files\\mwguard-metadata.toml",
@@ -137,48 +130,6 @@
       "SHA256": "78b04f690d3eee8a1b01284620a9f09275475704a644a15136150e0c93e3837d",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mweffectinspector\\mcm.lua",
       "SourceModified": "2026-11-14T10:57:13"
-    },
-    {
-      "RelativePath": "Data Files\\MWSE\\mods\\mwespreplacements\\config.lua",
-      "Bytes": 1206,
-      "SHA256": "57024b8fa66eb23540adf7810adf1880503e6f09ad2d2a407f00e848d10c99cc",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwespreplacements\\config.lua",
-      "SourceModified": "2026-11-14T10:57:13"
-    },
-    {
-      "RelativePath": "Data Files\\MWSE\\mods\\mwespreplacements\\main.lua",
-      "Bytes": 1187,
-      "SHA256": "a04c19e438533daf0953fe9c7d009d44b2e2fbf9b53dc42f86ad47dfceb9c8a9",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwespreplacements\\main.lua",
-      "SourceModified": "2026-11-14T10:03:47"
-    },
-    {
-      "RelativePath": "Data Files\\MWSE\\mods\\mwespreplacements\\mcm.lua",
-      "Bytes": 7723,
-      "SHA256": "b388cffed2f615de9d2365edcc82c88764722524c3508a5d379dc1f87bf5d748",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwespreplacements\\mcm.lua",
-      "SourceModified": "2026-11-14T10:57:13"
-    },
-    {
-      "RelativePath": "Data Files\\MWSE\\mods\\mwespreplacements\\tweaks\\equipment.lua",
-      "Bytes": 9763,
-      "SHA256": "9ce8975bb5e5109c36cce86e4af3535caaaba655aa871a43ba126a94a74752bd",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwespreplacements\\tweaks\\equipment.lua",
-      "SourceModified": "2026-11-14T10:03:47"
-    },
-    {
-      "RelativePath": "Data Files\\MWSE\\mods\\mwespreplacements\\tweaks\\scripts.lua",
-      "Bytes": 2912,
-      "SHA256": "8f13b7f08556a69717c61b4411db6258e98bcd56d3087d7250838a8a248f466d",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwespreplacements\\tweaks\\scripts.lua",
-      "SourceModified": "2026-11-14T10:03:47"
-    },
-    {
-      "RelativePath": "Data Files\\MWSE\\mods\\mwespreplacements\\tweaks\\visuals.lua",
-      "Bytes": 2464,
-      "SHA256": "e0e554f027821d6da63b89e56165476796b04833e27dc2d27f4506091f7a662e",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwespreplacements\\tweaks\\visuals.lua",
-      "SourceModified": "2026-11-14T10:03:47"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwfloatfix\\main.lua",
