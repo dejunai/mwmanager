@@ -29,6 +29,11 @@
 ; the wildcards * and ? and mlox's <VER> (a version number). A plugin always loads after its
 ; masters, and every .esm before every .esp, whatever the rules say.
 
+; Patch for Purists (the unofficial patch) loads right after Bloodmoon.esm, before Tamriel_Data,
+; OAAB_Data and every other master.
+[NearStart]
+Patch for Purists.esm
+
 [NearEnd]
 XE Sky Variations.esp
 
@@ -169,7 +174,7 @@ avp BTBGI-NE - Factions - TR_Factions.esp
 avp BTBGI-NE - Uvirith's Legacy.esp
 FM - Unique Items v1.0 - PfP.ESP
 
-; ---- added by --cell-conflicts 2026-11-12 01:26 ----
+; ---- added by --cell-conflicts 2026-11-14 07:53 ----
 
 [Order]
 Sheogorad - Groves of the North.esp
@@ -290,6 +295,11 @@ abotRedoranCouncilEntrancePlanters.esp
 Fields of Humility.ESP
 Creatures and Critters.ESP
 ; keep Creatures and Critters.ESP winning where they conflict
+
+[Order]
+Rise of House Telvanni.esm
+RepopulatedMorrowind.ESM
+; keep RepopulatedMorrowind.ESM winning where they conflict
 
 [Order]
 HelnimREDUXskriak.ESP
@@ -1728,6 +1738,11 @@ ST_Alchemy_Replacer_1.3.esp
 
 [Order]
 Clean_Mines and Caverns.esp
+Join All Vampire Clans.esp
+; keep Join All Vampire Clans.esp winning where they conflict
+
+[Order]
+Clean_Mines and Caverns.esp
 Sheogorad - Groves of the North.esp
 ; keep Sheogorad - Groves of the North.esp winning where they conflict
 
@@ -1790,6 +1805,11 @@ GreymarchDawn.esp
 The Mountain of Fear.ESP
 ST_Alchemy_Replacer_1.3.esp
 ; keep ST_Alchemy_Replacer_1.3.esp winning where they conflict
+
+[Order]
+Better Bounties.esp
+abotWindowsGlow.esp
+; keep abotWindowsGlow.esp winning where they conflict
 
 [Order]
 The Sable Dragon 1.6 mmc.esp

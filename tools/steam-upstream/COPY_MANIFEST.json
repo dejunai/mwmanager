@@ -1,8 +1,8 @@
 ﻿{
-    "SyncedAt":  "2026-11-14T08:30:00",
+    "SyncedAt":  "2026-11-14T08:45:00",
     "TimeZone":  "America/Los_Angeles",
     "SourceRoot":  "\u003cSteam Morrowind\u003e = the Steam Morrowind install root",
-    "FileSetGuide":  "public repo dejunai/morrowind-conflict-tools @30be84a",
+    "FileSetGuide":  "public repo dejunai/morrowind-conflict-tools @08ca20d; mwdialog_check.rules.txt from the Steam root (with the Patch for Purists rule)",
     "Excluded":  "game data, plans, logs, backups, caches, Morrowind.ini, mlox, tools\\luajit binaries; user-state records (load order, rules, answers, added masters, cell winners, generated lists, mwguard.json) keep their 06:59 snapshot; chargen_ship_patch.py and stranded_doors_patch.py were retired upstream (_backup\\retired-one-off-20261114) and are not in the snapshot",
     "Files":  [
                   {
@@ -133,17 +133,17 @@
                   },
                   {
                       "RelativePath":  "mwdialog_check.py",
-                      "Bytes":  488472,
-                      "SHA256":  "6cb6912d55f09fe20301f32877e1a0c0046cec80438b9532a2941d95996e0cad",
+                      "Bytes":  487779,
+                      "SHA256":  "d28b037e576c352c9e94d454e30066e4239ba56794de3e45e55424c20cc8253e",
                       "Source":  "\u003cSteam Morrowind\u003e\\mwdialog_check.py",
-                      "SourceModified":  "2026-11-14T08:25:28"
+                      "SourceModified":  "2026-11-14T08:41:08"
                   },
                   {
                       "RelativePath":  "mwdialog_check.rules.txt",
-                      "Bytes":  88376,
-                      "SHA256":  "cac8aa11385810fb71ad33afb4a193b7a7c22704b062e0375f61e9585e7dee00",
+                      "Bytes":  88915,
+                      "SHA256":  "939e2e9289bff663d0589a3b143203852e897d127d74fc8cc2f7016acc9b7025",
                       "Source":  "\u003cSteam Morrowind\u003e\\mwdialog_check.rules.txt",
-                      "SourceModified":  "2026-11-12T01:26:16"
+                      "SourceModified":  "2026-11-14T08:41:08"
                   },
                   {
                       "RelativePath":  "mwdialog_conflict_answers.json",
@@ -539,10 +539,10 @@
                   },
                   {
                       "RelativePath":  "MWDIALOG_REFACTOR2.md",
-                      "Bytes":  12549,
-                      "SHA256":  "ac1090be6ac980fffd860f81d522282bf989160baeca62210020546b0e4b3d1c",
+                      "Bytes":  12556,
+                      "SHA256":  "0de8c4650e5dbebe1dbd8915a06b812c75e178e11ebc74eba5e4e890b7c43a5a",
                       "Source":  "\u003cSteam Morrowind\u003e\\MWDIALOG_REFACTOR2.md",
-                      "SourceModified":  "2026-11-14T08:25:28"
+                      "SourceModified":  "2026-11-14T08:41:08"
                   },
                   {
                       "RelativePath":  "Data Files\\MWSE\\mods\\mwperformers\\main.lua",
@@ -559,11 +559,11 @@
                       "SourceModified":  "2026-11-14T07:38:21"
                   },
                   {
-                      "RelativePath":  "tests\\test_major_masters.py",
-                      "Bytes":  2255,
-                      "SHA256":  "8f3c9477dd7cb9d399be34a1795f881f38e748e66bf35bdce99a23c58bfa5539",
-                      "Source":  "\u003cSteam Morrowind\u003e\\tests\\test_major_masters.py",
-                      "SourceModified":  "2026-11-14T08:25:28"
+                      "RelativePath":  "tests\\test_rules_pfp.py",
+                      "Bytes":  1934,
+                      "SHA256":  "ddb9e87558f26b87e4c169a321b383b8c834899c571b80ea91d75d3595046f48",
+                      "Source":  "\u003cSteam Morrowind\u003e\\tests\\test_rules_pfp.py",
+                      "SourceModified":  "2026-11-14T08:41:08"
                   }
               ]
 }

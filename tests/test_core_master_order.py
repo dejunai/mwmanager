@@ -1,13 +1,11 @@
-"""Patch for Purists is a major master: first in MWManager's priority list (right after Bloodmoon.esm) and placed
-there by --sort through upstream's built-in rules. Temporary folders only; nothing real is touched."""
-import argparse
+"""Patch for Purists is a major master: first in MWManager's priority list (right after Bloodmoon.esm), and
+mwmanager_rules.txt has the sort rule that puts it there. Temporary folders only; nothing real is touched."""
 import json
 import struct
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -37,7 +35,7 @@ class PriorityList(unittest.TestCase):
 
 
 class SortPlacesIt(unittest.TestCase):
-    def test_sort_rules_put_it_right_after_bloodmoon(self):
+    def test_rules_file_puts_it_right_after_bloodmoon(self):
         import mwmanager as m
         with tempfile.TemporaryDirectory() as tmp, mwmanager_upstream.use_manager_dir(tmp):
             df = Path(tmp) / "game" / "Data Files"
@@ -50,11 +48,9 @@ class SortPlacesIt(unittest.TestCase):
             for name, masters in layout:
                 plugin(df / name, masters)
                 plugins.append((name, str(df / name)))
-            args = argparse.Namespace(data_dir=str(df), no_mlox_rules=True, no_content_order=True, dry_run=True,
-                                      yes=False)
-            with mock.patch.object(m, "ensure_mlox_rules", lambda *a, **k: False):
-                rule_sets, _files = m.sort_rule_sources(args, plugins, quiet=True)
-            order, _notes = m.compute_order(plugins, rule_sets, [n for n, _p in plugins])
+            rules = m.parse_rules(str(ROOT / "mwmanager_rules.txt"))[0]          # the shipped rules file
+            self.assertTrue(any(kind == "nearstart" and PFP in entries for kind, entries, _src in rules))
+            order, _notes = m.compute_order(plugins, [rules], [n for n, _p in plugins])
         self.assertEqual(order[:4], ["Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm", PFP])
         self.assertLess(order.index("Tamriel_Data.esm"), order.index("OAAB_Data.esm"))
 

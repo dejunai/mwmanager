@@ -166,6 +166,16 @@ Behaviour changes:
   once); Patch for Purists is a major master.
 - MWManager changes: `Patch for Purists.esm` is first in `core_addons.BUILTIN_MASTERS` and
   `mwmanager_core_addons.json` (it loads right after `Bloodmoon.esm`, before Tamriel_Data, TR, OAAB, ...);
-  `mwmanager_overrides.sort_rule_sources` / `run_sort` add upstream's `builtin_rules()` like upstream does;
+  the sort rule is in the rules text (see the next section);
   `mwmanager_gui.detect_vortex_downloads` also calls `mwdialog_mastercheck.clear_caches()`. Test:
   `tests\test_core_master_order.py`.
+
+## Patch for Purists sort rule moved to the rules text — 2026-11-14, 08:45 (Pacific)
+
+- Upstream @08ca20d has no built-in sort rule: `mwdialog_check.rules.txt` (Steam root, and the repo's copy) has
+  `[NearStart]` / `Patch for Purists.esm` near its top. `mwdialog_check.py` is back to the version without
+  `builtin_rules()` (root and snapshot); the snapshot's `mwdialog_check.rules.txt` is refreshed from the Steam root;
+  `tests\test_major_masters.py` is replaced by `tests\test_rules_pfp.py`.
+- MWManager: `mwmanager_overrides.py` no longer inserts a built-in rule; `mwmanager_rules.txt` has the same
+  `[NearStart]` block. Patch for Purists stays first in the major-master list (the `--init` / GUI superset).
+  Backup: `_backup\pre-pfp-rule-<stamp>\`.
