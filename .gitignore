@@ -1,0 +1,54 @@
+# per-install settings and state (personal paths, load orders, caches)
+mwmanager.ini
+mwmanager_gui_settings.json
+mwmanager_gui_state.json
+mwmanager_sort_order.txt
+mwmanager_sort_order.txt.bak
+mwmanager_loadorder_undo.txt
+mwmanager_core_hashes.json
+mwmanager_mastercheck_cache.json
+mwmanager_master_sizes.json
+mwmanager_mip_exempt.txt
+mwmanager_merged.txt
+mwmanager_merge_rebuild.txt
+mwmanager_disabled.txt
+mwmanager_added_masters.json
+mwmanager_cell_winners.txt
+mwmanager_conflict_answers.json
+mwmanager_dates_undo.txt
+mwmanager_luafix.json
+major_master_deployments.json
+archive_scan_cache.json
+game_catalog.sqlite3
+STEAM_UTILITY_REVIEW.md
+# working folders
+outputs/
+backups/
+_backup/
+staging/
+disabled_plugins/
+Off/
+downloads/
+journal/
+logs/
+mwdialog_backup/
+*.log
+*.jsonl
+*.sqlite
+*.sqlite3
+*.bak
+# downloaded or third-party tools (see README)
+mlox/
+tools/*
+!tools/steam-upstream/
+tools/steam-upstream/previous-*/
+tools/steam-upstream/not-related/
+# Python and editors
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+.claude/
+.vscode/
+.idea/

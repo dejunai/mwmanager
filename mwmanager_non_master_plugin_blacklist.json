@@ -1,0 +1,555 @@
+{
+  "plugins": {
+    "better robes tr.esp": {
+      "filename": "Better Robes TR.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Better Robes Tamriel Data Patch 44875 2.3 2026-09-06T20-57Z rDfZDUe9.7z"
+      ]
+    },
+    "diverse blood - project cyrodiil.esp": {
+      "filename": "Diverse Blood - Project Cyrodiil.ESP",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Diverse Blood for Tamriel Data 55687 1.2 2026-09-13T16-08Z CP9MPLMB.7z"
+      ]
+    },
+    "diverse blood - shotn.esp": {
+      "filename": "Diverse Blood - SHotN.ESP",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Diverse Blood for Tamriel Data 55687 1.2 2026-09-13T16-08Z CP9MPLMB.7z"
+      ]
+    },
+    "diverse blood - tamriel data.esp": {
+      "filename": "Diverse Blood - Tamriel Data.ESP",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Diverse Blood for Tamriel Data 55687 1.2 2026-09-13T16-08Z CP9MPLMB.7z"
+      ]
+    },
+    "diverse blood - tamriel rebuilt.esp": {
+      "filename": "Diverse Blood - Tamriel Rebuilt.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Diverse Blood for Tamriel Data 55687 1.2 2026-09-13T16-08Z CP9MPLMB.7z"
+      ]
+    },
+    "djangos dialogue - tamriel rebuilt.esp": {
+      "filename": "Djangos Dialogue - Tamriel Rebuilt.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Djangos Dialogue - Tamriel Rebuilt 52121 1.6 2026-08-29T17-05Z 63rw3vou.7z"
+      ]
+    },
+    "guarded_dungeon_entrances_for_project_cyrodiil.esp": {
+      "filename": "Guarded_Dungeon_Entrances_for_Project_Cyrodiil.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Guarded Dungeon Entrances for Project Cyrodiil-58010-1-0-1767111524.zip"
+      ]
+    },
+    "guarded_dungeon_entrances_for_skyrim_home_of_the_nords.esp": {
+      "filename": "Guarded_Dungeon_Entrances_for_Skyrim_Home_Of_The_Nords.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Guarded Dungeon Entrances for SHOTN-58197-1-0-1770718991.zip"
+      ]
+    },
+    "guarded_dungeon_entrances_for_tamriel_rebuilt.esp": {
+      "filename": "Guarded_Dungeon_Entrances_for_Tamriel_Rebuilt.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Guarded Dungeon Entrances for Tamriel Rebuilt 57676 1.3 2026-09-16T18-09Z Le0Pedu3.zip"
+      ]
+    },
+    "light a candle - project cyrodiil.esp": {
+      "filename": "Light a Candle - Project Cyrodiil.ESP",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Light a Candle - Project Cyrodiil-55731-1-0-2-1736151586.7z"
+      ]
+    },
+    "logs on fire tamriel rebuilt.esp": {
+      "filename": "Logs on Fire Tamriel Rebuilt.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Logs on Fire Tamriel Rebuilt 56516 1.1 2026-09-20T10-41Z c9Ra9Hxh.7z"
+      ]
+    },
+    "patch - tribunal reforged and tamriel rebuilt.esp": {
+      "filename": "Patch - Tribunal Reforged and Tamriel Rebuilt.ESP",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Patch - Tribunal Reforged And Tamriel Rebuilt-58759-1-1-1777367234.zip"
+      ]
+    },
+    "pricebalanceaatl.esp": {
+      "filename": "PriceBalanceAATL.ESP",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Price Balance - AATL_Data 59642 1.0 2026-07-19T16-10Z p6TN6dfl.zip"
+      ]
+    },
+    "census_and_excise_office_faction - tamriel_data patch.esp": {
+      "filename": "Census_and_Excise_Office_Faction - Tamriel_Data Patch.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Tamriel Data - Factions - Patch-48955-1-0-0-1699288053.7z"
+      ]
+    },
+    "oaab brother junipers twin lamps - tamriel_data patch.esp": {
+      "filename": "OAAB Brother Junipers Twin Lamps - Tamriel_Data Patch.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Tamriel Data - Factions - Patch-48955-1-0-0-1699288053.7z"
+      ]
+    },
+    "tamriel_data - tr_factions - factions patch - merged.esp": {
+      "filename": "Tamriel_Data - TR_Factions - Factions Patch - Merged.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Tamriel Data - Factions - Patch-48955-1-0-0-1699288053.7z"
+      ]
+    },
+    "tel_aruhn_chronicles - tamriel_data patch.esp": {
+      "filename": "Tel_Aruhn_Chronicles - Tamriel_Data Patch.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Tamriel Data - Factions - Patch-48955-1-0-0-1699288053.7z"
+      ]
+    },
+    "vvardenfell brotherhood - tr_factions patch.esp": {
+      "filename": "Vvardenfell Brotherhood - TR_Factions Patch.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Tamriel Data - Factions - Patch-48955-1-0-0-1699288053.7z"
+      ]
+    },
+    "tr_museumofartifacts.esp": {
+      "filename": "TR_MuseumofArtifacts.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Tamriel Rebuilt - Museum of Artifacts 59077 1.2 2026-10-28T16-09Z ih57hRHn.zip"
+      ]
+    },
+    "tamriel rebuilt - yet another border fix.esp": {
+      "filename": "Tamriel Rebuilt - Yet Another Border Fix.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Tamriel Rebuilt - Yet Another Border Fix 60458 1.1 2026-11-02T16-01Z ZdxLdPBh.zip"
+      ]
+    },
+    "tamriel rebuilt - alternate start.esp": {
+      "filename": "Tamriel Rebuilt - Alternate Start.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Tamriel Rebuilt Alternate Start 60674 1.0 2026-10-20T23-29Z nOlkOzDQ.zip"
+      ]
+    },
+    "tr_darkdungeons.esp": {
+      "filename": "TR_DarkDungeons.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Tamriel Rebuilt Dark Dungeons-58328-0-1-1772505131.zip"
+      ]
+    },
+    "tr_plantlightradiusincrease.esp": {
+      "filename": "TR_PlantLightRadiusIncrease.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Tamriel Rebuilt Dark Dungeons-58328-0-1-1772505131.zip"
+      ]
+    },
+    "ul_3.5_tr_26.08_add-on.esp": {
+      "filename": "UL_3.5_TR_26.08_Add-on.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Uvirith's Legacy - Tamriel Rebuilt 26.08 Add-on 55897 3.4 2026-08-30T20-06Z x2p02QRC.7z"
+      ]
+    },
+    "vanilla_tr_oaab_armors_rebalance.esp": {
+      "filename": "Vanilla_TR_OAAB_Armors_Rebalance.ESP",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Vanilla - TR Data - OAAB Data Armors Rebalance-56684-1-0-1747766336.rar"
+      ]
+    },
+    "what thieves guild tr.esp": {
+      "filename": "What Thieves Guild TR.ESP",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "What Thieves Guild - Tamriel Rebuilt-55410-1-0-1730506117.zip"
+      ]
+    },
+    "graphic herbalism tamriel_data extra.esp": {
+      "filename": "Graphic Herbalism Tamriel_Data Extra.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "GH for Tamriel Data 06-43829-06.7z"
+      ]
+    },
+    "graphic herbalism tamriel_data.esp": {
+      "filename": "Graphic Herbalism Tamriel_Data.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "GH for Tamriel Data 06-43829-06.7z"
+      ]
+    }
+  },
+  "archives": {
+    "k:\\downloads\\vortex\\morrowind\\better robes tamriel data patch 44875 2.3 2026-09-06t20-57z rdfzdue9.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Better Robes Tamriel Data Patch 44875 2.3 2026-09-06T20-57Z rDfZDUe9.7z",
+      "size_bytes": 796521,
+      "mtime_ns": 1792443889607280300,
+      "plugins": [
+        "Better Robes TR.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\diverse blood for tamriel data 55687 1.2 2026-09-13t16-08z cp9mplmb.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Diverse Blood for Tamriel Data 55687 1.2 2026-09-13T16-08Z CP9MPLMB.7z",
+      "size_bytes": 57283,
+      "mtime_ns": 1793087468880876200,
+      "plugins": [
+        "Diverse Blood - Project Cyrodiil.ESP",
+        "Diverse Blood - SHotN.ESP",
+        "Diverse Blood - Tamriel Data.ESP",
+        "Diverse Blood - Tamriel Rebuilt.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\djangos dialogue - tamriel rebuilt 52121 1.6 2026-08-29t17-05z 63rw3vou.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Djangos Dialogue - Tamriel Rebuilt 52121 1.6 2026-08-29T17-05Z 63rw3vou.7z",
+      "size_bytes": 48909,
+      "mtime_ns": 1793903186710283400,
+      "plugins": [
+        "Djangos Dialogue - Tamriel Rebuilt.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\guarded dungeon entrances for project cyrodiil-58010-1-0-1767111524.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Guarded Dungeon Entrances for Project Cyrodiil-58010-1-0-1767111524.zip",
+      "size_bytes": 19738,
+      "mtime_ns": 1792977898520251000,
+      "plugins": [
+        "Guarded_Dungeon_Entrances_for_Project_Cyrodiil.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\guarded dungeon entrances for shotn-58197-1-0-1770718991.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Guarded Dungeon Entrances for SHOTN-58197-1-0-1770718991.zip",
+      "size_bytes": 9876,
+      "mtime_ns": 1792977906800120400,
+      "plugins": [
+        "Guarded_Dungeon_Entrances_for_Skyrim_Home_Of_The_Nords.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\guarded dungeon entrances for tamriel rebuilt 57676 1.3 2026-09-16t18-09z le0pedu3.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Guarded Dungeon Entrances for Tamriel Rebuilt 57676 1.3 2026-09-16T18-09Z Le0Pedu3.zip",
+      "size_bytes": 124345,
+      "mtime_ns": 1792977848765862200,
+      "plugins": [
+        "Guarded_Dungeon_Entrances_for_Tamriel_Rebuilt.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\ilfas tamriel data 60577 1.0 2026-10-15t07-02z vcu3c5f3.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\ILFAS Tamriel Data 60577 1.0 2026-10-15T07-02Z vcU3c5f3.zip",
+      "size_bytes": 4409420,
+      "mtime_ns": 1793031325067557300,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\light a candle - project cyrodiil-55731-1-0-2-1736151586.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Light a Candle - Project Cyrodiil-55731-1-0-2-1736151586.7z",
+      "size_bytes": 208526,
+      "mtime_ns": 1793090350380383200,
+      "plugins": [
+        "Light a Candle - Project Cyrodiil.ESP"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\logs on fire tamriel rebuilt 56516 1.1 2026-09-20t10-41z c9ra9hxh.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Logs on Fire Tamriel Rebuilt 56516 1.1 2026-09-20T10-41Z c9Ra9Hxh.7z",
+      "size_bytes": 604314,
+      "mtime_ns": 1793090013045513500,
+      "plugins": [
+        "Logs on Fire Tamriel Rebuilt.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\lustrous pearls - tamriel data patch-57811-1-1-1775422321.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Lustrous Pearls - Tamriel Data Patch-57811-1-1-1775422321.zip",
+      "size_bytes": 33155,
+      "mtime_ns": 1793629295216807400,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\muse - the northerner diaries in morrowind - shotn-51361-1-04-1723683783.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\MUSE - The Northerner Diaries in Morrowind - SHOTN-51361-1-04-1723683783.zip",
+      "size_bytes": 43173548,
+      "mtime_ns": 1793438815914517300,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\oaab data 60274 2 2026-10-27t21-00z hpvspnw1.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\OAAB Data 60274 2 2026-10-27T21-00Z hpVSpnW1.zip",
+      "size_bytes": 73554135,
+      "mtime_ns": 1793293382731427500,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\oaab data 60274 3 2026-10-30t14-54z qx42xymd.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\OAAB Data 60274 3 2026-10-30T14-54Z QX42Xymd.7z",
+      "size_bytes": 71308840,
+      "mtime_ns": 1793452875951537500,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\oaab data 60274 4 2026-11-02t08-23z 8mahmspa.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\OAAB Data 60274 4 2026-11-02T08-23Z 8MahMSPa.zip",
+      "size_bytes": 73259604,
+      "mtime_ns": 1793980780321227900,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\patch - tribunal reforged and tamriel rebuilt-58759-1-1-1777367234.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Patch - Tribunal Reforged And Tamriel Rebuilt-58759-1-1-1777367234.zip",
+      "size_bytes": 3068,
+      "mtime_ns": 1793296400169624600,
+      "plugins": [
+        "Patch - Tribunal Reforged and Tamriel Rebuilt.ESP"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\price balance - aatl_data 59642 1.0 2026-07-19t16-10z p6tn6dfl.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Price Balance - AATL_Data 59642 1.0 2026-07-19T16-10Z p6TN6dfl.zip",
+      "size_bytes": 5051,
+      "mtime_ns": 1793441971259662100,
+      "plugins": [
+        "PriceBalanceAATL.ESP"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\project cyrodiil - ssqn patch-55688-1-3-1-1747567368.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Project Cyrodiil - SSQN Patch-55688-1-3-1-1747567368.7z",
+      "size_bytes": 26894,
+      "mtime_ns": 1793090202239588500,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\project cyrodiil fully voiced dialogue (mwse)-57146-1-0-1752788019.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Project Cyrodiil Fully Voiced Dialogue (MWSE)-57146-1-0-1752788019.zip",
+      "size_bytes": 4287515650,
+      "mtime_ns": 1793249692939406800,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\project cyrodiil music-55779-1-1-1737192092.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Project Cyrodiil Music-55779-1-1-1737192092.7z",
+      "size_bytes": 227981946,
+      "mtime_ns": 1792786184730763900,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\project cyrodiil part 1 60274 2 2026-10-27t23-24z x2p02arr.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Project Cyrodiil Part 1 60274 2 2026-10-27T23-24Z x2p02ARr.7z",
+      "size_bytes": 3165956873,
+      "mtime_ns": 1793451135945686600,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\project cyrodiil part 2 60274 2 2026-10-27t23-19z 9anoatdy.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Project Cyrodiil Part 2 60274 2 2026-10-27T23-19Z 9AnoATdY.7z",
+      "size_bytes": 2744573389,
+      "mtime_ns": 1793451128588823600,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\skyrim home of the nords 60274 8 2026-10-27t23-31z vcu3c5sy.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Skyrim Home Of The Nords 60274 8 2026-10-27T23-31Z vcU3c5sy.7z",
+      "size_bytes": 1788615206,
+      "mtime_ns": 1793451047760714900,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel data - factions - patch-48955-1-0-0-1699288053.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Data - Factions - Patch-48955-1-0-0-1699288053.7z",
+      "size_bytes": 2639,
+      "mtime_ns": 1793109523902638200,
+      "plugins": [
+        "Census_and_Excise_Office_Faction - Tamriel_Data Patch.esp",
+        "OAAB Brother Junipers Twin Lamps - Tamriel_Data Patch.esp",
+        "Tamriel_Data - TR_Factions - Factions Patch - Merged.esp",
+        "Tel_Aruhn_Chronicles - Tamriel_Data Patch.esp",
+        "Vvardenfell Brotherhood - TR_Factions Patch.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel data part 1 60274 2 2026-10-27t21-22z ih57hrgm.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Data Part 1 60274 2 2026-10-27T21-22Z ih57hRgM.7z",
+      "size_bytes": 2564874051,
+      "mtime_ns": 1793443614579628200,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel data part 2 60274 3 2026-10-30t19-49z gwcfwxnl.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Data Part 2 60274 3 2026-10-30T19-49Z gWCfWxNL.7z",
+      "size_bytes": 2512608922,
+      "mtime_ns": 1793451050395165600,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel data trees animated 60548 1.1 2026-10-12t20-50z yiwbiu2g.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Data Trees Animated 60548 1.1 2026-10-12T20-50Z yiwbiU2G.zip",
+      "size_bytes": 24821716,
+      "mtime_ns": 1792429466835373700,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel data water retextured-58211-1-1-1771005255.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Data water retextured-58211-1-1-1771005255.zip",
+      "size_bytes": 4425151,
+      "mtime_ns": 1793175209722636800,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - argonians 60274 1 2026-10-27t23-15z p6tn6otb.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Argonians 60274 1 2026-10-27T23-15Z p6TN6OtB.7z",
+      "size_bytes": 2181110553,
+      "mtime_ns": 1793451023813778900,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - bretons and high elves 60274 1 2026-10-27t23-11z aboybri9.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Bretons And High Elves 60274 1 2026-10-27T23-11Z AbOYbrI9.7z",
+      "size_bytes": 2596030343,
+      "mtime_ns": 1793451145594345200,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - dark elves female part 1a 60274 12 2026-10-31t07-35z rdfzdlsb.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Dark Elves Female Part 1a 60274 12 2026-10-31T07-35Z rDfZDLsB.7z",
+      "size_bytes": 1108481363,
+      "mtime_ns": 1793443338645164700,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - dark elves female part 1b 60274 2 2026-10-31t07-31z szjezcl7.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Dark Elves Female Part 1b 60274 2 2026-10-31T07-31Z sZJEZCl7.7z",
+      "size_bytes": 1670271779,
+      "mtime_ns": 1793443415418444800,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - dark elves female part 2 60274 2 2026-10-31t07-29z m4op4nhc.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Dark Elves Female Part 2 60274 2 2026-10-31T07-29Z M4op4NhC.7z",
+      "size_bytes": 2391822488,
+      "mtime_ns": 1793443420266124500,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - dark elves male part 1a 60274 2 2026-10-31t07-25z mulwuqgb.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Dark Elves Male Part 1a 60274 2 2026-10-31T07-25Z muLWuQgB.7z",
+      "size_bytes": 1476227381,
+      "mtime_ns": 1793443431471064900,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - dark elves male part 1b 60274 2 2026-10-31t07-23z dbqdbez9.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Dark Elves Male Part 1b 60274 2 2026-10-31T07-23Z DBQdBeZ9.7z",
+      "size_bytes": 1608485976,
+      "mtime_ns": 1793443422368318200,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - dark elves male part 2 60274 2 2026-10-31t07-20z 3ad5auwr.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Dark Elves Male Part 2 60274 2 2026-10-31T07-20Z 3aD5auwr.7z",
+      "size_bytes": 3098659349,
+      "mtime_ns": 1793443459059884900,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - imperials 60274 1 2026-10-27t22-44z gwcfwxif.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Imperials 60274 1 2026-10-27T22-44Z gWCfWxiF.7z",
+      "size_bytes": 2495271444,
+      "mtime_ns": 1793451181089381000,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - khajiit 60274 2 2026-10-30t14-54z aobvofke.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Khajiit 60274 2 2026-10-30T14-54Z aoBVoFKE.7z",
+      "size_bytes": 1923639601,
+      "mtime_ns": 1793450982044146500,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - museum of artifacts 59077 1.2 2026-10-28t16-09z ih57hrhn.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Museum of Artifacts 59077 1.2 2026-10-28T16-09Z ih57hRHn.zip",
+      "size_bytes": 40342,
+      "mtime_ns": 1793369409971105300,
+      "plugins": [
+        "TR_MuseumofArtifacts.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - new races and creatures 60274 1 2026-10-27t22-22z zf8jfhbd.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - New Races and Creatures 60274 1 2026-10-27T22-22Z zf8JfHbd.7z",
+      "size_bytes": 1891268549,
+      "mtime_ns": 1793451222048445000,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - nords and orcs 60274 1 2026-10-27t22-33z b7mu7dzu.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Nords And Orcs 60274 1 2026-10-27T22-33Z b7mU7DzU.7z",
+      "size_bytes": 2774037255,
+      "mtime_ns": 1793451227436644200,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - redguards and wood elves 60274 1 2026-10-27t22-28z c9ra9vzo.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Redguards And Wood Elves 60274 1 2026-10-27T22-28Z c9Ra9VZO.7z",
+      "size_bytes": 2579605357,
+      "mtime_ns": 1793451219059243600,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt - yet another border fix 60458 1.1 2026-11-02t16-01z zdxldpbh.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt - Yet Another Border Fix 60458 1.1 2026-11-02T16-01Z ZdxLdPBh.zip",
+      "size_bytes": 5837697,
+      "mtime_ns": 1793978068722751400,
+      "plugins": [
+        "Tamriel Rebuilt - Yet Another Border Fix.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt alternate start 60674 1.0 2026-10-20t23-29z nolkozdq.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt Alternate Start 60674 1.0 2026-10-20T23-29Z nOlkOzDQ.zip",
+      "size_bytes": 42542,
+      "mtime_ns": 1792889884734936600,
+      "plugins": [
+        "Tamriel Rebuilt - Alternate Start.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt dark dungeons-58328-0-1-1772505131.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt Dark Dungeons-58328-0-1-1772505131.zip",
+      "size_bytes": 11817,
+      "mtime_ns": 1793068481819073000,
+      "plugins": [
+        "TR_DarkDungeons.esp",
+        "TR_PlantLightRadiusIncrease.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt dremora oathkin with daedric robe-44321-1--0-1730056764.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt Dremora Oathkin with Daedric Robe-44321-1--0-1730056764.zip",
+      "size_bytes": 1272120,
+      "mtime_ns": 1792767264998682800,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\tamriel rebuilt soundtrack-47254-1-1576789329.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Tamriel Rebuilt Soundtrack-47254-1-1576789329.7z",
+      "size_bytes": 303660043,
+      "mtime_ns": 1792426601806606600,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\this is crate - tamriel rebuilt patch-48959-1-2-1747480462.rar": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\This is crate - Tamriel Rebuilt patch-48959-1-2-1747480462.rar",
+      "size_bytes": 1301811,
+      "mtime_ns": 1792980522679250900,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\uvirith's legacy - tamriel rebuilt 26.08 add-on 55897 3.4 2026-08-30t20-06z x2p02qrc.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Uvirith's Legacy - Tamriel Rebuilt 26.08 Add-on 55897 3.4 2026-08-30T20-06Z x2p02QRC.7z",
+      "size_bytes": 828934,
+      "mtime_ns": 1793296127194714900,
+      "plugins": [
+        "UL_3.5_TR_26.08_Add-on.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\vanilla - tr data - oaab data armors rebalance-56684-1-0-1747766336.rar": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Vanilla - TR Data - OAAB Data Armors Rebalance-56684-1-0-1747766336.rar",
+      "size_bytes": 39850,
+      "mtime_ns": 1793441465625685400,
+      "plugins": [
+        "Vanilla_TR_OAAB_Armors_Rebalance.ESP"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\what thieves guild - tamriel rebuilt-55410-1-0-1730506117.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\What Thieves Guild - Tamriel Rebuilt-55410-1-0-1730506117.zip",
+      "size_bytes": 14723,
+      "mtime_ns": 1793888989590850500,
+      "plugins": [
+        "What Thieves Guild TR.ESP"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\gh for tamriel data 06-43829-06.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\GH for Tamriel Data 06-43829-06.7z",
+      "size_bytes": 1300765,
+      "mtime_ns": 1794471480587921800,
+      "plugins": [
+        "Graphic Herbalism Tamriel_Data Extra.esp",
+        "Graphic Herbalism Tamriel_Data.esp"
+      ]
+    }
+  }
+}

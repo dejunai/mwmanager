@@ -1,0 +1,17 @@
+MWManager's interactive Nexus browser uses these third-party components:
+
+pywebview 6.2.1 — BSD 3-Clause License
+https://github.com/r0x0r/pywebview
+Copyright (c) 2014-2017, Roman Sirokov
+
+pythonnet 3.2.1 — MIT License
+https://github.com/pythonnet/pythonnet
+
+The browser renderer is Microsoft Edge WebView2 Runtime, which is supplied by
+Microsoft Edge on this system. It is not copied into MWManager by this feature.
+See Microsoft's WebView2 distribution guidance before bundling the runtime:
+https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution
+
+The full license texts are distributed by the upstream projects at the linked
+repositories. If MWManager later bundles wheels or binaries, include the exact
+license texts shipped with those versions in the application package.

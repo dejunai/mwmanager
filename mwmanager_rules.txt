@@ -1,0 +1,39 @@
+[Context]
+; Written by --sort on 2026-11-09 00:23. For reading only: every line here is
+; a comment, and --sort rewrites this section each time. Edit the rules below it instead.
+;
+; These are the patch-after-mod rules --sort works out from what the plugins change: when most of
+; the records a small .esp changes are records a much bigger .esp adds (not counting anything an
+; .esm defines), the small one is a patch for the big one and loads after it.
+; They rank below the rules in this file and above mlox's. To override one, add an [Order] rule
+; below; to turn them all off, use --no-content-order.
+;
+; 0 rule(s) found:
+;
+;   (none)
+; ---- end of [Context] ----
+
+; mwmanager.rules.txt: load order rules for mwmanager.py --sort
+;
+; The same format as mlox rules (mlox_user.txt / mlox_base.txt). Rules here win over mlox's own:
+; files are read in this order, and a rule that contradicts an earlier one is skipped.
+;
+;   [Order]          each plugin listed loads before the next one
+;   [NearStart]      these plugins load as early as their masters allow (in this order)
+;   [NearEnd]        these plugins load as late as possible; the FIRST one listed loads LAST
+;                    (mlox's convention, so the patch that must win goes first)
+;   [Exact]          these plugins load one right after the other, in exactly this order, with
+;                    nothing in between (exact names, no wildcards). Not applied, with a note, if
+;                    masters make it impossible.
+;
+; One plugin per line; ";" starts a comment. Names are not case-sensitive and may use
+; the wildcards * and ? and mlox's <VER> (a version number). A plugin always loads after its
+; masters, and every .esm before every .esp, whatever the rules say.
+
+[NearStart]
+mwmanager - ESM fixes.esp
+
+[NearEnd]
+mwmanager Performers Patch.esp
+mwmanager PlaceholderCell ESP Patch.esp
+mwmanager Multipatch.esp

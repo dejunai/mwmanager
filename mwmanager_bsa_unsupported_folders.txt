@@ -1,0 +1,5 @@
+; Folders that vanilla Morrowind cannot load from a TES3 BSA. One top-level folder per line.
+sound
+fonts
+splash
+music

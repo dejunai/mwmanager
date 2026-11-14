@@ -1,0 +1,712 @@
+"""MWManager layer: --init, the game catalog, MWSE / MCP / MGE XE checks, mlox rules and the core masters.
+
+MWManager only (none of this is in upstream). Runs inside the upstream mwdialog_check namespace after
+mwmanager_overrides.py (see mwmanager_upstream.py).
+"""
+from mwdialog_check import *  # noqa: F401,F403  (names resolve in mwdialog_check when composed)
+
+
+def major_master_conflict_overrides(plugin_paths):
+    """Read resolved major-master records for the generated ESM fixes patch."""
+    choices_path = manager_file("mwmanager_major_master_conflicts.json")
+    try:
+        choices = json.loads(Path(choices_path).read_text(encoding="utf-8")).get("resolutions", [])
+    except (OSError, ValueError, TypeError):
+        return [], []
+    records, winners = [], []
+    for item in choices:
+        if not isinstance(item, dict):
+            continue
+        winner = str(item.get("winner", ""))
+        path = plugin_paths.get(winner.casefold())
+        tag = str(item.get("record_tag", ""))
+        editor_id = str(item.get("editor_id", "")).casefold()
+        if not path or len(tag) != 4 or not editor_id:
+            continue
+        try:
+            raw = extract_record(path, tag, editor_id)
+        except (OSError, FormatError):
+            raw = None
+        if raw:
+            records.append(raw)
+            winners.append(winner)
+    return records, winners
+
+
+MLOX_RULE_URLS = {
+    "mlox_base.txt": "https://raw.githubusercontent.com/DanaePlays/mlox-rules/main/mlox_base.txt",
+    "mlox_user.txt": "https://raw.githubusercontent.com/DanaePlays/mlox-rules/main/mlox_user.txt",
+}
+MLOX_SUPPORTED_SECTIONS = {"order", "nearstart", "nearend", "exact"}
+MLOX_SECTION_LINE = re.compile(r"^\s*\[([A-Za-z][A-Za-z0-9_]*)\]\s*(?:;.*)?$")
+
+
+def clean_mlox_rule_file(path):
+    """Keep only load-order sections MWManager understands, including its [Exact] extension."""
+    try:
+        with open(path, "r", encoding=ENC, errors="replace") as stream:
+            original = stream.read()
+    except OSError as exc:
+        return False, f"cannot read {path}: {exc}"
+
+    kept, active = [], True
+    for line in original.splitlines(keepends=True):
+        header = MLOX_SECTION_LINE.match(line.rstrip("\r\n"))
+        if header:
+            active = header.group(1).casefold() in MLOX_SUPPORTED_SECTIONS
+            if active:
+                kept.append(line)
+        elif active:
+            kept.append(line)
+    cleaned = "".join(kept)
+    if cleaned == original:
+        return False, None
+
+    try:
+        if not path.endswith(".mwmanager-original"):
+            backup = backup_file("rules", os.path.basename(path) + ".mwmanager-original")
+            if not os.path.exists(backup):
+                shutil.copy2(path, backup)
+        with open(path, "w", encoding=ENC, errors="replace", newline="") as stream:
+            stream.write(cleaned)
+    except OSError as exc:
+        return False, f"cannot clean {path}: {exc}"
+    return True, None
+
+
+def ensure_mlox_rules(game_dir=None, *, dry_run=False, yes=False, disabled=False):
+    """Import local game rules once, then offer to fetch missing rules and clean MWManager copies."""
+    folder = manager_file("mlox")
+    if disabled:
+        return False
+    os.makedirs(folder, exist_ok=True) if not dry_run else None
+    # Import the user's installed rules once. After import, the MWManager copy is authoritative.
+    import_marker = os.path.join(folder, ".imported_game_rules.json")
+    if game_dir and not os.path.isfile(import_marker):
+        game_rules = os.path.join(game_dir, "mlox")
+        found = [(name, os.path.join(game_rules, name)) for name in MLOX_RULE_URLS
+                 if os.path.isfile(os.path.join(game_rules, name))]
+        if found and dry_run:
+            print("--dry-run: would copy installed mlox rules from " + os.path.join(game_dir, "mlox"))
+        elif found:
+            for name, source in found:
+                target = os.path.join(folder, name)
+                if os.path.isfile(target):
+                    digest = hashlib.sha256(os.path.normcase(os.path.abspath(game_dir)).encode("utf-8")).hexdigest()[:12]
+                    backup = backup_file("rules", f"{digest}-{name}.pre-game-import")
+                    if not os.path.exists(backup):
+                        shutil.copy2(target, backup)
+                shutil.copy2(source, target)
+                print(f"MWManager: copied {os.path.join('mlox', name)} into its managed rules folder")
+            with open(import_marker, "w", encoding="utf-8") as stream:
+                json.dump({"game_dir": os.path.abspath(game_dir), "files": [name for name, _ in found]}, stream, indent=2)
+
+    missing = [name for name in MLOX_RULE_URLS if not os.path.isfile(os.path.join(folder, name))]
+    if dry_run:
+        if missing:
+            if disabled:
+                print("--dry-run: mlox rules are disabled; would not download " + ", ".join(missing))
+            else:
+                print("--dry-run: mlox rules missing; would offer to download " + ", ".join(missing) + " from DanaePlays/mlox-rules")
+        return not missing
+
+    if missing and disabled:
+        return False
+
+    if missing and not yes:
+        use_rules = False
+        if sys.stdin.isatty():
+            answer = input("MWManager has no mlox rules. Download and clean them now? [y/N] ").strip().casefold()
+            use_rules = answer in {"y", "yes"}
+        else:
+            try:
+                import tkinter.messagebox as messagebox
+                import tkinter as tk
+                prompt_root = tk.Tk()
+                prompt_root.withdraw()
+                try:
+                    use_rules = messagebox.askyesno(
+                        "mlox load-order rules",
+                        "No mlox rules were found in the Morrowind folder or MWManager.\n\n"
+                        "Download the community rules from GitHub and clean them for MWManager?\n\n"
+                        "Choose No to continue without mlox rules. You can enable them later by running --sort without --no-mlox-rules.",
+                        parent=prompt_root)
+                finally:
+                    prompt_root.destroy()
+            except Exception:
+                use_rules = False
+        if not use_rules:
+            print("MWManager: continuing without mlox rules; use --no-mlox-rules to make this choice explicit.")
+            return False
+
+    try:
+        os.makedirs(folder, exist_ok=True)
+    except OSError as exc:
+        print(f"WARNING: cannot create MWManager mlox rules folder: {exc}", file=sys.stderr)
+        return False
+
+    for name in missing:
+        url = MLOX_RULE_URLS[name]
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "MWManager/1.0"})
+            with urllib.request.urlopen(request, timeout=20) as response:
+                content = response.read(8 * 1024 * 1024 + 1)
+            if len(content) > 8 * 1024 * 1024 or b"[order]" not in content.lower():
+                raise ValueError("download was unexpectedly large or did not look like an mlox rules file")
+            target = os.path.join(folder, name)
+            temp = target + ".download"
+            with open(temp, "wb") as stream:
+                stream.write(content)
+            os.replace(temp, target)
+            print(f"MWManager: downloaded missing mlox rules file {name} from {url}")
+        except Exception as exc:
+            print(f"WARNING: could not download {name} from {url}: {exc}", file=sys.stderr)
+            return False
+
+    for name in MLOX_RULE_URLS:
+        changed, error = clean_mlox_rule_file(os.path.join(folder, name))
+        if error:
+            print(f"WARNING: {error}", file=sys.stderr)
+            return False
+        if changed:
+            print(f"MWManager: cleaned {name}; retained [Order], [NearStart], [NearEnd], and [Exact] rules")
+    return True
+
+
+CORE_HASH_FILES = (*CORE_GAME_ESMS, *CORE_GAME_BSAS)
+PREREQUISITE_URLS = {
+    "texconv": "https://github.com/microsoft/DirectXTex/wiki/Texconv",
+    "ffmpeg": "https://ffmpeg.org/download.html",
+    "mcp": "https://www.nexusmods.com/morrowind/mods/26348?tab=files",
+    "mwse": "https://www.nexusmods.com/morrowind/mods/45468?tab=files",
+}
+
+
+def show_download_interface(items, title="MWManager prerequisites"):
+    """Offer browser links in a small Tk window; fall back to printable URLs without a desktop."""
+    try:
+        import tkinter as tk
+        import webbrowser
+        root = tk.Tk()
+        root.title(title)
+        root.resizable(False, False)
+        frame = tk.Frame(root, padx=18, pady=14)
+        frame.pack(fill="both", expand=True)
+        for heading, detail, url in items:
+            tk.Label(frame, text=heading, font=("Segoe UI", 10, "bold"), anchor="w").pack(fill="x", pady=(4, 0))
+            tk.Label(frame, text=detail, justify="left", anchor="w", wraplength=540).pack(fill="x", pady=(1, 2))
+            tk.Button(frame, text="Open download page", command=lambda u=url: webbrowser.open(u)).pack(anchor="e", pady=(0, 5))
+        tk.Button(frame, text="Close", command=root.destroy).pack(anchor="e", pady=(6, 0))
+        root.mainloop()
+    except Exception as exc:
+        print(f"(Could not open the prerequisite window: {exc})")
+        for heading, _detail, url in items:
+            print(f"  {heading}: {url}")
+
+
+def check_mwse_latest_commit(timeout=10):
+    """Return the latest upstream MWSE commit SHA used as a nightly-build freshness proxy."""
+    from urllib.request import Request, urlopen
+    request = Request("https://api.github.com/repos/MWSE/MWSE/commits/master",
+                      headers={"Accept": "application/vnd.github+json", "User-Agent": "MWManager"})
+    with urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    sha = payload.get("sha", "") if isinstance(payload, dict) else ""
+    return sha.lower() if re.fullmatch(r"[0-9a-fA-F]{40}", sha) else None
+
+
+def offer_mwse_update(game_dir, *, dry_run=False, yes=False):
+    """Check MWSE freshness ourselves; offer the official updater only when needed or unknown."""
+    updater = os.path.join(game_dir, "MWSE-Update.exe")
+    if not os.path.isfile(updater):
+        print("\nWARNING: MWSE-Update.exe was not found in the Morrowind game folder. "
+              "MWSE may be missing or its updater may need to be restored.")
+        if dry_run:
+            print("--dry-run: would offer the MWSE installation page.")
+        else:
+            show_download_interface([("MWSE and its updater",
+                                      "MGE XE normally includes MWSE-Update.exe. Install/update MWSE, then rerun MWManager.",
+                                      PREREQUISITE_URLS["mwse"])], "MWSE updater missing")
+        return False
+
+    marker = os.path.join(game_dir, "mwse-version.txt")
+    installed = os.path.isfile(marker) and os.path.isfile(os.path.join(game_dir, "MWSE.dll"))
+    installed_sha = None
+    if installed:
+        try:
+            candidate = open(marker, encoding="ascii", errors="ignore").read().strip()
+            installed_sha = candidate.lower() if re.fullmatch(r"[0-9a-fA-F]{40}", candidate) else None
+        except OSError:
+            pass
+    if not installed:
+        print("\nMWSE appears incomplete (version marker or MWSE.dll missing).")
+    else:
+        print(f"\nMWSE installation found; installed build marker: {installed_sha or 'unrecognized'}.")
+
+    latest_sha = None
+    check_error = None
+    try:
+        latest_sha = check_mwse_latest_commit()
+    except Exception as exc:
+        check_error = str(exc)
+    if latest_sha and installed_sha and latest_sha == installed_sha:
+        print("MWSE is current according to the upstream build marker; no update prompt is needed.")
+        return True
+    if latest_sha and installed_sha:
+        print(f"A newer MWSE upstream revision is available ({installed_sha[:12]} -> {latest_sha[:12]}).")
+        reason = "A newer MWSE build is available."
+    elif not installed:
+        reason = "MWSE is missing or incomplete."
+    else:
+        print(f"WARNING: MWSE update status could not be verified ({check_error or 'unrecognized installed build marker'}).",
+              file=sys.stderr)
+        reason = "MWSE update status could not be verified. Run its official updater to check for an update?"
+
+    if dry_run:
+        print(f"--dry-run: would ask whether to run MWSE-Update.exe. Reason: {reason}")
+        return installed
+    answer = bool(yes)
+    if yes:
+        print("--yes: running the official MWSE updater because the installed build is outdated or could not be verified.")
+    else:
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            root = tk.Tk()
+            root.withdraw()
+            answer = messagebox.askyesno(
+                "MWSE update available",
+                reason + "\n\nMWManager will run MWSE-Update.exe and wait for it to finish.",
+                parent=root)
+            root.destroy()
+        except Exception:
+            try:
+                answer = input(reason + " [y/N] ").strip().casefold() in {"y", "yes"}
+            except (EOFError, OSError):
+                answer = False
+    if not answer:
+        print("MWSE update skipped; continuing with the installed build.")
+        return installed
+    try:
+        result = subprocess.run([updater], cwd=game_dir, check=False)
+    except OSError as exc:
+        print(f"WARNING: could not start MWSE-Update.exe: {exc}", file=sys.stderr)
+        return False
+    if result.returncode:
+        print(f"WARNING: MWSE updater exited with code {result.returncode}; continuing.", file=sys.stderr)
+        return False
+    print("MWSE updater finished; initialization will lint the installed core Lua afterward.")
+    return True
+
+
+def mcp_beta_status(game_dir):
+    """Detect MCP Skunk Works from its beta patch definitions in mcpatch/."""
+    mcpatch_dir = os.path.join(game_dir, "mcpatch")
+    describe_path = os.path.join(mcpatch_dir, "describe.json")
+    try:
+        with open(describe_path, encoding="utf-8-sig") as stream:
+            categories = json.load(stream)
+    except (OSError, ValueError) as exc:
+        return False, f"MCP patch metadata could not be read from {describe_path}: {exc}"
+
+    beta_ids = {
+        patch.get("id")
+        for category in categories if isinstance(category, dict)
+        and str(category.get("category", "")).strip().casefold() == "beta"
+        for patch in category.get("patches", []) if isinstance(patch, dict)
+        and isinstance(patch.get("id"), int)
+    }
+    expected_ids = set(range(180, 196))
+    if expected_ids.issubset(beta_ids):
+        return True, "mcpatch/ contains the MCP Skunk Works beta patch definitions (IDs 180–195)."
+    if beta_ids:
+        return False, f"mcpatch/ has a Beta category, but the expected Skunk Works patch set (IDs 180–195) is incomplete. Found IDs: {', '.join(map(str, sorted(beta_ids)))}."
+    return False, f"mcpatch/ does not contain the MCP Skunk Works beta patch definitions: {describe_path} has no Beta category."
+
+
+def warn_mcp_beta(game_dir, *, show_ui=True):
+    ok, detail = mcp_beta_status(game_dir)
+    if ok:
+        print("MCP beta check: " + detail)
+        return True
+    print("\nWARNING: MCP Skunk Works / MCP 2.5 beta was not detected. " + detail)
+    print("MWManager recommends installing the beta over the base MCP. You may continue without it.")
+    if show_ui:
+        show_download_interface([("MCP Skunk Works beta",
+                                  "Install MCP Skunk Works over the base MCP, then rerun initialization.",
+                                  PREREQUISITE_URLS["mcp"])], "MCP beta recommended")
+    return False
+
+
+def catalog_core_hashes(db_path):
+    """Read the previously catalogued source hashes as the initial trusted baseline."""
+    result = {}
+    if not os.path.isfile(db_path):
+        return result
+    try:
+        db_uri_path = os.path.abspath(db_path).replace(os.sep, "/")
+        with sqlite3.connect(f"file:{db_uri_path}?mode=ro", uri=True) as db:
+            for name in CORE_GAME_ESMS:
+                row = db.execute("SELECT source_sha256 FROM esm_record WHERE lower(source_file)=lower(?) LIMIT 1",
+                                 (name,)).fetchone()
+                if row and row[0] is not None:
+                    result[name] = bytes(row[0]).hex()
+            row = db.execute("SELECT archive_sha256 FROM bsa_asset WHERE lower(archive_file)=lower(?) LIMIT 1",
+                             ("Morrowind.bsa",)).fetchone()
+            if row and row[0] is not None:
+                result["Morrowind.bsa"] = bytes(row[0]).hex()
+    except sqlite3.Error:
+        return {}
+    return result
+
+
+def audit_core_files(data_dir, game_dir, *, initializing=False, dry_run=False, db_path=None):
+    """Compare canonical ESM and shipped BSA hashes; advise restoring originals but never block the run."""
+    key = os.path.normcase(os.path.abspath(game_dir)).casefold()
+    try:
+        with open(CORE_HASH_MANIFEST, encoding="utf-8") as stream:
+            saved = json.load(stream)
+    except (OSError, ValueError, TypeError):
+        saved = {}
+    saved = saved if isinstance(saved, dict) else {}
+    known = saved.get(key, {})
+    if not isinstance(known, dict):
+        known = {}
+    db_path = db_path or os.path.join(MANAGER_DIR, "game_catalog.sqlite3")
+    catalog_hashes = catalog_core_hashes(db_path)
+    lookup = index_dir(data_dir)
+    mismatches, unverified, new_baseline = [], [], {}
+    for name in CORE_HASH_FILES:
+        path = lookup.get(name.casefold())
+        if not path:
+            continue
+        actual = sha256_file(path)
+        expected = known.get(name) or catalog_hashes.get(name)
+        if expected:
+            new_baseline[name] = expected
+            if actual.casefold() != expected.casefold():
+                mismatches.append((name, expected, actual))
+        else:
+            new_baseline[name] = actual
+            unverified.append(name)
+    if mismatches:
+        print("\nWARNING: one or more core game files differ from the saved/catalogued SHA-256 hashes:")
+        for name, expected, actual in mismatches:
+            print(f"  ALTERED  {name}  expected {expected[:16]}… got {actual[:16]}…")
+        print("  MWManager repairs mod content without editing these core files. We recommend restoring the "
+              "original files through GOG Galaxy's verify/repair option. You may continue; no action was blocked.")
+    if unverified:
+        print("\nCore file hashes have no prior trusted catalog value for: " + ", ".join(unverified))
+        if initializing:
+            print("  A first-use fingerprint can detect future changes, but cannot prove these files were clean "
+                  "before this initialization. Verify the game installation first if you need that assurance.")
+    if not known and not catalog_hashes:
+        print("\nWARNING: no saved core-file hash baseline is available. Run --init to establish one after "
+              "verifying the game files; continuing is allowed.")
+    if initializing and new_baseline and not dry_run:
+        saved[key] = new_baseline
+        os.makedirs(os.path.dirname(CORE_HASH_MANIFEST), exist_ok=True)
+        with open(CORE_HASH_MANIFEST, "w", encoding="utf-8") as stream:
+            json.dump(saved, stream, indent=2, sort_keys=True)
+            stream.write("\n")
+        print(f"--init: core game SHA-256 baseline saved to {CORE_HASH_MANIFEST}")
+    elif initializing and new_baseline and dry_run and not known:
+        print(f"--dry-run: would save core game SHA-256 baseline to {CORE_HASH_MANIFEST}")
+    return bool(mismatches)
+
+
+def planned_ini_registrations(ini, section_name, key_prefix, canonical_names):
+    """Return INI text with canonical numbered entries first and existing extras retained."""
+    raw = open(ini, "rb").read()
+    text = raw.decode(ENC, errors="replace")
+    newline = "\r\n" if "\r\n" in text else "\n"
+    lines = text.splitlines()
+    section_indexes = []
+    current = None
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            current = stripped[1:-1].strip().casefold()
+        if current == section_name.casefold():
+            section_indexes.append(i)
+    if not section_indexes:
+        lines.extend(["", f"[{section_name}]"])
+        section_indexes = [len(lines) - 1]
+    start = section_indexes[0]
+    end = len(lines)
+    for i in range(start + 1, len(lines)):
+        stripped = lines[i].strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            end = i
+            break
+    existing = []
+    pattern = re.compile(r"^\s*" + re.escape(key_prefix) + r"\s*(\d+)\s*=\s*(.*?)\s*$", re.I)
+    for line in lines[start + 1:end]:
+        match = pattern.match(line)
+        if match:
+            existing.append((int(match.group(1)), match.group(2).strip().strip('"')))
+    extras = [value for _index, value in sorted(existing)
+              if value.casefold() not in {name.casefold() for name in canonical_names}]
+    registered = list(canonical_names) + extras
+    retained = [line for line in lines[start + 1:end] if not pattern.match(line)]
+    rebuilt = retained + [f"{key_prefix}{i}={name}" for i, name in enumerate(registered)]
+    lines = lines[:start + 1] + rebuilt + lines[end:]
+    return newline.join(lines) + newline, registered
+
+
+def plan_core_ini(ini):
+    """Ensure all canonical ESMs and BSAs are registered, retaining other registrations."""
+    original = open(ini, "rb").read().decode(ENC, errors="replace")
+    text, esms = planned_ini_registrations(ini, "Game Files", "GameFile", CORE_GAME_ESMS)
+    # Apply the second section to the intermediate text without touching disk.
+    temp = tempfile.NamedTemporaryFile(delete=False)
+    try:
+        temp.write(text.encode(ENC, errors="replace"))
+        temp.close()
+        text, bsas = planned_ini_registrations(temp.name, "Archives", "Archive ", CORE_GAME_BSAS)
+    finally:
+        try:
+            os.unlink(temp.name)
+        except OSError:
+            pass
+    return original, text, esms, bsas
+
+
+def lint_installed_core_mwse(game_dir, *, dry_run=False):
+    """Lint the Lua shipped with the installed MWSE core (MWSE\\core, MWSE\\lib) and apply its conservative
+    repairs. Each original is kept once, first copy wins, in Data Files\\MWSE\\backups\\<path under MWSE>; MWSE
+    only runs Lua from MWSE\\core, MWSE\\mods (and the legacy MWSE\\lua), so that folder is never loaded. Mods
+    in MWSE\\mods are not touched here: their originals stay in their staged mod."""
+    data_dir = os.path.join(os.path.abspath(game_dir), "Data Files")
+    mwse_dir = os.path.join(data_dir, "MWSE")
+    if not os.path.isdir(mwse_dir):
+        print(f"--init: MWSE core Lua folder not found; skipped lint ({mwse_dir})")
+        return 0
+    manager_dir = os.path.dirname(os.path.abspath(__file__))
+    linter = os.path.join(manager_dir, "mwse_lint.py")
+    if not os.path.isfile(linter):
+        print(f"--init: MWSE Lua linter not found: {linter}", file=sys.stderr)
+        return 0
+    report = os.path.join(OUTPUT_DIR, "mwmanager_core_mwse_lua_report.json")
+    bugreport = os.path.join(OUTPUT_DIR, "mwmanager_core_mwse_bugreport.txt")
+    backup_root = os.path.join(mwse_dir, "backups")
+    older_root = os.path.join(MANAGER_DIR, "backups", "mwse-core")    # where versions before 2026-11-13 kept them
+    if dry_run:
+        print(f"--dry-run: would lint and apply conservative repairs to installed MWSE core Lua under {mwse_dir}")
+        print(f"--dry-run: originals would be saved under {backup_root}")
+        print(f"--dry-run: JSON findings and sendable bugreport would be written under {OUTPUT_DIR}")
+        return 0
+    command = [sys.executable, linter, "--staging", data_dir, "--report", report, "--bugreport", bugreport,
+               "--only", "MWSE", "--exclude", "MWSE/mods", "MWSE/backups", "MWSE/lua",
+               "--backup-root", backup_root, "--backup-relative-to", mwse_dir,
+               "--prior-backup-root", older_root, "--apply"]
+    result = subprocess.run(command, check=False)
+    if result.returncode:
+        print(f"--init: MWSE core Lua lint returned {result.returncode}; initialization will continue. See {report}",
+              file=sys.stderr)
+    else:
+        print(f"--init: installed MWSE core Lua lint/repair complete; JSON: {report}; bugreport: {bugreport}")
+    return 0
+
+
+def install_mwse_lua_guards(args):
+    """Install MWManager's consolidated MWSE utilities as one mod entry."""
+    manager_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = Path(args.data_dir).resolve()
+    mwse_dir = data_dir / "MWSE"
+    if not mwse_dir.is_dir():
+        print(f"--init: MWSE core folder not found; Lua utilities installation deferred ({mwse_dir})")
+        return 0
+    source = manager_dir / "reference" / "mwse-lua-guards" / "mods" / "MWManager"
+    if not (source / "main.lua").is_file():
+        print(f"--init: consolidated MWSE Lua utility source not found: {source}", file=sys.stderr)
+        return 2
+    source_files = [p for p in source.rglob("*") if p.is_file()
+                    and not p.name.casefold().startswith(("main.lua.bak", "main.lua~"))]
+    target_root = mwse_dir / "mods"
+    destination = target_root / "MWManager"
+    if args.dry_run:
+        print(f"--dry-run: would install the consolidated MWManager MWSE mod to {destination}")
+        for name in ("mwcollide", "mwfloatfix", "mwguard", "mwhangwatch", "mwinfoloop",
+                     "mwperformers", "mwstranded", "mwsoundguard", "mouseBleedFix"):
+            if (target_root / name).is_dir():
+                print(f"--dry-run: would archive standalone MWSE mod {name} under {mwse_dir / 'backups' / 'mods'}")
+        return 0
+
+    try:
+        for source_file in source_files:
+            target = destination / source_file.relative_to(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary = target.with_name(target.name + ".mwmanager-tmp")
+            shutil.copy2(source_file, temporary)
+            os.replace(temporary, target)
+
+        # Data Files\\MWSE\\backups\\mods\\<name>: kept beside MWSE, where MWSE never loads Lua from (it runs main.lua
+        # files found anywhere under MWSE\\mods, so the older MWSE\\mods\\MWManager\\off\\legacy-standalone archive
+        # still ran; anything archived there moves out too).
+        legacy_root = mwse_dir / "backups" / "mods"
+        older = destination / "off" / "legacy-standalone"
+        olders = [(p.name, p) for p in sorted(older.iterdir()) if p.is_dir()] if older.is_dir() else []
+        for name, old in olders:
+            archived = legacy_root / name
+            suffix = 2
+            while archived.exists():
+                archived = legacy_root / f"{name}-{suffix}"
+                suffix += 1
+            archived.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old), str(archived))
+        for name in ("mwcollide", "mwfloatfix", "mwguard", "mwhangwatch", "mwinfoloop",
+                     "mwperformers", "mwstranded", "mwsoundguard", "mouseBleedFix"):
+            old = target_root / name
+            if not old.is_dir():
+                continue
+            archived = legacy_root / name
+            if archived.exists():
+                suffix = 2
+                while (legacy_root / f"{name}-{suffix}").exists():
+                    suffix += 1
+                archived = legacy_root / f"{name}-{suffix}"
+            archived.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(old), str(archived))
+    except OSError as exc:
+        print(f"--init: could not install consolidated MWSE Lua utilities: {exc}", file=sys.stderr)
+        return 2
+    print(f"--init: installed consolidated MWManager MWSE mod with nine utility tabs at {destination}")
+    return 0
+
+
+def initialize_manager(args):
+    """Initialize the local catalog and independent load-order list from INI GameFile0..2."""
+    data_dir = os.path.abspath(args.data_dir)
+    game_dir = os.path.dirname(data_dir)
+    if os.path.splitdrive(os.path.abspath(STAGING_DIR))[0].casefold() != os.path.splitdrive(game_dir)[0].casefold():
+        print(f"--init: staging must be on the same drive as Morrowind for hardlinks: {STAGING_DIR}", file=sys.stderr)
+        return 2, []
+    if not args.dry_run:
+        try:
+            os.makedirs(STAGING_DIR, exist_ok=True)
+        except OSError as exc:
+            print(f"--init: cannot create staging folder {STAGING_DIR}: {exc}", file=sys.stderr)
+            return 2, []
+    ini = os.path.abspath(args.ini or os.path.join(game_dir, "Morrowind.ini"))
+    if not os.path.isfile(ini):
+        print(f"--init: cannot read {ini}", file=sys.stderr)
+        return 2, []
+    names = list(CORE_GAME_ESMS)
+    try:
+        original_ini, planned_ini, registered_esms, registered_bsas = plan_core_ini(ini)
+    except (OSError, UnicodeError) as exc:
+        print(f"--init: cannot plan canonical INI registrations: {exc}", file=sys.stderr)
+        return 2, []
+    lookup = index_dir(data_dir)
+    missing = [name for name in (*CORE_GAME_ESMS, *CORE_GAME_BSAS) if name.lower() not in lookup]
+    if missing:
+        print("--init: required canonical game files are missing: " + ", ".join(missing), file=sys.stderr)
+        return 2, []
+    texconv = os.path.join(TOOLS_DIR, "texconv.exe")
+    if not os.path.isfile(texconv):
+        texconv = shutil.which("texconv")
+    if not texconv:
+        print("--init: required prerequisite texconv.exe was not found. Put it in MWManager\\tools\\ or add it to PATH.", file=sys.stderr)
+        if not args.dry_run:
+            show_download_interface([("texconv.exe", "DirectXTex texconv is MIT-licensed; download or install it, then place it in MWManager\\tools.", PREREQUISITE_URLS["texconv"])])
+        return 2, []
+    ffmpeg = os.path.join(TOOLS_DIR, "ffmpeg.exe")
+    if not os.path.isfile(ffmpeg):
+        ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        print("--init: required prerequisite ffmpeg.exe was not found. Keep it in MWManager\\tools or add it to PATH; "
+              "--full uses it to repair WAV and MP3 assets.", file=sys.stderr)
+        if not args.dry_run:
+            show_download_interface([("FFmpeg", "MWManager does not bundle FFmpeg because Windows builds can include different codec libraries and license terms. Use the official FFmpeg download page to choose a build.", PREREQUISITE_URLS["ffmpeg"])])
+        return 2, []
+    audit_core_files(data_dir, game_dir, initializing=True, dry_run=args.dry_run,
+                     db_path=getattr(args, "catalog_db", None))
+    warn_mcp_beta(game_dir, show_ui=not args.dry_run)
+    offer_mwse_update(game_dir, dry_run=args.dry_run, yes=args.yes)
+    if planned_ini != original_ini:
+        if args.dry_run:
+            print("--dry-run: would register canonical files in Morrowind.ini:")
+            for index, name in enumerate(registered_esms):
+                print(f"  GameFile{index}={name}")
+            for index, name in enumerate(registered_bsas):
+                print(f"  Archive {index}={name}")
+        else:
+            backup = backup_file("ini", os.path.basename(ini) + ".mwmanager-init.bak")
+            shutil.copy2(ini, backup)
+            with open(ini, "wb") as stream:
+                stream.write(planned_ini.encode(ENC, errors="replace"))
+            print(f"--init: registered canonical ESMs and BSAs in {ini} (backup: {backup})")
+    else:
+        print("--init: all canonical ESMs and BSAs are already registered in Morrowind.ini")
+
+    if not ensure_mlox_rules(game_dir, dry_run=args.dry_run, yes=args.yes,
+                             disabled=getattr(args, "no_mlox_rules", False)):
+        if not args.dry_run:
+            args.no_mlox_rules = True
+            detail = ("disabled by request" if getattr(args, "no_mlox_rules", False)
+                      else "unavailable; initialization can continue, but sorting will lack those rules")
+            print(f"--init: mlox rules {detail}.", file=sys.stderr)
+
+    root = os.path.dirname(os.path.abspath(__file__))
+    catalog = os.path.join(root, "database", "catalog.py")
+    if not os.path.isfile(catalog):
+        print(f"--init: catalog utility not found: {catalog}", file=sys.stderr)
+        return 2, []
+    command = [sys.executable, catalog, "--game-dir", game_dir, "--ini", ini, "--canonical-core"]
+    if getattr(args, "catalog_db", None):
+        command += ["--db", args.catalog_db]
+    if args.dry_run:
+        command.append("--inventory-only")
+    print("--init: starting catalog with these ESMs in INI order:")
+    for i, name in enumerate(names):
+        print(f"  {i}: {name}")
+    result = subprocess.run(command, check=False)
+    if result.returncode:
+        print(f"--init: catalog utility failed with exit code {result.returncode}", file=sys.stderr)
+        return result.returncode, []
+    if args.dry_run:
+        print(f"--dry-run: would initialize/update SQLite catalog at "
+              f"{getattr(args, 'catalog_db', None) or os.path.join(root, 'game_catalog.sqlite3')}")
+        print(f"--dry-run: would write independent working load order to {LOAD_ORDER_PATH}")
+        print("--dry-run: no INI, catalog, or load-order files were changed")
+        return 0, names
+    write_load_order(game_dir, names, "mwmanager --init")
+    print(f"--init: independent working load order written to {LOAD_ORDER_PATH}")
+    return 0, names
+
+
+def post_init_data_files_maintenance(args):
+    """Tidy loose documents on first init and migrate official add-on docs on later inits."""
+    data_dir = os.path.abspath(args.data_dir)
+    game_key = hashlib.sha256(os.path.normcase(data_dir).encode("utf-8", "surrogatepass")).hexdigest()[:16]
+    marker = os.path.join(OUTPUT_DIR, f"mwmanager_post_init_tidy_{game_key}.json")
+    tidy = os.path.join(MANAGER_DIR, "mwmanager_install.py")
+    if not os.path.isfile(tidy):
+        print(f"--init: Data Files tidy utility not found: {tidy}", file=sys.stderr)
+        return 2
+    command = [sys.executable, tidy, "--data-files", data_dir, "--once-marker", marker]
+    command.append("--dry-run" if args.dry_run else "--apply")
+    result = subprocess.run(command, check=False)
+    if result.returncode:
+        print(f"--init: Data Files tidy failed with exit code {result.returncode}; it can retry on the next --init.",
+              file=sys.stderr)
+    return result.returncode
+
+
+def refresh_init_catalog(args, plugins):
+    """Refresh the selected ESM/ESP records without dropping plugins catalogued in earlier init phases."""
+    root = os.path.dirname(os.path.abspath(__file__))
+    catalog = os.path.join(root, "database", "catalog.py")
+    game_dir = os.path.dirname(os.path.abspath(args.data_dir))
+    command = [sys.executable, catalog, "--game-dir", game_dir, "--plugin-files", *plugins, "--append"]
+    if args.ini:
+        command += ["--ini", args.ini]
+    if getattr(args, "catalog_db", None):
+        command += ["--db", args.catalog_db]
+    if args.dry_run:
+        command.append("--inventory-only")
+    result = subprocess.run(command, check=False)
+    if result.returncode:
+        print(f"--init: catalog refresh failed with exit code {result.returncode}", file=sys.stderr)
+    return result.returncode
