@@ -18,7 +18,11 @@ local defaultConfig = {
 local config = mwse.loadConfig(CONFIG_NAME, defaultConfig)
 
 function config.save()
-    mwse.saveConfig(CONFIG_NAME, config)
+    local plain = {}                    -- the functions on this table cannot go into JSON
+    for k, v in pairs(config) do
+        if type(v) ~= "function" then plain[k] = v end
+    end
+    mwse.saveConfig(CONFIG_NAME, plain)
 end
 
 return config

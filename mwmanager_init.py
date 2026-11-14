@@ -514,12 +514,22 @@ def lint_installed_core_mwse(game_dir, *, dry_run=False):
 RETIRED_MWSE_MODS = ("MWManager", "mwquickfixes")
 
 
+# reference\<folder>\mods\<name> and \metadata: the suite (copies of the Steam install), then MWManager's own
+# mwmanagermenu, which puts the suite's settings pages under one Mod Config Menu entry
+LUA_SOURCES = ("mwse-lua-guards", "mwmanager-menu")
+
+
 def _suite_source():
-    root = Path(os.path.dirname(os.path.abspath(__file__))) / "reference" / "mwse-lua-guards"
-    mods = root / "mods"
-    names = sorted(p.name for p in mods.iterdir() if (p / "main.lua").is_file()) if mods.is_dir() else []
-    metadata = sorted((root / "metadata").glob("*-metadata.toml")) if (root / "metadata").is_dir() else []
-    return mods, names, metadata
+    """(reference folder, {mod name: its source folder}, [metadata toml files])."""
+    reference = Path(os.path.dirname(os.path.abspath(__file__))) / "reference"
+    mods, metadata = {}, []
+    for folder in LUA_SOURCES:
+        root = reference / folder
+        if (root / "mods").is_dir():
+            mods.update({p.name: p for p in sorted((root / "mods").iterdir()) if (p / "main.lua").is_file()})
+        if (root / "metadata").is_dir():
+            metadata += sorted((root / "metadata").glob("*-metadata.toml"))
+    return reference, mods, metadata
 
 
 def _unique_archive(root, name):
@@ -545,7 +555,8 @@ def install_mwse_lua_guards(args):
     if not mwse_dir.is_dir():
         print(f"--init: MWSE core folder not found; Lua suite installation deferred ({mwse_dir})")
         return 0
-    source, names, metadata = _suite_source()
+    source, mods, metadata = _suite_source()
+    names = sorted(mods)
     if not names:
         print(f"--init: MWSE Lua suite source not found: {source}", file=sys.stderr)
         return 2
@@ -570,7 +581,7 @@ def install_mwse_lua_guards(args):
             archived.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(old), str(archived))
         for name in names:
-            mod_source = source / name
+            mod_source = mods[name]
             files = {p.relative_to(mod_source) for p in mod_source.rglob("*") if p.is_file()}
             destination = existing.get(name.casefold(), target_root / name)
             # files a suite mod no longer has (older modules, editor backups) leave MWSE\\mods

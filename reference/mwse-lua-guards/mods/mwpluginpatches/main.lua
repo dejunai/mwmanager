@@ -1,38 +1,44 @@
---[[
-    mwpluginpatches
-    Author: Antigravity
-
-    Unified collection of targeted fixes and quality-of-life patches for specific ESP/ESM plugins:
-      1. AutoStartupConfig:
-         - Morrowind Comes Alive (MCA.esm): Silently completes the initial questionnaire with configured spawn/companion settings.
-         - Ebonheart Underworks (Ebonheart_Underworks.esp): Silently answers Rebirth and Thief branch prompts.
-      2. psguardfix (Privileges & Services Guard Call Fix):
-         - Intercepts crime/intruder scripts in non-vanilla cells (TR, modded dungeons) and dynamically assigns
-           regional guards (Hlaalu, Redoran, Telvanni, Temple, Imperial) to prevent permanent black screen fadeouts.
-      3. YsmirCombatShield (YARR Nord Bubble Fix):
-         - Resolves the perpetual visual shield bubble on Nord NPCs by converting the passive shield into an active combat-only spell.
-
-    Each patch automatically detects whether its target plugin is installed and defaults to enabled only if installed.
-]]
-
 local config = require("mwpluginpatches.config")
+
 local autoStartup = require("mwpluginpatches.patches.autoStartup")
 local psguardfix = require("mwpluginpatches.patches.psguardfix")
 local ysmirShield = require("mwpluginpatches.patches.ysmirShield")
+local jiubDelay = require("mwpluginpatches.patches.jiubDelay")
+local lostHeirDelay = require("mwpluginpatches.patches.lostHeirDelay")
 
 local function onInitialized()
-    autoStartup.init()
-    psguardfix.init()
-    ysmirShield.init()
-    mwse.log("[mwpluginpatches] Initialized successfully. Active patches: MCA AutoStartup (%s), EU AutoStartup (%s), P&S Guard Fix (%s), Ysmir Shield (%s).",
-        (config.mcaEnabled and config.isMcaActive()) and "ON" or "OFF",
-        (config.euEnabled and config.isEbonheartUnderworksActive()) and "ON" or "OFF",
-        (config.psGuardFixEnabled and config.isPsGuardActive()) and "ON" or "OFF",
-        (config.ysmirShieldEnabled and config.isYsmirActive()) and "ON" or "OFF")
-end
-event.register("initialized", onInitialized)
+    mwse.log("[mwpluginpatches] Initializing unified plugin compatibility patches...")
 
--- Register Mod Config Menu
+    -- 1. AutoStartup (MCA & Ebonheart Underworks)
+    if (config.mcaEnabled and config.isMcaActive()) or (config.euEnabled and config.isEbonheartUnderworksActive()) then
+        autoStartup.init()
+    end
+
+    -- 2. Privileges & Services Guard Cell Black Screen Fix
+    if config.psGuardFixEnabled and config.isPsGuardActive() then
+        psguardfix.init()
+    end
+
+    -- 3. Ysmir Combat Shield (YARR)
+    if config.ysmirShieldEnabled and config.isYsmirActive() then
+        ysmirShield.init()
+    end
+
+    -- 4. Friends & Frens Jiub Companion Delayer
+    if config.jiubDelayEnabled and config.isFriendsAndFrensActive() then
+        jiubDelay.init()
+    end
+
+    -- 5. The Lost Heir Delayer
+    if config.lostHeirDelayEnabled and config.isLostHeirActive() then
+        lostHeirDelay.init()
+    end
+
+    mwse.log("[mwpluginpatches] Unified plugin compatibility patches initialized.")
+end
+
+event.register(tes3.event.initialized, onInitialized)
+
 local function registerModConfig()
     require("mwpluginpatches.mcm")
 end

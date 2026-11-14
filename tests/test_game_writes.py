@@ -256,7 +256,11 @@ class MwseCoreOriginalsStayInTheInstall(unittest.TestCase):
             self.assertEqual((suite / rel).read_bytes(), installed.read_bytes(), str(rel))
         live = sorted(p.name for p in (self.mwse / "mods").iterdir())
         names = sorted(p.name for p in (suite / "mods").iterdir())
-        self.assertEqual(live, sorted(names + ["mouseBleedFix", "somemod"]))
+        self.assertEqual(live, sorted(names + ["mouseBleedFix", "mwmanagermenu", "somemod"]))
+        menu = ROOT / "reference" / "mwmanager-menu"
+        self.assertEqual((menu / "mods" / "mwmanagermenu" / "main.lua").read_bytes(),
+                         (self.mwse / "mods" / "mwmanagermenu" / "main.lua").read_bytes())
+        self.assertTrue((self.data / "mwmanagermenu-metadata.toml").is_file())
         self.assertEqual(sorted(p.name for p in (self.mwse / "mods" / "mwfloatfix").iterdir()), ["main.lua"])
         backups = self.mwse / "backups" / "mods"
         self.assertTrue((backups / "MWManager" / "modules" / "mwquickfixes" / "main.lua").is_file())
@@ -297,16 +301,18 @@ class LuaSuiteIsTheUsersCopy(unittest.TestCase):
 
     def test_mwguard_exempts_every_suite_mod(self):
         names = {p.name for p in (self.SUITE / "mods").iterdir() if (p / "main.lua").is_file()}
-        self.assertEqual(len(names), 13)
+        self.assertEqual(len(names), 15)
         main = (self.SUITE / "mods" / "mwguard" / "main.lua").read_text("utf-8")
         block = main[main.index("exemptMods"):]
         block = block[:block.index("}")]
-        self.assertEqual(set(re.findall(r'"([^"]+)"', block)), names)
+        # mwguard also exempts mwespreplacements, the user's own load-order patches: not part of MWManager's suite
+        self.assertEqual(set(re.findall(r'"([^"]+)"', block)) - {"mwespreplacements"}, names)
 
     def test_no_quickfixes_or_consolidated_package_left(self):
         self.assertFalse((self.SUITE / "mods" / "MWManager").exists())
         self.assertFalse((self.SUITE / "legacy-standalone").exists())
-        self.assertEqual([p for p in ROOT.rglob("*quickfix*") if ".git" not in p.parts], [])
+        kept = {".git", "_backup", "backups"}                       # working folders, not shipped (.gitignore)
+        self.assertEqual([p for p in ROOT.rglob("*quickfix*") if not kept & set(p.parts)], [])
         for lua in self.SUITE.rglob("*.lua"):
             self.assertNotIn("mwquickfixes", lua.read_text("utf-8"), str(lua))
             self.assertNotIn("mwmanagerMCM", lua.read_text("utf-8"), str(lua))

@@ -37,6 +37,20 @@ local function restoreMainMenu()
 	end
 end
 
+local QUARANTINE_DIR = "saves\\quarantine"
+
+--- Moves a rejected save to saves\quarantine\ (a rename: nothing is deleted). Returns the new path, or nil.
+local function quarantine(path, baseName)
+	if not path or not lfs.fileexists(path) then return nil end
+	pcall(lfs.mkdir, QUARANTINE_DIR)
+	local dest = QUARANTINE_DIR .. "\\" .. baseName
+	if lfs.fileexists(dest) then                        -- an earlier quarantined save of the same name is kept
+		dest = QUARANTINE_DIR .. "\\" .. os.date("%Y%m%d-%H%M%S ") .. baseName
+	end
+	local ok = os.rename(path, dest)
+	return ok and dest or nil
+end
+
 --- @param e loadEventData
 local function onPreLoad(e)
 	if not config.enabled or not config.validateOnLoad then
@@ -65,16 +79,14 @@ local function onPreLoad(e)
 		event.trigger("loadAborted")
 
 		local saveBaseName = (resolvedPath and resolvedPath:match("([^\\]+)$")) or filename
-		mwse.log("[mwsaveguard] INTERCEPTED corrupt save load: '%s' (%s). Blocking load and deleting corrupted file.", tostring(resolvedPath), reason)
+		mwse.log("[mwsaveguard] INTERCEPTED corrupt save load: '%s' (%s). Load blocked.", tostring(resolvedPath), reason)
 
-		-- 2. Delete the corrupted save file from disk
-		if resolvedPath and lfs.fileexists(resolvedPath) then
-			local deleted = os.remove(resolvedPath)
-			if deleted then
-				mwse.log("[mwsaveguard] Successfully removed corrupted save file: '%s'", resolvedPath)
-			else
-				mwse.log("[mwsaveguard] Warning: Could not remove file: '%s'", resolvedPath)
-			end
+		-- 2. Move the save out of the way (never deleted): saves\quarantine\
+		local movedTo = quarantine(resolvedPath, saveBaseName)
+		if movedTo then
+			mwse.log("[mwsaveguard] Quarantined: '%s' -> '%s'", tostring(resolvedPath), movedTo)
+		else
+			mwse.log("[mwsaveguard] Could not move '%s' to quarantine; it was left where it is.", tostring(resolvedPath))
 		end
 
 		-- 3. Restore UI / Main Menu so the user is never stuck or locked out
@@ -87,7 +99,8 @@ local function onPreLoad(e)
 			okText = okGmst.value
 		end
 
-		local displayMsg = string.format("Save is corrupted.\n\nFile: %s\nReason: %s\n\nThis corrupted file has been deleted to prevent crashes.", saveBaseName, reason)
+		local displayMsg = string.format("Save is corrupted and was not loaded.\n\nFile: %s\nReason: %s\n\n%s", saveBaseName, reason,
+			movedTo and ("It was moved to " .. movedTo .. ".") or "It could not be moved to quarantine and was left in place.")
 		tes3.messageBox({
 			message = displayMsg,
 			buttons = { okText },
@@ -112,7 +125,9 @@ local lastCellChangeTime = os.clock()
 local lastCharGenFinishTime = os.clock()
 local isExecutingDeferredSave = false
 local pendingSave = nil
+local pendingSince = 0
 local deferTimer = nil
+local PENDING_MAX = 30          -- s: a deferred save older than this no longer holds the menu shut
 
 local function onCellChanged(e)
 	lastCellChangeTime = os.clock()
@@ -126,6 +141,7 @@ event.register("charGenFinished", onCharGenFinished)
 
 -- Also monitor on load so newly loaded games settle before autosaving
 local function onLoaded(e)
+	pendingSave, deferTimer = nil, nil        -- MWSE cancelled the timer before this event
 	lastCellChangeTime = os.clock()
 	if e and e.newGame then
 		lastCharGenFinishTime = 0
@@ -225,6 +241,7 @@ local function onSave(e)
 			filename = e.filename,
 			name = e.name,
 		}
+		pendingSince = now
 
 		logMsg("[mwsaveguard] Intercepted save '%s' during world settling window (%.1fs remaining). Deferring save...", tostring(e.filename), remaining)
 
@@ -244,6 +261,20 @@ end
 
 -- Priority 10000 ensures this intercepts before any other save handlers (like SSS or native)
 event.register("save", onSave, { priority = 10000 })
+
+-- While a save is waiting, the options menu (Esc) stays shut: quitting or loading from it would lose that save.
+local function onOptionsMenu()
+	if not config.enabled or not pendingSave or tes3.onMainMenu() then return end
+	if os.clock() - pendingSince > PENDING_MAX then return end      -- never hold the menu shut for long
+	timer.frame.delayOneFrame(function()
+		if not pendingSave then return end
+		local menu = tes3ui.findMenu("MenuOptions")
+		if menu then menu:destroy() end
+		tes3ui.leaveMenuMode()
+		tes3.messageBox("mwsaveguard: a delayed save is about to be written. The menu opens again in a few seconds.")
+	end)
+end
+event.register("uiActivated", onOptionsMenu, { filter = "MenuOptions" })
 
 
 ----------------------------------------------------------------------------------------------------

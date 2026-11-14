@@ -212,3 +212,36 @@ Behaviour changes:
 - Upstream note (not changed; `mwdialog_luafix.py` stays byte-identical): its built-in `OWN_MODS` still lists only the
   first eight suite mods plus `mwmanager`. It reads `exemptMods` from `mwguard.json`, which names all 13, so this only
   matters where `mwguard.json` is missing.
+
+## Suite sync: the reviewed mw* suite and one Mod Config Menu entry — 2026-11-14, 11:30 (Pacific)
+
+- Upstream: dejunai/morrowind-conflict-tools @2f5249c (dead-code cleanup, master-check speed-up, the whole mw*
+  Lua suite with its review fixes). Backup of every file this sync replaced or edited:
+  `_backup\pre-suite-sync-20261114-112848\` (`SHA256SUMS.txt`, `ROLLBACK.ps1`).
+- `tools\steam-upstream\` mirrors the public repo's code, docs, tests and Lua suite again, each file copied from
+  the Steam root and hash-verified: 47 new files, 14 replaced (kept in `previous-2026-11-14-suite\`).
+  User-state records keep their earlier snapshot. `COPY_MANIFEST.json` and `utility_source_manifest.json` are
+  refreshed.
+- Copied into the root as well (byte-identical, checked by `tests\test_game_writes.py`): `mwdialog_assets.py`,
+  `mwdialog_check.py`, `mwdialog_luafix.py`, `mwdialog_mastercheck.py`, `mwdialog_paths.py`,
+  `mwdialog_planfile.py`, `mwdialog_text.py`, `vortex_tidy.py`. Upstream removed functions nothing called;
+  MWManager's extension modules needed no change.
+- `reference\mwse-lua-guards\` is copied again from the Steam install: 15 mods. New: `mwmouseguard` and
+  `mwteleportguard` (the former MouseBleedFix and DeferredDialogueTeleport), and `mwwarnsuppression\locate.lua`.
+  Changed: mwsaveguard (a rejected save is quarantined, not deleted; the options menu stays shut while a save is
+  deferred), mwwarnsuppression (patch sites are found in the running executable, so GOG, Steam and code-patched
+  builds are handled or left alone), mwguard, and the settings saving of mwteleportguard, mwmouseguard,
+  mweffectinspector and mwpluginpatches. `mwespreplacements` is the user's own replacement for plugins in one
+  load order: it is in the upstream snapshot (the public repo has it) but not in MWManager's suite, and
+  `--init` does not install it.
+- One Mod Config Menu entry. `reference\mwmanager-menu\` holds MWManager's own `mwmanagermenu` mod. It loads
+  before the suite, keeps back each suite mod's settings-page registration, and registers one entry,
+  "MWManager", with a tab per suite mod; a tab shows that mod's own page, and closing or switching runs that
+  mod's own save. The suite's files stay byte-identical to Steam (the earlier consolidated `mods\MWManager\`
+  package carried edited copies instead). `--init` installs it with the suite (`mwmanager_init.LUA_SOURCES`).
+  `MWSE\mods\MWManager\` is still a retired folder name and is still archived.
+- Tests: `tests\test_unified_menu.py` (the tab list equals the suite; the menu run under LuaJIT with a stand-in
+  for MWSE: suite pages go under one entry, other mods keep theirs, switching and closing call the mod's own
+  close). `tests\test_game_writes.py`: 15 suite mods, the menu mod is installed, and the "no quickfix files"
+  check no longer walks the ignored `_backup\` and `backups\` folders (it failed on them before this sync).
+- Not checked: the menu and the Lua changes have not been run inside the game.

@@ -32,7 +32,8 @@ local defaults = {
     exemptMods = {
         "mwguard", "mwhangwatch", "mwfloatfix", "mwstranded", "mwcollide",
         "mwperformers", "mwinfoloop", "mwsoundguard", "mwsaveguard", "mwwarnsuppression",
-        "mwcompanionsneak", "mwpluginpatches", "mweffectinspector"
+        "mwcompanionsneak", "mwpluginpatches", "mweffectinspector", "mwmouseguard", "mwespreplacements",
+        "mwteleportguard"
     },
     perFrameHints = {
         "e%.delta", "camera", "velocity", "orientation", "position%s*=", "rotation", "animat",
@@ -50,68 +51,11 @@ local interop = include("mwguard.interop") or {
     isExempt = function() return false end, exemptMods = {}, exemptFunctions = {},
 }
 
--- logging & VoV log routing ----------------------------------------------------------------------
+-- logging ----------------------------------------------------------------------------------------
 local LOG_DIR = "Data Files\\MWSE\\logs"
-local vovLogFile = nil
-local function getVovLog()
-    if not vovLogFile then
-        pcall(function() lfs.mkdir(LOG_DIR) end)
-        vovLogFile = io.open(LOG_DIR .. "\\VoV.log", "a")
-        if vovLogFile then
-            vovLogFile:write(os.date("\n[--- Voices of Vvardenfell Session %Y-%m-%d %H:%M:%S ---]\n"))
-            vovLogFile:flush()
-        end
-    end
-    return vovLogFile
-end
-
--- Intercept mwse.log and print to route VoV dialogue queries to Data Files\MWSE\logs\VoV.log
-local origMwseLog = mwse.log
-mwse.log = function(fmt, ...)
-    local msg
-    if select("#", ...) > 0 then
-        local ok, s = pcall(string.format, fmt, ...)
-        msg = ok and s or tostring(fmt)
-    else
-        msg = tostring(fmt)
-    end
-
-    if msg:find("%[VoV%]") or msg:find("^Voices of Vvardenfell") then
-        local vf = getVovLog()
-        if vf then
-            vf:write(os.date("[%H:%M:%S] "), msg, "\n")
-            vf:flush()
-        end
-        return
-    end
-
-    return origMwseLog("%s", msg)
-end
-
-local origGlobalPrint = print
-_G.print = function(...)
-    local n = select("#", ...)
-    if n > 0 then
-        local first = tostring(select(1, ...))
-        if first:find("%[VoV%]") or first:find("^Voices of Vvardenfell") then
-            local vf = getVovLog()
-            if vf then
-                local parts = {}
-                for i = 1, n do
-                    parts[#parts + 1] = tostring(select(i, ...))
-                end
-                vf:write(os.date("[%H:%M:%S] "), table.concat(parts, "\t"), "\n")
-                vf:flush()
-            end
-            return
-        end
-    end
-    return origGlobalPrint(...)
-end
-
 local function origLog(fmt, ...)
     local ok, s = pcall(string.format, fmt, ...)
-    origGlobalPrint(ok and s or tostring(fmt))
+    print(ok and s or tostring(fmt))
 end
 
 local logFile
@@ -127,7 +71,7 @@ local function flog(fmt, ...)
     logFile:flush()
 end
 flog("mwguard started in passive profiling mode (MWSE build %s)", tostring(mwse.buildNumber or "?"))
-origMwseLog("[mwguard] Initialized first (load priority 1000000): passive profiler and event monitor active.")
+mwse.log("[mwguard] Initialized first (load priority 1000000): passive profiler and event monitor active.")
 
 -- microsecond clock ------------------------------------------------------------------------------
 local now = os.clock

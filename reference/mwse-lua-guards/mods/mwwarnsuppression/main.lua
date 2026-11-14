@@ -19,19 +19,68 @@ local defaults = {
 }
 local config = mwse.loadConfig(CONFIG_NAME, defaults)
 
+local locate = require("mwwarnsuppression.locate")
+local ffi = require("ffi")
+
 local origBytes = {}
 
-local function applyBodyPartPatch(enable)
-    if enable then
-        if not origBytes.bodyPart then
-            origBytes.bodyPart = mwse.memory.readBytes({ address = 0x4A1B02, length = 0x21 })
+-- Where the code to patch is in THIS Morrowind.exe (see locate.lua): found once, the first time it is needed.
+local sites
+local function findSites()
+    if sites then return sites end
+    sites = {}
+    local ok, err = pcall(function()
+        pcall(ffi.cdef, "void* GetModuleHandleA(const char* name);")
+        local base = tonumber(ffi.cast("uintptr_t", ffi.C.GetModuleHandleA(nil)))
+        local function read(rva, length)
+            return ffi.string(ffi.cast("const char*", base + rva), length)
         end
-        -- 0x4A1B02: LogWarning call block for "Not able to find %s part in %s.\r\n"
-        mwse.memory.writeNoOperation({ address = 0x4A1B02, length = 0x21 })
-        mwse.log("[mwwarnsuppression] Memory patch applied: 'Not able to find <BodyPart> part' warnings suppressed.")
-    elseif origBytes.bodyPart then
-        mwse.memory.writeBytes({ address = 0x4A1B02, bytes = origBytes.bodyPart })
-        mwse.log("[mwwarnsuppression] Memory patch reverted: Body part warnings restored.")
+        local image = { data = {} }
+        for _, sec in ipairs(locate.sections(read)) do
+            if sec.name == ".text" then
+                image.text, image.textAddress = read(sec.rva, sec.size), base + sec.rva
+            elseif sec.name == ".rdata" or sec.name == ".data" then
+                image.data[#image.data + 1] = { bytes = read(sec.rva, sec.size), address = base + sec.rva }
+            end
+        end
+        if image.text then sites = locate.find(image) end
+    end)
+    if not ok then mwse.log("[mwwarnsuppression] Could not read the executable's code: %s", tostring(err)) end
+    for _, name in ipairs({ "bodyPart", "texture", "nif", "kf" }) do
+        if sites[name] then
+            mwse.log("[mwwarnsuppression] %s: found at 0x%X.", name, sites[name].address)
+        else
+            mwse.log("[mwwarnsuppression] %s: not found in this Morrowind.exe (another build or already patched); left alone.", name)
+        end
+    end
+    return sites
+end
+
+-- Writes (enable) or puts back (not enable) one located patch. Returns true when the code was changed.
+local function patch(name, enable)
+    local site = findSites()[name]
+    if not site then return false end
+    if enable then
+        if origBytes[name] then return false end          -- already applied
+        origBytes[name] = mwse.memory.readBytes({ address = site.address, length = site.length })
+        if site.bytes then
+            mwse.memory.writeBytes({ address = site.address, bytes = site.bytes })
+        else
+            mwse.memory.writeNoOperation({ address = site.address, length = site.length })
+        end
+        return true
+    elseif origBytes[name] then
+        mwse.memory.writeBytes({ address = site.address, bytes = origBytes[name] })
+        origBytes[name] = nil
+        return true
+    end
+    return false
+end
+
+local function applyBodyPartPatch(enable)
+    if patch("bodyPart", enable) then
+        mwse.log(enable and "[mwwarnsuppression] 'Not able to find <BodyPart> part' warnings suppressed."
+            or "[mwwarnsuppression] Body part warnings restored.")
     end
 end
 
@@ -75,40 +124,14 @@ local function sanitizeWarningsFile()
 end
 
 local function applyShutdownPatch(enable)
-    if enable then
-        if not origBytes.texture then
-            origBytes.texture = mwse.memory.readBytes({ address = 0x483DF6, length = 2 })
-            origBytes.nif = mwse.memory.readBytes({ address = 0x4EDE64, length = 6 })
-            origBytes.kf = mwse.memory.readBytes({ address = 0x4EDF44, length = 6 })
-        end
-        -- Patch 1: Bypass texture cache shutdown refcount loop at 0x483DF6
-        mwse.memory.writeBytes{
-            address = 0x483DF6,
-            bytes = { 0xEB, 0x48 },
-        }
-        -- Patch 2: Bypass ModelLoader NIF file dump at 0x4EDE64
-        mwse.memory.writeBytes{
-            address = 0x4EDE64,
-            bytes = { 0xE9, 0xD3, 0x00, 0x00, 0x00, 0x90 },
-        }
-        -- Patch 3: Bypass ModelLoader KF file dump at 0x4EDF44
-        mwse.memory.writeBytes{
-            address = 0x4EDF44,
-            bytes = { 0xE9, 0xF4, 0x00, 0x00, 0x00, 0x90 },
-        }
-        sanitizeWarningsFile()
-        mwse.log("[mwwarnsuppression] Memory patches applied: shutdown texture and model cache dumps suppressed.")
-    else
-        if origBytes.texture then
-            mwse.memory.writeBytes{ address = 0x483DF6, bytes = origBytes.texture }
-        end
-        if origBytes.nif then
-            mwse.memory.writeBytes{ address = 0x4EDE64, bytes = origBytes.nif }
-        end
-        if origBytes.kf then
-            mwse.memory.writeBytes{ address = 0x4EDF44, bytes = origBytes.kf }
-        end
-        mwse.log("[mwwarnsuppression] Memory patches reverted: Shutdown cache warnings restored.")
+    local changed = false
+    for _, name in ipairs({ "texture", "nif", "kf" }) do
+        changed = patch(name, enable) or changed
+    end
+    if enable then sanitizeWarningsFile() end
+    if changed then
+        mwse.log(enable and "[mwwarnsuppression] Shutdown texture and model cache dumps suppressed."
+            or "[mwwarnsuppression] Shutdown cache warnings restored.")
     end
 end
 

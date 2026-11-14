@@ -2,7 +2,7 @@ local config = require("mweffectinspector.config")
 local inspector = require("mweffectinspector.inspector")
 
 local template = mwse.mcm.createTemplate("Effect Inspector")
-template:saveOnClose("mweffectinspector", config)
+template.onClose = function() config.save() end   -- not saveOnClose: config holds functions
 
 local page = template:createSideBarPage({
     label = "Settings",

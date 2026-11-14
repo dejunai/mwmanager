@@ -2,100 +2,127 @@ local CONFIG_NAME = "mwpluginpatches"
 
 local config = {}
 
---- Checks if Morrowind Comes Alive is active.
+-- Dynamic plugin active / installed checks
 function config.isMcaActive()
-    return tes3.isModActive("MCA.esm")
-        or tes3.findGlobal("MCA_Loaded") ~= nil
-        or (tes3.getObject("MCA_setup") ~= nil)
+    return tes3.isModActive("MCA.esm") or tes3.findGlobal("MCA_Loaded") ~= nil or tes3.getScript("MCA_setup") ~= nil
 end
 
---- Checks if Ebonheart Underworks is active.
 function config.isEbonheartUnderworksActive()
-    return tes3.isModActive("Ebonheart_Underworks.esp")
-        or tes3.findGlobal("dd19rebirthConfig") ~= nil
-        or (tes3.getObject("dd19_rebirthConfigScript") ~= nil)
+    return tes3.isModActive("Ebonheart_Underworks.esp") or tes3.findGlobal("dd19rebirthConfig") ~= nil or tes3.getScript("dd19_rebirthConfigScript") ~= nil
 end
 
---- Checks if Privileges & Services (P&S) is active.
 function config.isPsGuardActive()
     return tes3.isModActive("Privileges and Services.esp")
         or tes3.isModActive("Privileges&Services 1.1.esp")
         or tes3.isModActive("Privileges&Services - Improvement Patch.esp")
-        or tes3.isModActive("Privileges&Services - Bugs Patch only.esp")
-        or (tes3.findGlobal("ABM_ll_GuardCallCell") ~= nil)
-        or (tes3.getObject("ABM_ll_DetectPCCrimeScript") ~= nil)
+        or tes3.findGlobal("ABM_ll_GuardCallCell") ~= nil
+        or tes3.getScript("ABM_ll_DetectPCCrimeScript") ~= nil
 end
 
---- Checks if YARR (Yet Another Race Revamp / Ysmir's Shield) is active.
 function config.isYsmirActive()
     return tes3.isModActive("YARR - yet another race revamp v1.2.ESP")
         or tes3.isModActive("YARR.esp")
-        or (tes3.getObject("exo_nord_ysmirshield") ~= nil)
+        or tes3.getObject("exo_nord_ysmirshield") ~= nil
 end
 
-local defaults = {
-    -- 1. AutoStartup - MCA
-    mcaEnabled = config.isMcaActive(),
-    mcaCompanions = true,            -- Enable companions & recruitment
-    mcaCourtesans = "all",           -- "all" (both), "none" (disabled), "female" (female only), "male" (male only)
-    mcaHostileDrunks = true,         -- Angry tavern patrons / hostile drunks
-    mcaRespawnCaves = true,          -- Respawning hostile NPCs in caves & ruins
-    mcaBanditAttacksTowns = true,    -- Bandit attacks on towns
-    mcaHostileAshlanders = true,     -- Angry Ashlanders at outcast campsites
-    mcaCrossroadBandits = true,      -- Bandits / highwaymen at crossroads
-    mcaPartySize = 0,                -- 0 = 2-5 enemies (default), 1 = 2-10, 2 = 2-20
+function config.isFriendsAndFrensActive()
+    return tes3.isModActive("Friends & Frens - base.esm")
+        or tes3.isModActive("Friends & Frens - Vvardenfell.ESP")
+        or tes3.isModActive("Friends & Frens - TR.ESP")
+        or tes3.isModActive("Friends and Frens.ESP")
+        or tes3.isModActive("Friends and Frens - Jiub.esp")
+        or tes3.getObject("aa_comp_jiub") ~= nil
+end
 
-    -- 2. AutoStartup - Ebonheart Underworks
-    euEnabled = config.isEbonheartUnderworksActive(),
-    euRebirth = false,               -- false = No Rebirth (default)
-    euThiefBranch = false,           -- false = Standard TG requirement, true = Any class
+function config.isLostHeirActive()
+    return tes3.isModActive("t_lostheir.esp")
+        or tes3.isModActive("LostHeir.esp")
+end
 
-    -- 3. Privileges & Services Guard Call Fix
-    psGuardFixEnabled = config.isPsGuardActive(),
+-- Resolve dynamic defaults based on whether target plugin is active in load order
+local function getDynamicDefaults()
+    local mca = config.isMcaActive()
+    local eu = config.isEbonheartUnderworksActive()
+    local ps = config.isPsGuardActive()
+    local ysmir = config.isYsmirActive()
+    local fnf = config.isFriendsAndFrensActive()
+    local lostHeir = config.isLostHeirActive()
 
-    -- 4. Ysmir Combat Shield (YARR Nord Bubble Fix)
-    ysmirShieldEnabled = config.isYsmirActive(),
+    return {
+        -- AutoStartup: Morrowind Comes Alive
+        mcaEnabled = mca,
+        mcaCompanions = false,
+        mcaCourtesans = "none",
+        mcaHostileDrunks = false,
+        mcaRespawnCaves = false,
+        mcaBanditAttacksTowns = false,
+        mcaHostileAshlanders = false,
+        mcaCrossroadBandits = false,
+        mcaPartySize = 0,
 
-    -- Diagnostics
-    debugMode = false,
-}
+        -- AutoStartup: Ebonheart Underworks
+        euEnabled = eu,
+        euRebirth = false,
+        euThiefBranch = false,
 
--- Load existing mwpluginpatches config or migrate from AutoStartupConfig
-local loaded = mwse.loadConfig(CONFIG_NAME)
-if not loaded then
-    loaded = {}
+        -- Privileges & Services Guard Cell Fix
+        psGuardFixEnabled = ps,
+
+        -- Ysmir Combat Shield (YARR)
+        ysmirShieldEnabled = ysmir,
+
+        -- Friends & Frens Jiub Companion Delay
+        jiubDelayEnabled = fnf,
+        jiubDelayMinutes = 5,
+        jiubSyncAppearance = true,
+        jiubExcludeCensusOffice = true,
+
+        -- The Lost Heir Delayer
+        lostHeirDelayEnabled = lostHeir,
+    }
+end
+
+local loadedConfig = mwse.loadConfig(CONFIG_NAME)
+local dynamicDefaults = getDynamicDefaults()
+
+if loadedConfig == nil then
+    loadedConfig = {}
+    -- Migrate settings from legacy configs if they existed
     local oldAuto = mwse.loadConfig("AutoStartupConfig")
     if oldAuto then
         for k, v in pairs(oldAuto) do
-            loaded[k] = v
+            loadedConfig[k] = v
         end
     end
-end
-
--- Merge with dynamic defaults
-for k, v in pairs(defaults) do
-    if loaded[k] == nil then
-        loaded[k] = v
+    local oldFnf = mwse.loadConfig("FriendsAndFrensJiubDelay")
+    if oldFnf then
+        if oldFnf.enabled ~= nil then loadedConfig.jiubDelayEnabled = oldFnf.enabled end
+        if oldFnf.delayMinutes ~= nil then loadedConfig.jiubDelayMinutes = oldFnf.delayMinutes end
+        if oldFnf.syncAppearance ~= nil then loadedConfig.jiubSyncAppearance = oldFnf.syncAppearance end
+        if oldFnf.excludeCensusOffice ~= nil then loadedConfig.jiubExcludeCensusOffice = oldFnf.excludeCensusOffice end
     end
 end
 
--- Re-sync default-to-disabled if plugin is not installed and user hasn't explicitly saved
-if not config.isMcaActive() and loaded.mcaEnabled == nil then
-    loaded.mcaEnabled = false
-end
-if not config.isEbonheartUnderworksActive() and loaded.euEnabled == nil then
-    loaded.euEnabled = false
-end
-if not config.isPsGuardActive() and loaded.psGuardFixEnabled == nil then
-    loaded.psGuardFixEnabled = false
-end
-if not config.isYsmirActive() and loaded.ysmirShieldEnabled == nil then
-    loaded.ysmirShieldEnabled = false
+-- Merge with dynamic defaults so newly active plugins default on
+for k, v in pairs(dynamicDefaults) do
+    if loadedConfig[k] == nil then
+        loadedConfig[k] = v
+    end
 end
 
-mwse.saveConfig(CONFIG_NAME, loaded)
+-- Copy into config table
+for k, v in pairs(loadedConfig) do
+    config[k] = v
+end
 
--- Attach helper methods to returned config table
-setmetatable(loaded, { __index = config })
+function config.save()
+    local toSave = {}
+    for k, v in pairs(config) do
+        if type(v) ~= "function" then
+            toSave[k] = v
+        end
+    end
+    mwse.saveConfig(CONFIG_NAME, toSave)
+end
 
-return loaded
+return config
