@@ -412,6 +412,9 @@ def detect_vortex_downloads() -> Path | None:
     try:
         import mwdialog_paths
         mwdialog_paths.clear_vortex_settings_cache()                # Vortex may have changed since the GUI started
+        mastercheck = sys.modules.get("mwdialog_mastercheck")       # its staging index / master profiles too
+        if mastercheck is not None and hasattr(mastercheck, "clear_caches"):
+            mastercheck.clear_caches()
         found = mwdialog_paths.resolve_downloads(required=False)
         if found:
             return Path(found)

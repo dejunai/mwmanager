@@ -2731,8 +2731,8 @@ def content_rules(plugins):
 
 
 def sort_rule_sources(args, plugins, quiet=False):
-    """The rule sets --sort uses, highest priority first: your rules file, the content rules, then
-    mlox_user.txt and mlox_base.txt. Returns (rule_sets, {file basename: path})."""
+    """The rule sets --sort uses, highest priority first: your rules file, the content rules, upstream's
+    built-in rules (BUILTIN_RULES), then mlox_user.txt and mlox_base.txt. Returns (rule_sets, {file: path})."""
     game_dir = os.path.dirname(os.path.abspath(args.data_dir))
     rules_path = manager_file(RULES_FILE)
     sources = [rules_path]
@@ -2753,6 +2753,7 @@ def sort_rule_sources(args, plugins, quiet=False):
             rule_sets.append(parse_rules(s, DEFAULT_RULES)[0])
         else:
             rule_sets.append([])
+    rule_sets.insert(1, builtin_rules())
     if not getattr(args, "no_content_order", False):
         if not quiet:
             print("  Reading plugins to find patches that must follow the mods they change...", file=sys.stderr)
@@ -2792,6 +2793,7 @@ def run_sort(args, plugins):
                   + (f", {sum(ign.values())} other rule(s) ignored" if ign else ""))
         rule_sets.append(rules)
         ignored += ign
+    rule_sets.insert(1, builtin_rules())         # after your rules file, before mlox's
     mine = [b for b in BAD_RULE_ENTRIES if os.path.normcase(b[0]) == os.path.normcase(rules_path)]
     for src, no, entry in BAD_RULE_ENTRIES:
         if (src, no, entry) not in mine:

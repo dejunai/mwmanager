@@ -150,3 +150,22 @@ Behaviour changes:
 - The Lua check is upstream's (`tools\luajit\` is passed); its patches are journaled in Tidy's journal, originals
   under `backups\luafix\`. The old `outputs\mwmanager_luafix_journal.jsonl` is still undone by `--undo`.
 - Upstream reads "Data Files next to the script"; MWManager rebinds that to `--game-data-files` at compose time.
+
+## Steam utility sync: refactor 2 and review fixes — 2026-11-14, 08:30 (Pacific)
+
+- Upstream: dejunai/morrowind-conflict-tools @30be84a (Cursor's refactor 2 plus the review fixes; see
+  `tools\steam-upstream\MWDIALOG_REFACTOR2.md` section 9). Backup of every file this sync replaced:
+  `_backup\pre-r2-sync-<stamp>\` (`SHA256SUMS.txt`, `ROLLBACK.ps1`).
+- Copied into both the root and `tools\steam-upstream\`: `mwdialog_check.py`, `mwdialog_mastercheck.py`,
+  `mwdialog_records.py`, `mwdialog_cellmods.py`. Snapshot only: `README.md`, `MWDIALOG_REFACTOR2.md`, the mwguard,
+  mwperformers and mwstranded `main.lua`, and the upstream tests `test_check.py`, `test_mastercheck.py`,
+  `test_paths.py`, `test_major_masters.py`. `COPY_MANIFEST.json` and `UPSTREAM.json` refreshed; user-state
+  records keep their earlier snapshot.
+- What changes for MWManager: leveled lists keep other mods' levels; a same-size master is "other version" at
+  most unless the misses are overwhelming; large plugins find their downloaded original (archive cache v2, rebuilt
+  once); Patch for Purists is a major master.
+- MWManager changes: `Patch for Purists.esm` is first in `core_addons.BUILTIN_MASTERS` and
+  `mwmanager_core_addons.json` (it loads right after `Bloodmoon.esm`, before Tamriel_Data, TR, OAAB, ...);
+  `mwmanager_overrides.sort_rule_sources` / `run_sort` add upstream's `builtin_rules()` like upstream does;
+  `mwmanager_gui.detect_vortex_downloads` also calls `mwdialog_mastercheck.clear_caches()`. Test:
+  `tests\test_core_master_order.py`.

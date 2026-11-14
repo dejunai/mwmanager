@@ -1,4 +1,7 @@
 {
+  "patch for purists.esm": [
+    "patch for purists"
+  ],
   "tamriel_data.esm": [
     "tamriel data",
     "tamriel_data"

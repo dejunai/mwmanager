@@ -14,6 +14,8 @@ from pathlib import Path
 
 # Extend through mwmanager_core_addons.json as more community masters are identified.
 BUILTIN_MASTERS = {
+    # Patch for Purists (the unofficial patch) loads right after Bloodmoon.esm, before every other master
+    "patch for purists.esm": ("patch for purists",),
     "tamriel_data.esm": ("tamriel data", "tamriel_data"),
     "tr_mainland.esm": ("tamriel rebuilt", "tamrielrebuild"),
     "oaab_data.esm": ("oaab_data", "oaab data"),
