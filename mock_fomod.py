@@ -1041,7 +1041,8 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         return hidden_required
     try:
         import tkinter as tk
-        from tkinter import messagebox, ttk
+        from tkinter import ttk
+        import mwmanager_dialogs as messagebox
     except ImportError:
         print("Tk is unavailable; option selection was left unchanged.")
         return None

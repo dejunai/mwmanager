@@ -16,8 +16,11 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import ttk
 import tkinter as tk
+
+import mwmanager_dialogs as messagebox  # themed prompts
+from mwmanager_theme import FONTS, apply_theme, center
 
 APP_NAME = "MWManager"
 APP_VERSION = "0.1.0"
@@ -69,7 +72,7 @@ def _read_key(manager_dir: Path) -> str:
 def _ask_key(manager_dir: Path) -> str:
     global _SESSION_KEY, _KEY_PROMPTED
     _KEY_PROMPTED = True
-    key = simpledialog.askstring(
+    key = messagebox.askstring(
         "Nexus Mods API key",
         "MWManager can check this Nexus-linked mod for updates. Enter your personal Nexus API key. "
         "It will be encrypted for this Windows account and used only when you start a mod install.",
@@ -265,16 +268,17 @@ def _offer(mod: dict, candidate: dict, changelog: str,
     """Show details and return True after an approved update was downloaded."""
     root = tk.Tk()
     root.withdraw()
+    apply_theme(root)
     try:
         dialog = tk.Toplevel(root)
         dialog.title(f"MWManager update — {mod['name']}")
-        dialog.geometry("680x500" if changelog else "560x190")
+        center(dialog, None, *((680, 500) if changelog else (560, 190)))
         dialog.transient(root)
         dialog.grab_set()
         title = candidate.get("name") or candidate.get("file_name") or "Latest Nexus file"
         version = candidate.get("version", "")
         ttk.Label(dialog, text=f"Update available for {mod['name']}",
-                  font=("Segoe UI", 11, "bold")).pack(anchor="w", padx=12, pady=(12, 4))
+                  font=FONTS["h2"]).pack(anchor="w", padx=12, pady=(12, 4))
         ttk.Label(dialog, text=f"Current: {mod.get('version') or ', '.join(sorted(mod['file_ids'])) or 'unknown'}    "
                   f"Available: {version or title}", wraplength=640).pack(anchor="w", padx=12, pady=3)
         if changelog:
@@ -378,14 +382,15 @@ def _offer_targeted_patches(mod: dict, files: list[dict], target_version: str,
         return False
     root = tk.Tk()
     root.withdraw()
+    apply_theme(root)
     try:
         dialog = tk.Toplevel(root)
         dialog.title(f"Compatible patches — {mod['name']}")
-        dialog.geometry("740x440")
+        center(dialog, None, 740, 440)
         dialog.transient(root)
         dialog.grab_set()
         ttk.Label(dialog, text=f"Nexus lists optional patches or hotfixes for {mod['name']} {target_version}.",
-                  wraplength=700, font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=12, pady=(12, 8))
+                  wraplength=700, font=FONTS["bold"]).pack(anchor="w", padx=12, pady=(12, 8))
         ttk.Label(dialog, text="Select any files to include with this version. MWManager will download them into the Vortex downloads folder.",
                   wraplength=700).pack(anchor="w", padx=12, pady=(0, 8))
         body = ttk.Frame(dialog)

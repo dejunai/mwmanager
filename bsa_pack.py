@@ -62,7 +62,7 @@ def plugin_folder_name(mod_dir: Path) -> str:
 def ask_to_pack(count: int) -> bool:
     try:
         import tkinter as tk
-        from tkinter import messagebox
+        import mwmanager_dialogs as messagebox
         root = tk.Tk()
         root.withdraw()
         answer = messagebox.askyesno(

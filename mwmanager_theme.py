@@ -9,6 +9,7 @@ Public API (used by mwmanager_gui.py and mock_fomod.py):
   FONTS         font tuples, resolved to installed families by apply_theme()
   SPACE         spacing scale in pixels
   apply_theme   configure ttk styles, named fonts and classic-widget defaults on a root
+  center        place a window over the window that opened it, or in the middle of the desktop
 """
 
 from __future__ import annotations
@@ -237,6 +238,29 @@ def apply_theme(root: tk.Misc) -> ttk.Style:
 
     root.bind_all("<Map>", darken_dialog, add="+")
     return style
+
+
+def center(window: tk.Misc, parent: tk.Misc | None = None, width: int | None = None,
+           height: int | None = None) -> None:
+    """Centre `window` over `parent`'s window when that is on screen, else on the desktop, and keep it on screen.
+    Without a size the window's own requested size is used (call this after its contents are built)."""
+    window.update_idletasks()
+    width = width or window.winfo_reqwidth()
+    height = height or window.winfo_reqheight()
+    screen_w, screen_h = window.winfo_screenwidth(), window.winfo_screenheight()
+    x, y = (screen_w - width) // 2, (screen_h - height) // 2
+    if parent is not None:
+        try:
+            top = parent.winfo_toplevel()
+            top.update_idletasks()
+            if top.winfo_viewable():
+                x = top.winfo_rootx() + (top.winfo_width() - width) // 2
+                y = top.winfo_rooty() + (top.winfo_height() - height) // 2
+        except tk.TclError:
+            pass
+    x = max(0, min(x, screen_w - width))
+    y = max(0, min(y, screen_h - height))
+    window.geometry(f"{width}x{height}+{x}+{y}")
 
 
 def tree_tags(tree: ttk.Treeview) -> None:

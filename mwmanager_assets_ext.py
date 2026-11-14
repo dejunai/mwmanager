@@ -12,6 +12,7 @@ import os
 import re
 import shutil
 import sys
+import tempfile
 import time
 
 _scanner = sys.modules["mwdialog_check"]
@@ -286,7 +287,7 @@ def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
             if backup_callback:
                 backup_callback(pp, data)
             else:
-                bak = os.path.join(root, "Off", os.path.splitext(plugin_name)[0], "Reprocessed filenames",
+                bak = os.path.join(root, "Off", os.path.splitext(pf)[0], "Reprocessed filenames",
                                    os.path.splitext(pf)[0], pf + ".bak_ascii")
                 os.makedirs(os.path.dirname(bak), exist_ok=True)
                 if not os.path.exists(bak):

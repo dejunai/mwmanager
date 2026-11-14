@@ -14,9 +14,11 @@ import sys
 import threading
 import time
 import tkinter as tk
-from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter import filedialog, ttk
 
-from mwmanager_theme import COLORS, FONTS, SPACE, apply_theme, tree_tags
+import mwmanager_dialogs as messagebox  # themed prompts
+
+from mwmanager_theme import COLORS, FONTS, SPACE, apply_theme, center, tree_tags
 
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_FILE = APP_DIR / "mwmanager_gui_settings.json"
@@ -204,14 +206,7 @@ def _remove_ready_plugin_stage(package: Path) -> None:
 
 def center_window(window, parent, width: int, height: int) -> None:
     """Center a Tk window over its parent and keep it within the screen."""
-    window.update_idletasks()
-    parent.update_idletasks()
-    screen_w, screen_h = window.winfo_screenwidth(), window.winfo_screenheight()
-    x = parent.winfo_rootx() + (parent.winfo_width() - width) // 2
-    y = parent.winfo_rooty() + (parent.winfo_height() - height) // 2
-    x = max(0, min(x, screen_w - width))
-    y = max(0, min(y, screen_h - height))
-    window.geometry(f"{width}x{height}+{x}+{y}")
+    center(window, parent, width, height)
 
 
 def disabled_plugins_dir() -> Path:
@@ -833,7 +828,7 @@ class ManagerGUI(tk.Tk):
         self.title("MWManager")
         self._active_job = None
         self.protocol("WM_DELETE_WINDOW", self._on_close)
-        self.geometry("900x620")
+        center(self, None, 900, 620)                     # the main window: middle of the desktop
         self.minsize(760, 500)
         self.settings = read_settings()
         self.gui_state = read_gui_state()
@@ -989,6 +984,7 @@ class ManagerGUI(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("MWManager: confirm detected paths")
         dialog.transient(self)
+        dialog.after_idle(lambda: center(dialog, self))    # sized by its contents: placed once they are built
         dialog.grab_set()
         dialog.resizable(False, False)
         form = ttk.Frame(dialog, padding=14)
@@ -1090,7 +1086,7 @@ class ManagerGUI(tk.Tk):
 
     def _offer_major_master_processing(self):
         """Ask before scanning downloads or opening the major-master workflow."""
-        from tkinter import messagebox
+        import mwmanager_dialogs as messagebox
         data_dir = Path(self.settings["game_dir"]) / "Data Files"
         installed = {name.casefold() for name in self.major_masters if (data_dir / name).is_file()}
         staged = self._staged_major_master_names()
@@ -1906,7 +1902,7 @@ class ManagerGUI(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("Remove Installed Plugins")
         dialog.transient(self)
-        dialog.geometry("760x420")
+        center_window(dialog, self, 760, 420)
         dialog.minsize(620, 320)
         frame = ttk.Frame(dialog, padding=12)
         frame.pack(fill="both", expand=True)
@@ -2436,7 +2432,7 @@ class ManagerGUI(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("Major Masters")
         dialog.transient(self)
-        dialog.geometry("780x680")
+        center_window(dialog, self, 780, 680)
         dialog.minsize(680, 600)
         masters = list(self.major_masters)
         try:
@@ -2532,7 +2528,7 @@ class ManagerGUI(tk.Tk):
                 self.unstage_master_button.state(["!disabled"] if ready else ["disabled"])
 
         def unstage_selected():
-            from tkinter import messagebox
+            import mwmanager_dialogs as messagebox
             import shutil
             from major_master_deploy import staged_masters
             selection = tree.selection()
@@ -2616,7 +2612,7 @@ class ManagerGUI(tk.Tk):
             tree.see(name)
 
         def add_master():
-            name = simpledialog.askstring("Add major master", "Master filename (must end in .esm):", parent=dialog)
+            name = messagebox.askstring("Add major master", "Master filename (must end in .esm):", parent=dialog)
             if name is None:
                 return
             name = name.strip()
@@ -2746,7 +2742,7 @@ class ManagerGUI(tk.Tk):
 
     def deploy_major_masters(self, *, _preflight_done=False):
         """Confirm deployment policy, then hardlink staged major masters into Data Files."""
-        from tkinter import messagebox
+        import mwmanager_dialogs as messagebox
         from major_master_deploy import staged_masters
 
         if not _preflight_done:
@@ -2854,7 +2850,7 @@ class ManagerGUI(tk.Tk):
 
     def remove_deployed_major_masters(self):
         """Remove only masters deployed by MWManager and restore replaced files."""
-        from tkinter import messagebox
+        import mwmanager_dialogs as messagebox
         from major_master_deploy import tracked_deployment_masters
 
         data_dir = Path(self.settings["game_dir"]) / "Data Files"
@@ -2905,7 +2901,8 @@ class ManagerGUI(tk.Tk):
 
     def _resolve_major_master_conflicts(self, conflicts):
         """Summarize DB conflicts and offer optional, severity-filtered batches."""
-        from tkinter import messagebox, ttk
+        from tkinter import ttk
+        import mwmanager_dialogs as messagebox
         if not conflicts:
             return
 
@@ -2931,7 +2928,7 @@ class ManagerGUI(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("Major-master record conflicts")
         dialog.transient(self)
-        dialog.geometry("900x620")
+        center_window(dialog, self, 900, 620)
         dialog.minsize(760, 500)
         outer = ttk.Frame(dialog, padding=12)
         outer.pack(fill="both", expand=True)
@@ -3409,7 +3406,7 @@ class ManagerGUI(tk.Tk):
                                      if name.casefold() not in installed_or_staged
                                      and name.casefold() not in detected_masters]
                 if missing_downloads:
-                    from tkinter import messagebox
+                    import mwmanager_dialogs as messagebox
                     listing = "\n".join(missing_downloads[:10])
                     extra = len(missing_downloads) - min(10, len(missing_downloads))
                     if extra:
@@ -3449,7 +3446,7 @@ class ManagerGUI(tk.Tk):
                                    if not (Path(self.settings["game_dir"]) / "Data Files" / name).is_file()
                                    and name.casefold() not in self._staged_major_master_names()]
                     if missing_now:
-                        from tkinter import messagebox
+                        import mwmanager_dialogs as messagebox
                         listing = "\n".join(missing_now[:12])
                         extra = len(missing_now) - min(12, len(missing_now))
                         if extra:
@@ -3609,6 +3606,7 @@ class ManagerGUI(tk.Tk):
         dialog = tk.Toplevel(self)
         dialog.title("MWManager Options")
         dialog.transient(self)
+        dialog.after_idle(lambda: center(dialog, self))    # sized by its contents: placed once they are built
         dialog.grab_set()
         dialog.resizable(False, False)
         form = ttk.Frame(dialog, padding=14)

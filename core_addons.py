@@ -311,8 +311,12 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
     readiness()
     try:
         import tkinter as tk
-        from tkinter import messagebox, ttk
+        from tkinter import ttk
+        import mwmanager_dialogs as messagebox
+        from mwmanager_theme import COLORS, FONTS, apply_theme
         root = tk.Toplevel(parent) if parent is not None else tk.Tk()
+        if parent is None:
+            apply_theme(root)                       # run on its own: no main window has themed it
         root.title("Review major masters")
         if parent is not None:
             root.transient(parent)
@@ -321,7 +325,7 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         outer = ttk.Frame(root, padding=12)
         outer.pack(fill="both", expand=True)
         ttk.Label(outer, text="Every configured major master was checked before installation.",
-                  font=("Segoe UI", 11, "bold")).pack(anchor="w")
+                  font=FONTS["h2"]).pack(anchor="w")
         ttk.Label(outer, text="Double-click a ready row or select it and press Space to skip it. Missing dependencies and unavailable archives are shown in red. "
                   "A master cannot be disabled while an enabled master depends on it. This review makes no file changes.",
                   wraplength=810).pack(anchor="w", pady=(4, 10))
@@ -336,11 +340,11 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         tree.column("use", width=75, anchor="center", stretch=False)
         tree.column("status", width=145, stretch=False)
         tree.column("requires", width=360)
-        tree.tag_configure("ready", foreground="#137333")
-        tree.tag_configure("missing", foreground="#b3261e")
-        tree.tag_configure("disabled", foreground="#666666")
-        tree.tag_configure("installed", foreground="#137333")
-        tree.tag_configure("required", foreground="#1a73e8")
+        tree.tag_configure("ready", foreground=COLORS["green"])
+        tree.tag_configure("missing", foreground=COLORS["red"])
+        tree.tag_configure("disabled", foreground=COLORS["muted"])
+        tree.tag_configure("installed", foreground=COLORS["green"])
+        tree.tag_configure("required", foreground=COLORS["blue"])
         tree.grid(row=0, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")

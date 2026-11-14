@@ -120,7 +120,7 @@ def ensure_mlox_rules(game_dir=None, *, dry_run=False, yes=False, disabled=False
             use_rules = answer in {"y", "yes"}
         else:
             try:
-                import tkinter.messagebox as messagebox
+                import mwmanager_dialogs as messagebox
                 import tkinter as tk
                 prompt_root = tk.Tk()
                 prompt_root.withdraw()
@@ -187,16 +187,20 @@ def show_download_interface(items, title="MWManager prerequisites"):
     try:
         import tkinter as tk
         import webbrowser
+        from tkinter import ttk
+        from mwmanager_theme import apply_theme, center
         root = tk.Tk()
+        apply_theme(root)
         root.title(title)
         root.resizable(False, False)
-        frame = tk.Frame(root, padx=18, pady=14)
+        frame = ttk.Frame(root, padding=(18, 14))
         frame.pack(fill="both", expand=True)
         for heading, detail, url in items:
-            tk.Label(frame, text=heading, font=("Segoe UI", 10, "bold"), anchor="w").pack(fill="x", pady=(4, 0))
-            tk.Label(frame, text=detail, justify="left", anchor="w", wraplength=540).pack(fill="x", pady=(1, 2))
-            tk.Button(frame, text="Open download page", command=lambda u=url: webbrowser.open(u)).pack(anchor="e", pady=(0, 5))
-        tk.Button(frame, text="Close", command=root.destroy).pack(anchor="e", pady=(6, 0))
+            ttk.Label(frame, text=heading, style="H3.TLabel", anchor="w").pack(fill="x", pady=(4, 0))
+            ttk.Label(frame, text=detail, justify="left", anchor="w", wraplength=540).pack(fill="x", pady=(1, 2))
+            ttk.Button(frame, text="Open download page", command=lambda u=url: webbrowser.open(u)).pack(anchor="e", pady=(0, 5))
+        ttk.Button(frame, text="Close", command=root.destroy).pack(anchor="e", pady=(6, 0))
+        center(root)
         root.mainloop()
     except Exception as exc:
         print(f"(Could not open the prerequisite window: {exc})")
@@ -271,7 +275,7 @@ def offer_mwse_update(game_dir, *, dry_run=False, yes=False):
     else:
         try:
             import tkinter as tk
-            from tkinter import messagebox
+            import mwmanager_dialogs as messagebox
             root = tk.Tk()
             root.withdraw()
             answer = messagebox.askyesno(
