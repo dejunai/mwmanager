@@ -1,16 +1,16 @@
 ﻿{
-    "SyncedAt":  "2026-11-14T08:45:00",
+    "SyncedAt":  "2026-11-14T09:10:00",
     "TimeZone":  "America/Los_Angeles",
     "SourceRoot":  "\u003cSteam Morrowind\u003e = the Steam Morrowind install root",
-    "FileSetGuide":  "public repo dejunai/morrowind-conflict-tools @08ca20d; mwdialog_check.rules.txt from the Steam root (with the Patch for Purists rule)",
+    "FileSetGuide":  "public repo dejunai/morrowind-conflict-tools @874c069; mwdialog_check.rules.txt from the Steam root (cleaned: [Near*] blocks order their plugins)",
     "Excluded":  "game data, plans, logs, backups, caches, Morrowind.ini, mlox, tools\\luajit binaries; user-state records (load order, rules, answers, added masters, cell winners, generated lists, mwguard.json) keep their 06:59 snapshot; chargen_ship_patch.py and stranded_doors_patch.py were retired upstream (_backup\\retired-one-off-20261114) and are not in the snapshot",
     "Files":  [
                   {
                       "RelativePath":  "CHANGES.md",
-                      "Bytes":  42802,
-                      "SHA256":  "9da1ae7827360b1c108379818cfa401d93da40a96fa1ce57880993de558627c5",
+                      "Bytes":  43946,
+                      "SHA256":  "aa9d61acf3c198bf22cd857da7d7af02dcac718ea73e5ab21755752680fc81c8",
                       "Source":  "\u003cSteam Morrowind\u003e\\CHANGES.md",
-                      "SourceModified":  "2026-11-14T06:51:20"
+                      "SourceModified":  "2026-11-14T09:08:52"
                   },
                   {
                       "RelativePath":  "Data Files\\MWSE\\config\\mwguard.json",
@@ -133,17 +133,17 @@
                   },
                   {
                       "RelativePath":  "mwdialog_check.py",
-                      "Bytes":  487779,
-                      "SHA256":  "d28b037e576c352c9e94d454e30066e4239ba56794de3e45e55424c20cc8253e",
+                      "Bytes":  489852,
+                      "SHA256":  "9d3bad0f9a8d9463415cb646afc6b57ac0796cd225302e875a1d28532c26ee4b",
                       "Source":  "\u003cSteam Morrowind\u003e\\mwdialog_check.py",
-                      "SourceModified":  "2026-11-14T08:41:08"
+                      "SourceModified":  "2026-11-14T09:08:52"
                   },
                   {
                       "RelativePath":  "mwdialog_check.rules.txt",
-                      "Bytes":  88915,
-                      "SHA256":  "939e2e9289bff663d0589a3b143203852e897d127d74fc8cc2f7016acc9b7025",
+                      "Bytes":  88811,
+                      "SHA256":  "55b7687ea01e5473e0f3610ea2fc4abc1d4dfb48f69f95ed0f22b72a7419b143",
                       "Source":  "\u003cSteam Morrowind\u003e\\mwdialog_check.rules.txt",
-                      "SourceModified":  "2026-11-14T08:41:08"
+                      "SourceModified":  "2026-11-14T09:08:52"
                   },
                   {
                       "RelativePath":  "mwdialog_conflict_answers.json",
@@ -357,10 +357,10 @@
                   },
                   {
                       "RelativePath":  "README.md",
-                      "Bytes":  9373,
-                      "SHA256":  "ffe03b4d740470f72f26b3bcb522900edfae16a8fcf37107fbdeb37759da0e2c",
+                      "Bytes":  9522,
+                      "SHA256":  "b5a4605b42d41c621fbefafea97d6972aa950431fb2b1ee6fcab8318a928eb42",
                       "Source":  "\u003cSteam Morrowind\u003e\\README.md",
-                      "SourceModified":  "2026-11-14T07:39:04"
+                      "SourceModified":  "2026-11-14T09:08:52"
                   },
                   {
                       "RelativePath":  "tools\\README.md",
@@ -564,6 +564,13 @@
                       "SHA256":  "ddb9e87558f26b87e4c169a321b383b8c834899c571b80ea91d75d3595046f48",
                       "Source":  "\u003cSteam Morrowind\u003e\\tests\\test_rules_pfp.py",
                       "SourceModified":  "2026-11-14T08:41:08"
+                  },
+                  {
+                      "RelativePath":  "tests\\test_near_order.py",
+                      "Bytes":  6326,
+                      "SHA256":  "f4148cf4b337c206b8036a7c8045072b23264a7674d04d264240cfd0b108990b",
+                      "Source":  "\u003cSteam Morrowind\u003e\\tests\\test_near_order.py",
+                      "SourceModified":  "2026-11-14T09:08:52"
                   }
               ]
 }

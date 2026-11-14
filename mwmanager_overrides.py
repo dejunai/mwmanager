@@ -1198,10 +1198,9 @@ def run_cell_conflicts(args, plugins, collect=False):
     shown = ranked if args.conflict_all else ranked[:args.conflict_top]
     remembered = read_conflict_answers(os.path.dirname(os.path.abspath(args.data_dir)))
     _rp = os.path.join(os.path.dirname(os.path.abspath(args.data_dir)), RULES_FILE)
-    try:                                           # every [Order]/[Exact] rule in the rules file
+    try:                                           # every [Order]/[Exact]/[Near*] rule in the rules file
         _rt = open(_rp, encoding="cp1252", errors="replace").read() if os.path.exists(_rp) else ""
-        _rules = [[e.lower() for e in ents] for k, ents, _source in parse_rules(_rp, _rt)[0]
-                  if k in ("order", "exact")]
+        _rules = ordering_rules(parse_rules(_rp, _rt)[0])
     except Exception:
         _rules = []
 
@@ -1306,8 +1305,7 @@ def conflict_session(args, ranked, name_of, masters, total_new, plugins=(), labe
     # what earlier runs of this session added is replaced, not added to: this run's answers are the ones that count
     text = open(rules_path, encoding="cp1252", errors="replace").read() if os.path.exists(rules_path) else ""
     own_text, earlier = split_conflict_rules(text)
-    existing = [[e.lower() for e in ents] for k, ents, _s in parse_rules(rules_path, own_text)[0]
-                if k in ("order", "exact")]
+    existing = ordering_rules(parse_rules(rules_path, own_text)[0])
     earlier_l = {(a.lower(), b.lower()) for a, b in earlier}
     if earlier and not args.dry_run:
         # wiped before anything is read or asked: this session starts from your own rules only
@@ -2521,7 +2519,7 @@ def compute_order(plugins, rule_sets, current_order):
         all_names = names
 
     near_start, near_end = {}, {}
-    for rules in rule_sets:                      # highest priority first
+    for set_no, rules in enumerate(rule_sets):   # highest priority first; the first is your rules file
         for kind, entries, src in rules:
             notes["rules"] += 1
             if kind == "exact":
@@ -2533,14 +2531,23 @@ def compute_order(plugins, rule_sets, current_order):
                 for g in groups:
                     for n in g:
                         near_start.setdefault(n, len(near_start))
-                continue
-            if kind == "nearend":
+            elif kind == "nearend":
                 for g in groups:
                     for n in g:
                         near_end.setdefault(n, len(near_end))
+            # In your rules file (the first rule set) a [NearStart] / [NearEnd] block is also an [Order] rule
+            # for its own plugins, in the order it places them: [NearStart] as listed, [NearEnd] reversed (its
+            # first plugin loads last). So a plugin listed there needs no second [Order] entry; contradictions
+            # are skipped and reported like any [Order] step, and the plugin still goes to the start / end
+            # band. mlox's own files keep mlox's meaning (a list of priorities, not an order).
+            if kind in ("nearstart", "nearend") and set_no != 0:
                 continue
-            for (_ea, a_grp), (eb, b_grp) in zip(egroups, egroups[1:]):
-                step = notes["steps"].setdefault((src, eb), {"applied": 0, "skipped": [], "entries": entries})
+            pairs = zip(egroups, egroups[1:])
+            if kind == "nearend":
+                pairs = ((b, a) for a, b in pairs)
+            for (ea, a_grp), (eb, b_grp) in pairs:
+                step = notes["steps"].setdefault((src, max(ea, eb)), {"applied": 0, "skipped": [], "entries": entries,
+                                                                      "kind": kind})
                 for a in a_grp:
                     for b in b_grp:
                         if a == b:

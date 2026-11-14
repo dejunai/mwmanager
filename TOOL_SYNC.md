@@ -179,3 +179,13 @@ Behaviour changes:
 - MWManager: `mwmanager_overrides.py` no longer inserts a built-in rule; `mwmanager_rules.txt` has the same
   `[NearStart]` block. Patch for Purists stays first in the major-master list (the `--init` / GUI superset).
   Backup: `_backup\pre-pfp-rule-<stamp>\`.
+
+## [NearStart] / [NearEnd] as [Order] rules — 2026-11-14, 09:10 (Pacific)
+
+- Upstream @874c069: a `[Near*]` block in the user's rules file also orders its own plugins (`[NearStart]` as
+  listed, `[NearEnd]` reversed); mlox's files keep mlox's meaning. `mwdialog_check.py` (root and snapshot),
+  the snapshot's `CHANGES.md`, `README.md`, `mwdialog_check.rules.txt` (cleaned copy from the Steam root) and
+  `tests\test_near_order.py` are refreshed.
+- MWManager's own `compute_order` in `mwmanager_overrides.py` has the same change (only for the first rule set,
+  `mwmanager_rules.txt`); its `--cell-conflicts` rule checks use upstream's `ordering_rules()`. New
+  `tests\test_mwm_near_order.py`. `mwmanager_rules.txt` had no `[Order]` entry repeating a `[Near*]` one.
