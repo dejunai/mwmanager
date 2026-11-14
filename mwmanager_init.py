@@ -509,69 +509,88 @@ def lint_installed_core_mwse(game_dir, *, dry_run=False):
     return 0
 
 
+# MWManager's earlier Lua packaging under MWSE\\mods: the consolidated MWManager mod (its mwquickfixes tab,
+# its off\\legacy-standalone archive) and a standalone mwquickfixes folder. The suite replaces them.
+RETIRED_MWSE_MODS = ("MWManager", "mwquickfixes")
+
+
+def _suite_source():
+    root = Path(os.path.dirname(os.path.abspath(__file__))) / "reference" / "mwse-lua-guards"
+    mods = root / "mods"
+    names = sorted(p.name for p in mods.iterdir() if (p / "main.lua").is_file()) if mods.is_dir() else []
+    metadata = sorted((root / "metadata").glob("*-metadata.toml")) if (root / "metadata").is_dir() else []
+    return mods, names, metadata
+
+
+def _unique_archive(root, name):
+    archived = root / name
+    suffix = 2
+    while archived.exists():
+        archived = root / f"{name}-{suffix}"
+        suffix += 1
+    return archived
+
+
+def _copy_replacing(source_file, target):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(target.name + ".mwmanager-tmp")
+    shutil.copy2(source_file, temporary)
+    os.replace(temporary, target)
+
+
 def install_mwse_lua_guards(args):
-    """Install MWManager's consolidated MWSE utilities as one mod entry."""
-    manager_dir = Path(os.path.dirname(os.path.abspath(__file__)))
+    """Install the mw* MWSE Lua suite: each mod to MWSE\\mods\\<name>, its metadata toml to Data Files."""
     data_dir = Path(args.data_dir).resolve()
     mwse_dir = data_dir / "MWSE"
     if not mwse_dir.is_dir():
-        print(f"--init: MWSE core folder not found; Lua utilities installation deferred ({mwse_dir})")
+        print(f"--init: MWSE core folder not found; Lua suite installation deferred ({mwse_dir})")
         return 0
-    source = manager_dir / "reference" / "mwse-lua-guards" / "mods" / "MWManager"
-    if not (source / "main.lua").is_file():
-        print(f"--init: consolidated MWSE Lua utility source not found: {source}", file=sys.stderr)
+    source, names, metadata = _suite_source()
+    if not names:
+        print(f"--init: MWSE Lua suite source not found: {source}", file=sys.stderr)
         return 2
-    source_files = [p for p in source.rglob("*") if p.is_file()
-                    and not p.name.casefold().startswith(("main.lua.bak", "main.lua~"))]
     target_root = mwse_dir / "mods"
-    destination = target_root / "MWManager"
+    # Data Files\\MWSE\\backups\\mods\\<name>: beside MWSE, where MWSE never loads Lua from (it runs every main.lua
+    # under MWSE\\mods at any depth, so nothing that is not live may stay there).
+    legacy_root = mwse_dir / "backups" / "mods"
+    existing = {p.name.casefold(): p for p in target_root.iterdir() if p.is_dir()} if target_root.is_dir() else {}
+    retired = [existing[n.casefold()] for n in RETIRED_MWSE_MODS if n.casefold() in existing]
     if args.dry_run:
-        print(f"--dry-run: would install the consolidated MWManager MWSE mod to {destination}")
-        for name in ("mwcollide", "mwfloatfix", "mwguard", "mwhangwatch", "mwinfoloop",
-                     "mwperformers", "mwstranded", "mwsoundguard", "mouseBleedFix"):
-            if (target_root / name).is_dir():
-                print(f"--dry-run: would archive standalone MWSE mod {name} under {mwse_dir / 'backups' / 'mods'}")
+        for name in names:
+            print(f"--dry-run: would install MWSE Lua suite mod {name} to {target_root / name}")
+        for toml in metadata:
+            print(f"--dry-run: would install {toml.name} to {data_dir}")
+        for old in retired:
+            print(f"--dry-run: would move {old} to {legacy_root}")
         return 0
 
     try:
-        for source_file in source_files:
-            target = destination / source_file.relative_to(source)
-            target.parent.mkdir(parents=True, exist_ok=True)
-            temporary = target.with_name(target.name + ".mwmanager-tmp")
-            shutil.copy2(source_file, temporary)
-            os.replace(temporary, target)
-
-        # Data Files\\MWSE\\backups\\mods\\<name>: kept beside MWSE, where MWSE never loads Lua from (it runs main.lua
-        # files found anywhere under MWSE\\mods, so the older MWSE\\mods\\MWManager\\off\\legacy-standalone archive
-        # still ran; anything archived there moves out too).
-        legacy_root = mwse_dir / "backups" / "mods"
-        older = destination / "off" / "legacy-standalone"
-        olders = [(p.name, p) for p in sorted(older.iterdir()) if p.is_dir()] if older.is_dir() else []
-        for name, old in olders:
-            archived = legacy_root / name
-            suffix = 2
-            while archived.exists():
-                archived = legacy_root / f"{name}-{suffix}"
-                suffix += 1
+        for old in retired:
+            archived = _unique_archive(legacy_root, old.name)
             archived.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(old), str(archived))
-        for name in ("mwcollide", "mwfloatfix", "mwguard", "mwhangwatch", "mwinfoloop",
-                     "mwperformers", "mwstranded", "mwsoundguard", "mouseBleedFix"):
-            old = target_root / name
-            if not old.is_dir():
-                continue
-            archived = legacy_root / name
-            if archived.exists():
-                suffix = 2
-                while (legacy_root / f"{name}-{suffix}").exists():
-                    suffix += 1
-                archived = legacy_root / f"{name}-{suffix}"
-            archived.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(old), str(archived))
+        for name in names:
+            mod_source = source / name
+            files = {p.relative_to(mod_source) for p in mod_source.rglob("*") if p.is_file()}
+            destination = existing.get(name.casefold(), target_root / name)
+            # files a suite mod no longer has (older modules, editor backups) leave MWSE\\mods
+            stale = sorted(p.relative_to(destination) for p in destination.rglob("*")
+                           if p.is_file() and p.relative_to(destination) not in files) if destination.is_dir() else []
+            if stale:
+                archived = _unique_archive(legacy_root, name)
+                for rel in stale:
+                    (archived / rel).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(destination / rel), str(archived / rel))
+            for rel in sorted(files):
+                _copy_replacing(mod_source / rel, destination / rel)
+        for toml in metadata:
+            _copy_replacing(toml, data_dir / toml.name)
     except OSError as exc:
-        print(f"--init: could not install consolidated MWSE Lua utilities: {exc}", file=sys.stderr)
+        print(f"--init: could not install the MWSE Lua suite: {exc}", file=sys.stderr)
         return 2
-    print(f"--init: installed consolidated MWManager MWSE mod with nine utility tabs at {destination}")
+    print(f"--init: installed the MWSE Lua suite ({len(names)} mods: {', '.join(names)}) under {target_root}")
+    for old in retired:
+        print(f"--init: moved MWManager's earlier Lua package {old.name} to {legacy_root}")
     return 0
 
 

@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import types
@@ -224,20 +225,91 @@ class MwseCoreOriginalsStayInTheInstall(unittest.TestCase):
         self.assertIn("20000", self.text(self.mwse / "backups" / "core" / "a.lua"))
         self.assertFalse((self.manager / "backups" / "mwse-core" / "MWSE" / "core" / "a.lua").exists())
 
-    def test_standalone_mwse_mods_are_archived_beside_mwse_not_under_mods(self):
+    def install(self, dry_run=False):
+        args = types.SimpleNamespace(data_dir=str(self.data), dry_run=dry_run)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(self.m.install_mwse_lua_guards(args), 0)
+        return out.getvalue()
+
+    def test_the_lua_suite_is_installed_as_its_own_mods_and_the_old_package_leaves_mwse_mods(self):
+        suite = ROOT / "reference" / "mwse-lua-guards"
+        old = self.mwse / "mods" / "MWManager"
+        (old / "modules" / "mwquickfixes").mkdir(parents=True)
+        (old / "main.lua").write_text("-- consolidated\n", encoding="utf-8")
+        (old / "modules" / "mwquickfixes" / "main.lua").write_text("-- quickfixes\n", encoding="utf-8")
+        (old / "off" / "legacy-standalone" / "mwinfoloop").mkdir(parents=True)
+        (old / "off" / "legacy-standalone" / "mwinfoloop" / "main.lua").write_text("-- older\n", encoding="utf-8")
+        (self.mwse / "mods" / "mwquickfixes").mkdir(parents=True)
+        (self.mwse / "mods" / "mwquickfixes" / "main.lua").write_text("-- standalone\n", encoding="utf-8")
         (self.mwse / "mods" / "mwfloatfix").mkdir(parents=True)
         (self.mwse / "mods" / "mwfloatfix" / "main.lua").write_text("-- old\n", encoding="utf-8")
-        older = self.mwse / "mods" / "MWManager" / "off" / "legacy-standalone" / "mwinfoloop"
-        older.mkdir(parents=True)
-        (older / "main.lua").write_text("-- older\n", encoding="utf-8")
-        args = types.SimpleNamespace(data_dir=str(self.data), dry_run=False)
-        with contextlib.redirect_stdout(io.StringIO()):
-            self.assertEqual(self.m.install_mwse_lua_guards(args), 0)
-        self.assertTrue((self.mwse / "backups" / "mods" / "mwfloatfix" / "main.lua").is_file())
-        self.assertTrue((self.mwse / "backups" / "mods" / "mwinfoloop" / "main.lua").is_file())
-        self.assertFalse((self.mwse / "mods" / "mwfloatfix").exists())
-        self.assertFalse(older.exists())
+        (self.mwse / "mods" / "mwfloatfix" / "old_module.lua").write_text("-- stale\n", encoding="utf-8")
+        (self.mwse / "mods" / "mouseBleedFix").mkdir(parents=True)
+        (self.mwse / "mods" / "mouseBleedFix" / "main.lua").write_text("-- user's own\n", encoding="utf-8")
+        self.install()
+        manifest = json.loads((suite / "SOURCE_MANIFEST.json").read_text("utf-8"))
+        for item in manifest["Files"]:
+            rel = Path(item["Path"])
+            installed = (self.mwse / "mods" / rel.relative_to("mods")) if rel.parts[0] == "mods" \
+                else self.data / rel.name
+            self.assertEqual((suite / rel).read_bytes(), installed.read_bytes(), str(rel))
+        live = sorted(p.name for p in (self.mwse / "mods").iterdir())
+        names = sorted(p.name for p in (suite / "mods").iterdir())
+        self.assertEqual(live, sorted(names + ["mouseBleedFix", "somemod"]))
+        self.assertEqual(sorted(p.name for p in (self.mwse / "mods" / "mwfloatfix").iterdir()), ["main.lua"])
+        backups = self.mwse / "backups" / "mods"
+        self.assertTrue((backups / "MWManager" / "modules" / "mwquickfixes" / "main.lua").is_file())
+        self.assertTrue((backups / "MWManager" / "off" / "legacy-standalone" / "mwinfoloop" / "main.lua").is_file())
+        self.assertTrue((backups / "mwquickfixes" / "main.lua").is_file())
+        self.assertTrue((backups / "mwfloatfix" / "old_module.lua").is_file())
+        self.assertEqual((self.mwse / "mods" / "mouseBleedFix" / "main.lua").read_text("utf-8"), "-- user's own\n")
         self.assertFalse((self.manager / "backups").exists())
+        # a second run changes nothing and archives nothing more
+        before = sorted(str(p.relative_to(self.data)) for p in self.data.rglob("*"))
+        self.install()
+        self.assertEqual(sorted(str(p.relative_to(self.data)) for p in self.data.rglob("*")), before)
+
+    def test_dry_run_writes_nothing(self):
+        (self.mwse / "mods" / "MWManager").mkdir(parents=True)
+        before = sorted(str(p.relative_to(self.data)) for p in self.data.rglob("*"))
+        out = self.install(dry_run=True)
+        self.assertIn("mwsaveguard", out)
+        self.assertIn("MWManager", out)
+        self.assertEqual(sorted(str(p.relative_to(self.data)) for p in self.data.rglob("*")), before)
+
+
+class LuaSuiteIsTheUsersCopy(unittest.TestCase):
+    """reference/mwse-lua-guards holds the Steam install's mw* suite, byte for byte; mwquickfixes is gone."""
+
+    SUITE = ROOT / "reference" / "mwse-lua-guards"
+
+    def test_files_match_the_source_manifest(self):
+        manifest = json.loads((self.SUITE / "SOURCE_MANIFEST.json").read_text("utf-8"))
+        listed = sorted(item["Path"] for item in manifest["Files"])
+        present = sorted(p.relative_to(self.SUITE).as_posix() for p in self.SUITE.rglob("*")
+                         if p.is_file() and p.name not in ("README.md", "SOURCE_MANIFEST.json"))
+        self.assertEqual(listed, present)
+        for item in manifest["Files"]:
+            data = (self.SUITE / item["Path"]).read_bytes()
+            self.assertEqual(hashlib.sha256(data).hexdigest(), item["SHA256"], item["Path"])
+            self.assertEqual(len(data), item["Length"], item["Path"])
+
+    def test_mwguard_exempts_every_suite_mod(self):
+        names = {p.name for p in (self.SUITE / "mods").iterdir() if (p / "main.lua").is_file()}
+        self.assertEqual(len(names), 13)
+        main = (self.SUITE / "mods" / "mwguard" / "main.lua").read_text("utf-8")
+        block = main[main.index("exemptMods"):]
+        block = block[:block.index("}")]
+        self.assertEqual(set(re.findall(r'"([^"]+)"', block)), names)
+
+    def test_no_quickfixes_or_consolidated_package_left(self):
+        self.assertFalse((self.SUITE / "mods" / "MWManager").exists())
+        self.assertFalse((self.SUITE / "legacy-standalone").exists())
+        self.assertEqual([p for p in ROOT.rglob("*quickfix*") if ".git" not in p.parts], [])
+        for lua in self.SUITE.rglob("*.lua"):
+            self.assertNotIn("mwquickfixes", lua.read_text("utf-8"), str(lua))
+            self.assertNotIn("mwmanagerMCM", lua.read_text("utf-8"), str(lua))
 
 
 class GuiKeepsDisabledPluginsInItsFolder(unittest.TestCase):

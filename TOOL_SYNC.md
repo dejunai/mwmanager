@@ -80,8 +80,8 @@ Plan (each step: back up, box tests, PC tests, hash-verified deploy, no --apply/
 - Exception (2026-11-13): originals of MWSE core Lua that `--init` repairs (`MWSE\core`, `MWSE\lib`) are kept in
   the install at `Data Files\MWSE\backups\<path under MWSE>` (e.g. `MWSE\core\initialize.lua` ->
   `MWSE\backups\core\initialize.lua`); the first original is kept and never overwritten. Copies kept by older
-  versions in `MWManager\backups\mwse-core\` stay there untouched and are still read. MWManager's retired standalone MWSE mods are
-  archived to `MWSE\backups\mods\<name>`. MWSE only runs Lua from `MWSE\core`, `MWSE\mods` (any `main.lua`
+  versions in `MWManager\backups\mwse-core\` stay there untouched and are still read. MWManager's retired Lua packaging
+  (the consolidated `MWSE\mods\MWManager` mod, `mwquickfixes`) is archived to `MWSE\backups\mods\<name>`. MWSE only runs Lua from `MWSE\core`, `MWSE\mods` (any `main.lua`
   at any depth) and the legacy `MWSE\lua`, and `require` only searches core, core\lib, lib, mods and lua, so
   `MWSE\backups` is never loaded. Staged mods' Lua is repaired by `mwdialog_luafix` (through Tidy); its
   originals stay in `outputs\mwdialog_backup\luafix\<run>\` because `--undo` restores from them.
@@ -189,3 +189,26 @@ Behaviour changes:
 - MWManager's own `compute_order` in `mwmanager_overrides.py` has the same change (only for the first rule set,
   `mwmanager_rules.txt`); its `--cell-conflicts` rule checks use upstream's `ordering_rules()`. New
   `tests\test_mwm_near_order.py`. `mwmanager_rules.txt` had no `[Order]` entry repeating a `[Near*]` one.
+
+## The mw* MWSE Lua suite replaces mwquickfixes — 2026-11-14 (Pacific)
+
+- `reference\mwse-lua-guards\` now holds the user's mw* suite exactly as it is in the Steam install: 13 mods
+  under `mods\<name>\` (mwguard, mwhangwatch, mwfloatfix, mwstranded, mwcollide, mwperformers, mwinfoloop,
+  mwsoundguard, mwsaveguard, mwwarnsuppression, mwcompanionsneak, mwpluginpatches, mweffectinspector) and their
+  six `*-metadata.toml` files under `metadata\`. `SOURCE_MANIFEST.json` records each file's Steam source and
+  SHA-256; `tests\test_game_writes.py` checks the copies against it and checks that mwguard's default
+  `exemptMods` names every suite mod (the Steam `mwguard.json` lists all 13).
+- Gone: the consolidated `mods\MWManager\` package (one MCM, nine tabs, its `mwquickfixes` tab with
+  CorruptSaveGuard, DeferredDialogueTeleport, SuppressBodyPartWarnings, SuppressShutdownWarnings, CompanionSneak,
+  MouseBleedFix) and the `legacy-standalone\` snapshots. CorruptSaveGuard is now mwsaveguard, the two warning
+  suppressions are mwwarnsuppression, CompanionSneak is mwcompanionsneak. DeferredDialogueTeleport and
+  MouseBleedFix are standalone mods in the Steam install, not part of the suite, and MWManager no longer ships them.
+- `--init` (`mwmanager_init.install_mwse_lua_guards`) installs each suite mod to `Data Files\MWSE\mods\<name>\`
+  and the metadata files to `Data Files\`, moves `MWSE\mods\MWManager\` and `MWSE\mods\mwquickfixes\` to
+  `MWSE\backups\mods\`, and moves files a suite mod no longer has out of its folder to the same place, so
+  nothing that is not live stays under `MWSE\mods`. It no longer archives a `mouseBleedFix` folder.
+- `tools\steam-upstream\` and `COPY_MANIFEST.json` are unchanged (public repo @874c069): the suite's new Lua is
+  not in the public repo yet.
+- Upstream note (not changed; `mwdialog_luafix.py` stays byte-identical): its built-in `OWN_MODS` still lists only the
+  first eight suite mods plus `mwmanager`. It reads `exemptMods` from `mwguard.json`, which names all 13, so this only
+  matters where `mwguard.json` is missing.

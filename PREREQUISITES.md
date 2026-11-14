@@ -95,6 +95,8 @@ FFmpeg's upstream project uses LGPL by default, while enabling optional GPL or n
 
 After catalog initialization succeeds, `--init` runs the one-time Data Files document tidy: loose root-level documents move into `Data Files/docs`; a document whose filename matches an installed ESP/ESM stays unprefixed, and unmatched documents receive `No Known Mod - ` before the original filename. Completion is recorded per game installation in MWManager `outputs`. The tidy is journaled for undo. After it succeeds (or has already completed), `--init` continues as `--full --yes`, processing the three core ESMs, the existing independent load-order entries, and the shipped standalone ESPs as ordinary plugins and building the applicable MWManager patches. `--init --dry-run` shows the document and full-processing plans without changing files. During `--init`, MWManager also lints Lua files in the installed `Data Files\MWSE` core folder and writes findings to `outputs/mwmanager_core_mwse_lua_report.json`. The pass applies conservative repairs to installed core Lua, saves originals under `backups/mwse-core`, and writes a sendable report to `outputs/mwmanager_core_mwse_bugreport.txt`. `--init --dry-run` prints the lint plan without creating the report.
 
+`--init` also installs the mw* MWSE Lua suite (`reference/mwse-lua-guards/`, byte-identical to the Steam install's copies): each of its 13 mods goes to `Data Files/MWSE/mods/<name>/` and its metadata file to `Data Files/`. MWManager's earlier consolidated `MWSE/mods/MWManager` package (with `mwquickfixes`) is moved to `Data Files/MWSE/backups/mods/`. Settings in `Data Files/MWSE/config/` are left as they are. `--init --dry-run` lists these moves without making them.
+
 
 ## Major community masters
 
