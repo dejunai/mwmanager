@@ -250,9 +250,11 @@ def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
     """Rename a file (and the folders on its way) to its ASCII name, and change the name in the mod's own
     plugins (Windows-1252, as Morrowind writes them; same length, so changed in place)."""
     new_full = os.path.join(root, new_rel)
+    operations = []
     os.makedirs(os.path.dirname(new_full), exist_ok=True)
     if not os.path.exists(new_full):
         os.replace(full, new_full)
+        operations.append({"src": full, "dst": new_full})
     elif os.path.exists(full):
         # If this path was renamed earlier, keep the old-named source under the feature-specific Off tree.
         import mwmanager as _manager
@@ -260,8 +262,10 @@ def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
         os.makedirs(os.path.dirname(keep), exist_ok=True)
         if os.path.exists(keep):
             os.remove(full)
+            operations.append({"duplicate": new_full, "restore": full})
         else:
             os.replace(full, keep)
+            operations.append({"src": full, "dst": keep})
         log(f"{rel}: ASCII replacement {new_rel} already exists; moved the redundant source to Off\\names\\")
     # drop the old folders when emptied
     d = os.path.dirname(full)
@@ -283,7 +287,7 @@ def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
         if ob != nb and len(ob) == len(nb):
             pairs.append((ob.lower(), nb))
     if not pairs:
-        return
+        return operations
     import mwdialog_check as _m
     for pf in os.listdir(root):
         if not pf.lower().endswith((".esp", ".esm", ".omwaddon")):
@@ -297,7 +301,9 @@ def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
             continue
         if hits:
             if backup_callback:
-                backup_callback(pp, data)
+                backup = backup_callback(pp, data)
+                if backup:
+                    operations.append({"restore": pp, "backup": backup})
             else:
                 bak = os.path.join(root, "Off", os.path.splitext(pf)[0], "Reprocessed filenames",
                                    os.path.splitext(pf)[0], pf + ".bak_ascii")
@@ -307,9 +313,11 @@ def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
             with open(pp, "r+b") as f:                 # in place: keeps a Vortex hard link
                 f.write(bytes(new))
             log(f"{pf}: {hits} name(s) of {rel} changed to {new_rel}")
+    return operations
 
 
-def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progress_callback=None):
+def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progress_callback=None,
+                 journal_ops=None):
     """Repair findings in place; optionally append one exact record per successful file change."""
     texconv = next((p for p in (os.path.join(TOOLS_DIR, "texconv.exe"), shutil.which("texconv")) if p and
                     os.path.exists(p)), None)
@@ -321,28 +329,37 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
         if progress_callback and (index == 1 or index % 25 == 0):
             progress_callback(f"Applying asset repairs for {plugin_name}: {index:,} of {total:,} files")
         try:
-            data = open(full, "rb").read()
+            with open(full, "rb") as source:
+                data = source.read()
             new = None
             if kind == "ascii":
-                rename_ascii(root, full, rel, job, lambda t: print("  " + t))
+                def backup_plugin(path, _data):
+                    plugin_rel = os.path.relpath(path, root)
+                    return _backup_in_mod(root, plugin_rel, path, plugin_name, m,
+                                          FEATURE_OF.get("ascii", "Reprocessed filenames"))
+                operations = rename_ascii(root, full, rel, job, lambda t: print("  " + t), backup_plugin)
+                if journal_ops is not None:
+                    journal_ops.extend(operations)
                 done += 1
                 continue
             if kind == "orphan":
                 dest = os.path.join(root, "Off", _backup_owner(plugin_name), FEATURE_OF["orphan"], rel)
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
-                if not os.path.exists(dest):
+                moved = not os.path.exists(dest)
+                if moved:
                     shutil.move(full, dest)
                 if change_log is not None:
                     change_log.append({"file": rel, "action": "moved to Off/orphaned after checking global asset availability",
                                        "backup": os.path.relpath(dest, root), "cross_plugin": True})
+                if journal_ops is not None and moved:
+                    journal_ops.append({"src": full, "dst": dest})
                 done += 1
                 continue
             if kind == "broken":
-                dest = os.path.join(root, "Off", _backup_owner(plugin_name), FEATURE_OF["broken"], rel)
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                if not os.path.exists(dest):
-                    shutil.copy2(full, dest)
+                dest = _backup_in_mod(root, rel, full, plugin_name, m, FEATURE_OF["broken"])
                 m.replace_asset_in_place(full, m.stand_in_bytes(rel))
+                if journal_ops is not None:
+                    journal_ops.append({"restore": full, "backup": dest})
                 if change_log is not None:
                     change_log.append({"file": rel, "action": "replaced damaged asset with MWManager stand-in", "backup": os.path.relpath(dest, root)})
                 done += 1
@@ -407,6 +424,8 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                 continue
             backup = _backup_in_mod(root, rel, full, plugin_name, m, FEATURE_OF.get(kind, "repair"))
             m.replace_asset_in_place(full, new)
+            if journal_ops is not None:
+                journal_ops.append({"restore": full, "backup": backup})
             if change_log is not None:
                 details = {"keys": "normalized NIF text-key line endings", "abs": "rewrote absolute texture paths"}.get(kind)
                 if kind == "keys":

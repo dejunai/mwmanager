@@ -2,6 +2,7 @@
 is a temporary folder: no real MWManager state, Data Files, Vortex or game folder is touched."""
 import contextlib
 import io
+import json
 import os
 import sys
 import tempfile
@@ -144,6 +145,21 @@ class TidySteps(unittest.TestCase):
         self.assertEqual(rc, 0)
         assets.close_caches.assert_called_once_with()
 
+    def test_staged_asset_repair_returns_exact_restore_record(self):
+        root = self.staging / "ModA-1-1-0"
+        asset = root / "Textures" / "broken.dds"
+        original = b"not a DDS"
+        mk(asset, original)
+        operations = []
+        assets = self.t._scanner.asset_health_module()
+        done, skipped = assets.apply_folder(
+            str(root), [("broken", str(asset), "Textures\\broken.dds", None)],
+            self.t._scanner, str(self.data.parent), "ModA", journal_ops=operations)
+        self.assertEqual((done, skipped), (1, []))
+        self.assertEqual(len(operations), 1)
+        self.assertEqual(Path(operations[0]["restore"]), asset)
+        self.assertEqual(Path(operations[0]["backup"]).read_bytes(), original)
+
     def test_plan_then_apply_then_undo(self):
         start = self.files()
         rc, out = self.run_tidy()
@@ -160,6 +176,37 @@ class TidySteps(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.files(), start)
         self.assertEqual(sorted(os.listdir(self.data)), [])       # nothing written into the game folder
+
+    def test_undo_only_restores_one_staged_plugin(self):
+        mod_b = self.staging / "ModB-2-0"
+        mk(mod_b / "ModB.esp", b"TES3" + b"\0" * 12)
+        mk(mod_b / "ModB Readme.txt", b"readme b")
+        rc, out = self.run_tidy()
+        self.assertEqual(rc, 0, out)
+        rc, out = self.run_tidy("--apply", "--yes")
+        self.assertEqual(rc, 0, out)
+        self.assertFalse((self.staging / "ModA-1-1-0" / "ModA Readme.txt").exists())
+        self.assertFalse((mod_b / "ModB Readme.txt").exists())
+
+        plugin = self.staging / "ModA-1-1-0" / "ModA.esp"
+        backup = self.manager / "ModA.esp.before-repair"
+        backup.write_bytes(plugin.read_bytes())
+        plugin.write_bytes(b"repaired")
+        with Path(self.t.JOURNAL).open("a", encoding="utf-8") as journal:
+            journal.write(json.dumps({"run": "second pass", "staging": str(self.staging),
+                                      "plugins": ["ModA-1-1-0"]}) + "\n")
+            journal.write(json.dumps({"restore": str(plugin), "backup": str(backup),
+                                      "plugin": "ModA-1-1-0"}) + "\n")
+
+        rc, out = self.run_tidy("--undo", "--only", "ModA-1-1-0")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue((self.staging / "ModA-1-1-0" / "ModA Readme.txt").is_file())
+        self.assertEqual(plugin.read_bytes(), b"TES3" + b"\0" * 12)
+        self.assertFalse((mod_b / "ModB Readme.txt").exists())
+        self.assertTrue(any((mod_b / "Docs").rglob("ModB Readme.txt")))
+        records = [json.loads(line) for line in Path(self.t.JOURNAL).read_text(encoding="utf-8").splitlines()]
+        self.assertTrue(any(record.get("plugin") == "ModB-2-0" for record in records))
+        self.assertFalse(any(record.get("plugin") == "ModA-1-1-0" for record in records))
 
     def test_apply_refuses_a_changed_or_missing_plan(self):
         rc, out = self.run_tidy("--apply", "--yes")

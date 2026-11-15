@@ -2360,7 +2360,8 @@ class ManagerGUI(tk.Tk):
             if not messagebox.askyesno(
                     "Remove tracked deployments",
                     f"Remove {len(chosen)} selected deployment(s), restore their saved overwritten files, "
-                    "and unregister their BSAs? Any file changed since deployment will be left in place.",
+                    "unregister their BSAs, and roll back their staged Tidy changes? "
+                    "Any file changed since deployment will be left in place.",
                     parent=dialog):
                 return
             ids = {entry["id"] for entry in chosen}
@@ -2369,16 +2370,33 @@ class ManagerGUI(tk.Tk):
 
             def worker(progress):
                 from plugin_install import remove_deployments
-                result = remove_deployments(APP_DIR, data_dir, ids)
-                progress("Updating the plugin catalog and load order…")
-                command = [str(self._console_python()), "-u", str(APP_DIR / "mwmanager.py"),
-                           str(data_dir), "--sort", "--all", "--yes"]
                 quiet = {}
                 if os.name == "nt":
                     startup = subprocess.STARTUPINFO()
                     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                     startup.wShowWindow = subprocess.SW_HIDE
                     quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
+                result = remove_deployments(APP_DIR, data_dir, ids)
+                tidy_failures = []
+                staging_root = (APP_DIR / "staging" / "plugins").resolve()
+                for package_text in result.get("tidy_packages", []):
+                    package = Path(package_text).resolve()
+                    if not package.is_relative_to(staging_root):
+                        tidy_failures.append(f"{package}: outside plugin staging")
+                        continue
+                    progress(f"Rolling back Tidy changes for {package.name}…")
+                    tidy_command = [str(self._console_python()), "-u", str(APP_DIR / "mwmanager_install.py"),
+                                    "--staging", str(staging_root), "--undo", "--only", package.name]
+                    tidy_process = subprocess.run(
+                        tidy_command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, capture_output=True,
+                        text=True, encoding="utf-8", errors="replace", timeout=7200, **quiet)
+                    if tidy_process.returncode:
+                        tidy_failures.append(f"{package.name}: "
+                                             + (tidy_process.stderr or tidy_process.stdout or "rollback failed")[-500:])
+                result["tidy_rollback_failures"] = tidy_failures
+                progress("Updating the plugin catalog and load order…")
+                command = [str(self._console_python()), "-u", str(APP_DIR / "mwmanager.py"),
+                           str(data_dir), "--sort", "--all", "--yes"]
                 process = subprocess.run(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, capture_output=True,
                                          text=True, encoding="utf-8", errors="replace",
                                          timeout=7200, **quiet)
@@ -2396,10 +2414,15 @@ class ManagerGUI(tk.Tk):
                 write_gui_state(self.gui_state)
                 self._update_action_buttons()
                 self.status.set(f"Removed {result['removed']:,} files; restored {result['restored']:,}. "
-                                f"{result['pending']:,} changed file(s) remain tracked.")
+                                f"{result['pending']:,} changed file(s) remain tracked; "
+                                f"{len(result.get('tidy_rollback_failures', [])):,} Tidy rollback(s) need attention.")
+                tidy_note = ""
+                if result.get("tidy_rollback_failures"):
+                    tidy_note = "\n\nTidy rollback needs attention:\n" + "\n".join(
+                        result["tidy_rollback_failures"][:5])
                 messagebox.showinfo("Plugin deployments removed",
                                     f"Removed files: {result['removed']:,}\nRestored files: {result['restored']:,}\n"
-                                    f"Still tracked for review: {result['pending']:,}", parent=self)
+                                    f"Still tracked for review: {result['pending']:,}{tidy_note}", parent=self)
 
             self._run_progress_job("Remove Installed Plugins", "Removing selected tracked deployments…",
                                    worker, completed)

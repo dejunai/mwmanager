@@ -963,6 +963,7 @@ def align_master_versions(staging, data_files, *, apply_changes):
                 Path(path).write_bytes(_rewrite_header_version(original, target))
                 with open(JOURNAL, "a", encoding="utf-8") as journal:
                     journal.write(json.dumps({"restore": path, "backup": backup,
+                                              "plugin": _path_plugin(path, staging),
                                               "reason": "restore original HEDR version during tidy undo"}) + "\n")
     if not apply_changes and changed:
         print(f"  Plan: {changed} staged plugin header(s) need a newer master version.")
@@ -996,6 +997,7 @@ def update_omwaddon_masters(staging, *, apply_changes):
                 Path(path).write_bytes(rewritten)
                 with open(JOURNAL, "a", encoding="utf-8") as journal:
                     journal.write(json.dumps({"restore": path, "backup": backup,
+                                              "plugin": _path_plugin(path, staging),
                                               "reason": "restore original plugin header during tidy undo"}) + "\n")
     if not apply_changes and changed_count:
         print(f"  Plan: {changed_count} plugin header(s) need updated MAST names.")
@@ -1141,6 +1143,63 @@ def undo_lua_repairs():
         return 1
 
 
+_upstream_assets_apply = assets_apply
+
+
+def assets_apply(args, ares, moved_mods=()):
+    """Run upstream asset repairs while adding exact per-package restores to Tidy's journal."""
+    if not ares:
+        return _upstream_assets_apply(args, ares, moved_mods)
+    ah, m, game_dir = ares["ah"], ares["m"], ares["game_dir"]
+    lpm = m.longpaths_module()
+    original_folder, original_longpaths = ah.apply_folder, lpm.apply_mod
+    by_plugin = {}
+
+    def folder(root, fixes, module, current_game_dir, plugin_name, *positional, **keywords):
+        operations = []
+        keywords["journal_ops"] = operations
+        result = original_folder(root, fixes, module, current_game_dir, plugin_name, *positional, **keywords)
+        by_plugin.setdefault(_path_plugin(root, args.staging), []).extend(operations)
+        return result
+
+    def longpaths(root, plan, module, current_game_dir, plugin_name=None, log=print):
+        before = {json.dumps(entry, sort_keys=True) for entry in lpm.Record(current_game_dir).moves}
+        result = original_longpaths(root, plan, module, current_game_dir, plugin_name, log)
+        operations = by_plugin.setdefault(_path_plugin(root, args.staging), [])
+        added = [entry for entry in lpm.Record(current_game_dir).moves
+                 if json.dumps(entry, sort_keys=True) not in before
+                 and entry.get("mod", "").casefold() == os.path.basename(os.path.normpath(root)).casefold()]
+        for record in added:
+            operations += [{"src": src, "dst": dst} for src, dst in record.get("files", [])]
+            for plugin_path in record.get("esp", []):
+                operations.append({"restore": plugin_path,
+                                   "backup": module.off_dest(root, "longpaths", os.path.basename(plugin_path),
+                                                             os.path.basename(plugin_path))})
+            for nif_path in record.get("nif", []):
+                operations.append({"restore": nif_path,
+                                   "backup": module.off_dest(root, "longpaths", plugin_name,
+                                                             os.path.relpath(nif_path, root))})
+        if added:
+            operations.append({"longpath_records": [entry["orig"] for entry in added],
+                               "game_dir": current_game_dir})
+        return result
+
+    ah.apply_folder, lpm.apply_mod = folder, longpaths
+    try:
+        return _upstream_assets_apply(args, ares, moved_mods)
+    finally:
+        ah.apply_folder, lpm.apply_mod = original_folder, original_longpaths
+        for plugin, operations in by_plugin.items():
+            if not plugin or not operations:
+                continue
+            with open(JOURNAL, "a", encoding="utf-8") as journal:
+                journal.write(json.dumps({"run": time.strftime("%Y-%m-%d %H:%M:%S"),
+                                          "staging": args.staging, "plugins": [plugin], "assets": True}) + "\n")
+                for operation in operations:
+                    operation["plugin"] = plugin
+                    journal.write(json.dumps(operation) + "\n")
+
+
 def _prune_empty_directories(staging, journal):
     """Remove every empty directory under staged packages, deepest first."""
     removed = 0
@@ -1162,7 +1221,7 @@ def _prune_empty_directories(staging, journal):
                     continue
             except OSError:
                 continue
-            journal.write(json.dumps({"rmdir": base}) + "\n")
+            journal.write(json.dumps({"rmdir": base, "plugin": package.name}) + "\n")
             journal.flush()
             removed += 1
     return removed
@@ -1186,7 +1245,9 @@ def apply(moves, staging, progress=None, head_extra=None):
     """Make the moves, journaling each. progress (a list) gets the index of every move done, as it is done,
     so an interrupted run knows what is left. Returns the moves that failed."""
     done, failed = 0, []
-    head = {"run": time.strftime("%Y-%m-%d %H:%M:%S"), "staging": staging}
+    plugins = sorted({_path_plugin(src, staging) for src, _dst, _why in moves if _path_plugin(src, staging)},
+                     key=str.casefold)
+    head = {"run": time.strftime("%Y-%m-%d %H:%M:%S"), "staging": staging, "plugins": plugins}
     head.update(head_extra or {})
     with open(JOURNAL, "a", encoding="utf-8") as j:
         j.write(json.dumps(head) + "\n")
@@ -1197,7 +1258,8 @@ def apply(moves, staging, progress=None, head_extra=None):
                     if why.startswith("identical duplicate from "):
                         target = why.removeprefix("identical duplicate from ")
                         os.remove(src)
-                        j.write(json.dumps({"duplicate": target, "restore": src}) + "\n")
+                        j.write(json.dumps({"duplicate": target, "restore": src,
+                                            "plugin": _path_plugin(src, staging)}) + "\n")
                         j.flush()
                         done += 1
                         continue
@@ -1223,14 +1285,14 @@ def apply(moves, staging, progress=None, head_extra=None):
                                 else:
                                     os.chmod(base, stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
                                 os.rmdir(base)
-                            j.write(json.dumps({"rmdir": base}) + "\n")
+                            j.write(json.dumps({"rmdir": base, "plugin": _path_plugin(base, staging)}) + "\n")
                             j.flush()
                     if progress is not None:
                         progress.append(i)
                     continue
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 os.rename(src, dst)          # staging stays on one drive, so moves are cheap
-                j.write(json.dumps({"src": src, "dst": dst}) + "\n")
+                j.write(json.dumps({"src": src, "dst": dst, "plugin": _path_plugin(src, staging)}) + "\n")
                 j.flush()
                 done += 1
                 if progress is not None:
@@ -1247,17 +1309,39 @@ def apply(moves, staging, progress=None, head_extra=None):
     return failed
 
 
-def undo(staging=STAGING):
+def _path_plugin(path, staging):
+    """The top-level staging package containing path, or None for records outside staging."""
+    try:
+        rel = os.path.relpath(os.path.abspath(path), os.path.abspath(staging))
+    except (OSError, TypeError, ValueError):
+        return None
+    if rel == os.pardir or rel.startswith(os.pardir + os.sep) or os.path.isabs(rel):
+        return None
+    return rel.split(os.sep, 1)[0]
+
+
+def _op_plugin(op, staging):
+    if op.get("plugin"):
+        return str(op["plugin"])
+    for name in ("src", "restore", "luafix", "rmdir", "dst"):
+        if op.get(name):
+            plugin = _path_plugin(op[name], staging)
+            if plugin:
+                return plugin
+    return None
+
+
+def undo(staging=STAGING, plugin=None):
     if not os.path.exists(JOURNAL):
         try:
             from mock_fomod import undo_staging_options
-            undone = undo_staging_options(staging, OUTPUT_DIR)
+            undone = undo_staging_options(staging, OUTPUT_DIR, only=plugin)
         except Exception as exc:
             print(f"Could not undo option selections: {exc}", file=sys.stderr)
             return 1
         had_lua_journal = os.path.isfile(os.path.join(OUTPUT_DIR, "mwmanager_luafix_journal.jsonl"))
-        lua_undone = undo_lua_repairs()
-        if not undone and not had_lua_journal:
+        lua_undone = 0 if plugin else undo_lua_repairs()
+        if not undone and (plugin or not had_lua_journal):
             print("Nothing to undo (no journal).")
             return 1
         return lua_undone
@@ -1280,67 +1364,99 @@ def undo(staging=STAGING):
     if not runs:
         print("Nothing to undo.")
         return 1
-    last = runs.pop()
-    back = 0
-    left = []
-    for op in reversed(last["ops"]):
-        if "luafix" in op:                            # a Lua file mwdialog_luafix patched in place
-            lf = _luafix()
-            ok, msg = lf.restore_op(op) if lf else (False, f"{op['luafix']}: mwdialog_luafix.py not found")
-            if ok:
-                back += 1
-            else:
-                print("  " + msg, file=sys.stderr)
-                left.append(op)
-            continue
+    wanted = plugin.casefold() if plugin else None
+    targets = ([i for i, run in enumerate(runs)
+                if any((_op_plugin(op, staging) or "").casefold() == wanted for op in run["ops"])]
+               if plugin else [len(runs) - 1])
+    if not targets:
         try:
-            if "rmdir" in op:
-                os.makedirs(op["rmdir"], exist_ok=True)
-            elif "duplicate" in op:
-                if os.path.isfile(op["duplicate"]):
-                    os.makedirs(os.path.dirname(op["restore"]), exist_ok=True)
-                    shutil.copy2(op["duplicate"], op["restore"])
+            from mock_fomod import undo_staging_options
+            undone = undo_staging_options(staging, OUTPUT_DIR, only=plugin)
+        except Exception as exc:
+            print(f"Could not undo option selections for {plugin}: {exc}", file=sys.stderr)
+            return 1
+        print(f"No Tidy journal entries for {plugin}.")
+        return 0 if undone else 1
+    latest_run = runs[targets[-1]]["head"]["run"]
+    back = failed_count = 0
+    for target in reversed(targets):
+        last = runs[target]
+        selected = {i for i, op in enumerate(last["ops"])
+                    if not plugin or (_op_plugin(op, staging) or "").casefold() == wanted}
+        failed = set()
+        for index in sorted(selected, reverse=True):
+            op = last["ops"][index]
+            if "luafix" in op:                        # a Lua file mwdialog_luafix patched in place
+                lf = _luafix()
+                ok, msg = lf.restore_op(op) if lf else (False, f"{op['luafix']}: mwdialog_luafix.py not found")
+                if ok:
                     back += 1
                 else:
-                    left.append(op)
-            elif "restore" in op:
-                if os.path.isfile(op["backup"]):
-                    shutil.copy2(op["backup"], op["restore"])
+                    print("  " + msg, file=sys.stderr)
+                    failed.add(index)
+                continue
+            try:
+                if "longpath_records" in op:
+                    record = _scanner.longpaths_module().Record(op["game_dir"])
+                    record_plugin = wanted or (_op_plugin(op, staging) or "").casefold()
+                    originals = {name.replace("/", "\\").casefold() for name in op["longpath_records"]}
+                    before = len(record.moves)
+                    record.moves = [entry for entry in record.moves
+                                    if not (entry.get("mod", "").casefold() == record_plugin
+                                            and entry.get("orig", "").replace("/", "\\").casefold() in originals)]
+                    record.save()
+                    back += before - len(record.moves)
+                elif "rmdir" in op:
+                    os.makedirs(op["rmdir"], exist_ok=True)
+                elif "duplicate" in op:
+                    if os.path.isfile(op["duplicate"]):
+                        os.makedirs(os.path.dirname(op["restore"]), exist_ok=True)
+                        shutil.copy2(op["duplicate"], op["restore"])
+                        back += 1
+                    else:
+                        failed.add(index)
+                elif "restore" in op:
+                    if os.path.isfile(op["backup"]):
+                        shutil.copy2(op["backup"], op["restore"])
+                        back += 1
+                    else:
+                        failed.add(index)
+                elif os.path.exists(op["dst"]):
+                    if os.path.exists(op["src"]):
+                        print(f"  not put back (something is at {op['src']} already): {op['dst']}", file=sys.stderr)
+                        failed.add(index)
+                        continue
+                    os.makedirs(os.path.dirname(op["src"]), exist_ok=True)
+                    os.rename(op["dst"], op["src"])
                     back += 1
                 else:
-                    left.append(op)
-            elif os.path.exists(op["dst"]):
-                if os.path.exists(op["src"]):
-                    print(f"  not put back (something is at {op['src']} already): {op['dst']}", file=sys.stderr)
-                    left.append(op)
-                    continue
-                os.makedirs(os.path.dirname(op["src"]), exist_ok=True)
-                os.rename(op["dst"], op["src"])
-                back += 1
-            else:
-                print(f"  not put back (no longer there): {op['dst']}", file=sys.stderr)
-                left.append(op)
-        except OSError as e:
-            print(f"  could not put back {op.get('dst')}: {e}", file=sys.stderr)
-            left.append(op)
-    for d in {os.path.dirname(op["dst"]) for op in last["ops"] if "dst" in op}:   # tidy emptied folders
-        try:
-            while d and os.path.isdir(d) and not os.listdir(d):
-                os.rmdir(d)
-                d = os.path.dirname(d)
-        except OSError:
-            pass
-    marker = last["head"].get("once_marker")
-    if marker and not left:
-        try:
-            os.remove(marker)
-            print(f"Cleared one-time marker: {marker}")
-        except FileNotFoundError:
-            pass
-        except OSError as e:
-            print(f"  could not clear one-time marker {marker}: {e}", file=sys.stderr)
-    if left:
-        runs.append({"head": last["head"], "ops": list(reversed(left))})
+                    print(f"  not put back (no longer there): {op['dst']}", file=sys.stderr)
+                    failed.add(index)
+            except OSError as e:
+                print(f"  could not put back {op.get('dst')}: {e}", file=sys.stderr)
+                failed.add(index)
+        for d in {os.path.dirname(last["ops"][i]["dst"]) for i in selected if "dst" in last["ops"][i]}:
+            try:
+                while d and os.path.isdir(d) and not os.listdir(d):
+                    os.rmdir(d)
+                    d = os.path.dirname(d)
+            except OSError:
+                pass
+        remaining = [op for i, op in enumerate(last["ops"]) if i not in selected or i in failed]
+        marker = last["head"].get("once_marker")
+        if marker and not remaining:
+            try:
+                os.remove(marker)
+                print(f"Cleared one-time marker: {marker}")
+            except FileNotFoundError:
+                pass
+            except OSError as e:
+                print(f"  could not clear one-time marker {marker}: {e}", file=sys.stderr)
+        if remaining:
+            runs[target] = {"head": last["head"], "ops": remaining}
+        else:
+            runs.pop(target)
+        failed_count += len(failed)
     temp_journal = JOURNAL + ".tmp"
     with open(temp_journal, "w", encoding="utf-8") as j:
         for r in runs:
@@ -1350,13 +1466,14 @@ def undo(staging=STAGING):
     os.replace(temp_journal, JOURNAL)
     try:
         from mock_fomod import undo_staging_options
-        undo_staging_options(staging, OUTPUT_DIR)
+        undo_staging_options(staging, OUTPUT_DIR, only=plugin)
     except Exception as exc:
         print(f"  Could not undo option selections: {exc}", file=sys.stderr)
-    lua_undone = undo_lua_repairs()
-    print(f"Put back {back} item(s) moved by the run of {last['head']['run']}.")
-    if left or lua_undone:
-        print(f"{len(left)} tidy item(s) could not be put back; the remaining journal entries can be retried.")
+    lua_undone = 0 if plugin else undo_lua_repairs()
+    scope = f" for {plugin}" if plugin else ""
+    print(f"Put back {back} item(s){scope} through the run of {latest_run}.")
+    if failed_count or lua_undone:
+        print(f"{failed_count} tidy item(s) could not be put back; the remaining journal entries can be retried.")
         return 1
     return 0
 
@@ -1606,7 +1723,8 @@ def mwmanager_parser():
     ap.add_argument("--apply", action="store_true",
                     help="step 3: enact the reviewed plan file (refused, exit 2, if the plan changed since)")
     ap.add_argument("--yes", action="store_true", help="with --apply: don't ask first")
-    ap.add_argument("--undo", action="store_true", help="put back the last --apply's moves and activated option files")
+    ap.add_argument("--undo", action="store_true",
+                    help="put back the last --apply, or only the package named by --only")
     ap.add_argument("--asset-repair", action="store_true", default=None,
                     help="also plan and make asset repairs (off by default: the asset check is only reported; "
                          "[Repair] asset_repair = true in mwmanager.ini turns it on)")
@@ -1651,7 +1769,9 @@ def mwmanager_main(argv=None):
     if options and (args.apply or args.undo):
         ap.error("--options writes a plan to review: run --apply afterwards (and --undo on its own)")
     if args.undo:
-        return undo(args.staging)
+        if args.only and len(args.only) != 1:
+            ap.error("--undo accepts exactly one package name with --only")
+        return undo(args.staging, args.only[0] if args.only else None)
     if not os.path.isdir(args.staging):
         print(f"Staging folder not found: {args.staging}", file=sys.stderr)
         return 2

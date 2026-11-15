@@ -150,6 +150,9 @@ Behaviour changes:
   `mwmanager.ini` has `[Repair]` `asset_repair = true`. Tidy's asset check is a report unless the switch is on.
 - The Lua check is upstream's (`tools\luajit\` is passed); its patches are journaled in Tidy's journal, originals
   under `backups\luafix\`. The old `outputs\mwmanager_luafix_journal.jsonl` is still undone by `--undo`.
+- Tidy journal entries carry their staging package. `--undo --only <package>` reverses that package's moves,
+  asset repairs, long-path records, Lua repairs, and FOMOD choices across its Tidy runs without touching other
+  staged packages. Removing a tracked deployment uses this package rollback automatically.
 - Upstream reads "Data Files next to the script"; MWManager rebinds that to `--game-data-files` at compose time.
 
 ## Steam utility sync: refactor 2 and review fixes — 2026-11-14, 08:30 (Pacific)

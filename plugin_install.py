@@ -820,7 +820,7 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
     from major_master_deploy import unregister_archives
     manager, data_dir = manager.resolve(), data_dir.resolve()
     state = _read_deployment_state(manager)
-    kept, removed, restored, pending = [], 0, 0, []
+    kept, removed, restored, pending, tidy_packages = [], 0, 0, [], []
     ini_path = data_dir.parent / "Morrowind.ini"
     catalog_path = manager / "game_catalog.sqlite3"
     touched_plugins = set()
@@ -868,6 +868,8 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
             continue
         touched_plugins.update(deployment.get("plugins", []))
         touched_archives.update(deployment.get("archives", []))
+        if deployment.get("staging_package"):
+            tidy_packages.append(deployment["staging_package"])
         unregister_archives(ini_path, deployment.get("registered_archives", []))
         if catalog_path.is_file():
             with sqlite3.connect(catalog_path) as db:
@@ -896,7 +898,9 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
     state["deployments"] = [entry for entry in state["deployments"]
                             if entry.get("id") in remaining_ids]
     _write_deployment_state(manager, state)
-    return {"removed": removed, "restored": restored, "pending": sum(len(item["operations"]) for item in pending)}
+    return {"removed": removed, "restored": restored,
+            "pending": sum(len(item["operations"]) for item in pending),
+            "tidy_packages": sorted(set(tidy_packages), key=str.casefold)}
 
 
 def steam_morrowind_roots() -> list[Path]:

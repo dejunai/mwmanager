@@ -2053,7 +2053,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
     return sorted(changed_mods, key=str.casefold)
 
 
-def undo_staging_options(staging: str | os.PathLike, output_dir: str | os.PathLike) -> int:
+def undo_staging_options(staging: str | os.PathLike, output_dir: str | os.PathLike, only: str | None = None) -> int:
     """Undo active option payloads, restoring each mod's original staged files from Off."""
     path = Path(output_dir) / "mwmanager_compatibility_journal.json"
     try:
@@ -2067,6 +2067,8 @@ def undo_staging_options(staging: str | os.PathLike, output_dir: str | os.PathLi
         try:
             mod_dir.resolve().relative_to(root)
         except (OSError, ValueError):
+            continue
+        if only and mod_dir.name.casefold() != only.casefold():
             continue
         activation = entry.get("activation", {})
         _restore_activation(mod_dir, activation)
