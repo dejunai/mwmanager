@@ -888,6 +888,10 @@ def run_preinstall(game_dir: Path, manager_dir: Path, progress, *,
             progress("Preflight: " + line)
         if not _install_mwse_lua_suite(game_dir, progress):
             return False
-    _record_preflight(manager_dir, game_dir, overrides, report["status"])
+    # The report was built before the first-launch prompt; refresh the log-derived lines after that launch.
+    statuses = [line for line in report["status"]
+                if not line.startswith(("Code Patch features seen by the game", "MWSE.log:"))]
+    statuses.extend(mwmanager_prereqs.startup_log_lines(mwmanager_prereqs.startup_logs(game_dir)))
+    _record_preflight(manager_dir, game_dir, overrides, statuses)
     progress("Preflight passed.")
     return True

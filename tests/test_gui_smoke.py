@@ -172,6 +172,12 @@ class ArchiveSettingsTests(unittest.TestCase):
         self.assertTrue(settings["paths_confirmed"])
         self.assertEqual(settings["game_dir"], str(self.game))
 
+    def test_partial_save_preserves_always_elevate_path(self):
+        self.g.MWMANAGER_INI.write_text(
+            f"[Paths]\ngame_dir = {self.game}\nalways_elevate_game_dir = {self.game}\n")
+        self.g.write_settings({"game_dir": str(self.game), "first_run": 1})
+        self.assertEqual(self.g.read_settings()["always_elevate_game_dir"], str(self.game))
+
     def test_registry_default_does_not_count_as_path_confirmation(self):
         self.g.SETTINGS_FILE.write_text(json.dumps({"first_run": 1, "init_complete": 0}))
         self.assertFalse(self.g.read_settings()["paths_confirmed"])
@@ -241,12 +247,14 @@ class GuiSmokeTests(unittest.TestCase):
     def test_first_run_starts_full_cycle_before_major_masters(self):
         called = []
         offered = []
+        catalogued = []
         self.app.settings["first_run"] = 1
         self.app._ensure_archive_downloads = lambda: True
         self.app._run_progress_job = lambda _title, _description, _worker, completed: completed(True, None)
         self.app._run_initial_tidy = lambda on_success: on_success()
         self.app.generate_patches = lambda **kwargs: called.append(kwargs)
         self.app._offer_major_master_processing = lambda: offered.append(True)
+        self.app._run_initial_catalog = lambda on_success: (catalogued.append(True), on_success())
         self.app._begin_first_run()
         self.pump(0.3)
         self.assertEqual(called[0]["mode"], "full")
@@ -254,7 +262,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertTrue(called[0]["asset_repair"])
         self.assertEqual(self.app.settings["first_run"], 1)
         called[0]["on_success"]()
-        self.assertEqual((self.app.settings["first_run"], offered), (0, [True]))
+        self.assertEqual((self.app.settings["first_run"], catalogued, offered), (0, [True], [True]))
 
     def test_first_run_resumes_after_completed_preflight(self):
         self.app.settings["first_run"] = 1

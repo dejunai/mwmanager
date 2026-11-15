@@ -444,6 +444,29 @@ class Journal:
         shutil.move(str(source), str(destination))
         return {"source": source_rel, "destination": str(destination), "sha256": digest}
 
+    def migrate_unknown_asset_backups(self, game_dir) -> int:
+        """Rename the old manager-owned Off/Unknown Plugin tree and bring every file into the ledger."""
+        game_dir = Path(game_dir).resolve()
+        old = game_dir / "Data Files" / "Off" / "Unknown Plugin"
+        if not old.is_dir():
+            return 0
+        files = [path for path in old.rglob("*") if path.is_file()]
+        destinations = [(path, old.parent / "Original Install" / path.relative_to(old)) for path in files]
+        collision = next((target for _source, target in destinations if target.exists()), None)
+        if collision:
+            raise FileExistsError(f"cannot migrate legacy asset backup over {collision}")
+        run = self.start_run("mwmanager_journal.py", {"operation": "rename legacy Unknown Plugin asset backups"})
+        for source, target in destinations:
+            digest = sha256_file(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source, target)
+            self.record(run["run"], rel_of(game_dir, target), "create", digest, {"kind": "absent"},
+                        tag="asset-repair-backup")
+        for folder, _dirs, _names in os.walk(old, topdown=False):
+            Path(folder).rmdir()
+        self.finish_run(run)
+        return len(files)
+
     # ------------------------------------------------------------------------------------- runs / inputs
     def store_input(self, value) -> str:
         data = (canon(value) if not isinstance(value, (bytes, str)) else value)
@@ -587,8 +610,12 @@ class Journal:
         actual = {key(rel_of(game_dir, p)): p for p in walk_files(game_dir)}
         report = {"against": against, "changed": [], "missing": [], "extra": [], "unexplained": [],
                   "journal_problems": problems, "original_problems": [], "ignored": 0}
+        # Against the deployed state, two things are MWManager's own and are not journaled change by change:
+        # Morrowind.ini (either ours or the original; the original is kept at baseline\\Morrowind.ini and a
+        # rollback restores it), and Data Files\\Off\\ (the originals MWManager kept before repairing a file).
+        own_ini = self.baseline_ini.is_file()
         for k, want in expected.items():
-            if layers.get(k) in IGNORED_DIFF_LAYERS:
+            if layers.get(k) in IGNORED_DIFF_LAYERS or (own_ini and k == "morrowind.ini"):
                 report["ignored"] += 1
                 continue
             path = actual.get(k)
@@ -612,6 +639,9 @@ class Journal:
                     report["unexplained"].append(rel_of(game_dir, path))
         for k, path in actual.items():
             if k in expected or classify(k) in IGNORED_DIFF_LAYERS:
+                continue
+            if against == "deployed" and k.startswith("data files/off/"):
+                report["ignored"] += 1
                 continue
             report["extra"].append(rel_of(game_dir, path))
             if k not in journaled and k not in backup_keys:
@@ -656,6 +686,8 @@ class Journal:
         rollback_checkpoint = self.checkpoint_state(True)
         for k, original in sorted(originals.items(), key=lambda kv: -max(e["seq"] for e in entries
                                                                           if key(e["path"]) == kv[0])):
+            if k == "morrowind.ini":
+                continue                         # the whole baseline INI is authoritative, including old ledgers
             rel = original["path"]
             if original["kind"] == "absent":
                 steps.append({"op": "delete", "path": rel})
@@ -682,12 +714,9 @@ class Journal:
                     original["location"].startswith("game:"):
                 used_backups.append(original["location"])
         ini = game_dir / "Morrowind.ini"
-        prereq_ini = next((info for rel, info in self.prerequisites()["files"].items()
-                           if key(rel) == "morrowind.ini"), None)
-        ini_source = prereq_ini.get("backup") if prereq_ini else "journal:baseline/Morrowind.ini"
-        ini_hash = prereq_ini.get("sha256") if prereq_ini else (
-            sha256_file(self.baseline_ini) if self.baseline_ini.is_file() else None)
-        if "morrowind.ini" not in originals and ini_hash and (not ini.is_file() or sha256_file(ini) != ini_hash):
+        ini_source = "journal:baseline/Morrowind.ini"
+        ini_hash = sha256_file(self.baseline_ini) if self.baseline_ini.is_file() else None
+        if ini_hash and (not ini.is_file() or sha256_file(ini) != ini_hash):
             steps.append({"op": "restore", "path": "Morrowind.ini", "from": ini_source})
         if not preserve_prerequisites:
             for rel, info in self.prerequisites()["files"].items():

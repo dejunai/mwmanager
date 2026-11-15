@@ -49,14 +49,25 @@ MCP_DESCRIBE_NAMES = ("describe.json", "description.json")
 # The three masters and three BSAs are identical across stores: these SHA-256 values were read from GOG's
 # goggame-1435828767.hashdb-verified install and from the Steam install on 2026-11-13 (both matched). Anything
 # else in the install, including Morrowind.exe (the Code Patch rewrites it), is never checked against a store.
-CORE_FILE_HASHES = {
-    "Morrowind.esm": ("5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647",),
-    "Tribunal.esm": ("2ace511f23cc2a9ddd5f3aa59c7919789b9378cf4b17c8ae3375dd6b782f3f2b",),
-    "Bloodmoon.esm": ("bd27090d0e6ad4c1bf1abc83f1a2dac56fcc82cae7bfe8263c413fb301801357",),
-    "Morrowind.bsa": ("3dcd5e6bfa08245521a53374bf733ee5c920df49103898a15aa31144ad64cf48",),
-    "Tribunal.bsa": ("3901e7a146f7a64a4ae9534c80d5974f7ab15adf5c48c4561d9313c0f7831d69",),
-    "Bloodmoon.bsa": ("7c20956791400d958cb407f0b7c1c19ceaf46719df7eb724d0b450299360bd7c",),
-}
+CORE_HASHES_FILE = Path(__file__).with_name("mwmanager_core_hashes.json")
+
+
+def _load_core_hashes() -> dict:
+    """{file name: (known original SHA-256, ...)} from mwmanager_core_hashes.json, which ships with MWManager and
+    is never written: it is what says the ESM and BSA files found are unaltered."""
+    try:
+        files = json.loads(CORE_HASHES_FILE.read_text(encoding="utf-8"))["files"]
+        table = {str(name): tuple(str(h).casefold() for h in hashes) for name, hashes in files.items()}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
+        raise RuntimeError(f"{CORE_HASHES_FILE.name} is part of MWManager and could not be read ({exc}). "
+                           "Restore it from the MWManager download.") from exc
+    if not table or any(len(h) != 64 for hashes in table.values() for h in hashes):
+        raise RuntimeError(f"{CORE_HASHES_FILE.name} does not hold SHA-256 hashes; restore it from the "
+                           "MWManager download.")
+    return table
+
+
+CORE_FILE_HASHES = _load_core_hashes()
 MGE_EXECUTABLES = ("MGEXEgui.exe", "MGEgui.exe", "MGE XE.exe", "MGE XE GUI.exe")
 _VS_FIXED = b"\xbd\x04\xef\xfe"
 

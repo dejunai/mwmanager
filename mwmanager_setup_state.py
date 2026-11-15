@@ -17,11 +17,13 @@ from datetime import datetime
 from pathlib import Path
 
 STEPS = ("paths_confirmed", "preflight_complete", "sort_complete", "tidy_complete",
-         "initial_full_pass_complete", "initial_full_complete", "initialization_complete")
+         "initial_full_pass_complete", "initial_full_complete", "catalog_complete",
+         "initialization_complete")
 LABELS = {"paths_confirmed": "confirming the paths", "preflight_complete": "the preflight",
           "sort_complete": "sorting the shipped plugins", "tidy_complete": "the initial Tidy",
           "initial_full_pass_complete": "the initial --full pass",
           "initial_full_complete": "the initial --full cycle",
+          "catalog_complete": "building the catalog database",
           "initialization_complete": "the major-master step"}
 
 
@@ -184,7 +186,16 @@ def pid_alive(pid) -> bool:
 def end_process(pid) -> None:
     """End a process and what it started (a setup step left running by a closed MWManager)."""
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"], capture_output=True)
+        result = subprocess.run(["taskkill", "/PID", str(int(pid)), "/T", "/F"], capture_output=True)
+        if result.returncode:
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(0x0001, False, int(pid))       # PROCESS_TERMINATE
+            if handle:
+                try:
+                    kernel32.TerminateProcess(handle, 1)
+                finally:
+                    kernel32.CloseHandle(handle)
     else:
         try:
             os.kill(int(pid), 15)

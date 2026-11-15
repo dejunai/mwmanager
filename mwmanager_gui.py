@@ -291,6 +291,20 @@ class _ShellProgram:
         import ctypes
         from ctypes import wintypes
 
+        path = Path(path)
+        self._process = None
+        if not arguments:
+            command = ([os.environ.get("COMSPEC", "cmd.exe"), "/d", "/c", str(path)]
+                       if path.suffix.casefold() in {".cmd", ".bat"} else [str(path)])
+            try:
+                self._process = _popen(command, cwd=str(path.parent), close_fds=True)
+                self._handle = None
+                self._code = None
+                return
+            except OSError as exc:
+                if getattr(exc, "winerror", None) != 740:
+                    raise
+
         class Info(ctypes.Structure):
             _fields_ = [("cbSize", wintypes.DWORD), ("fMask", wintypes.ULONG), ("hwnd", wintypes.HWND),
                         ("lpVerb", wintypes.LPCWSTR), ("lpFile", wintypes.LPCWSTR),
@@ -299,10 +313,11 @@ class _ShellProgram:
                         ("lpClass", wintypes.LPCWSTR), ("hkeyClass", wintypes.HKEY), ("dwHotKey", wintypes.DWORD),
                         ("hIcon", wintypes.HANDLE), ("hProcess", wintypes.HANDLE)]
 
-        path = Path(path)
         info = Info()
         info.cbSize = ctypes.sizeof(Info)
-        info.fMask = 0x00000040 | 0x00000100          # SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC
+        # NOCLOSEPROCESS gives us a wait handle. NOASYNC can deadlock this worker thread while the shell waits
+        # for DDE/COM completion, which left prerequisite setup locked before MCP appeared.
+        info.fMask = 0x00000040                        # SEE_MASK_NOCLOSEPROCESS
         info.lpFile = str(path)
         info.lpParameters = arguments or None
         info.lpDirectory = str(path.parent)
@@ -324,9 +339,11 @@ class _ShellProgram:
 
     @property
     def waitable(self) -> bool:
-        return bool(self._handle) or self._code is not None
+        return self._process is not None or bool(self._handle) or self._code is not None
 
     def poll(self):
+        if self._process is not None:
+            return self._process.poll()
         if self._code is not None or not self._handle:
             return self._code
         if self._kernel32.WaitForSingleObject(self._handle, 0) == 0x102:      # WAIT_TIMEOUT: still running
@@ -673,7 +690,9 @@ def write_settings(settings: dict) -> None:
     if not ini.has_section("Paths"):
         ini.add_section("Paths")
     for key in PATH_SETTING_KEYS:
-        ini.set("Paths", key, str(settings.get(key, "") or ""))
+        # A caller updating preferences must not erase path choices it did not load.
+        if key in settings:
+            ini.set("Paths", key, str(settings.get(key) or ""))
     for legacy in LEGACY_PATH_KEYS.values():
         for key in legacy:
             ini.remove_option("Paths", key)
@@ -1004,7 +1023,12 @@ class ManagerGUI(tk.Tk):
                 self.after(150, self._open_detected_paths)
         else:
             self.refresh()
-        if not first_run and self.settings.get("init_complete", 0) != 1:
+        if (not first_run and self._setup_done("initial_full_complete")
+                and not self._setup_done("catalog_complete")):
+            # setup stopped (or was made) before the catalog step: build it now, then carry on
+            resume = self._begin_init if self.settings.get("init_complete", 0) != 1 else (lambda: None)
+            self.after(150, lambda: self._run_initial_catalog(resume))
+        elif not first_run and self.settings.get("init_complete", 0) != 1:
             self.after(150, self._begin_init)
         elif not first_run and (self.settings.get("archive_source") is None
                                 or not self.settings.get("archive_downloads_dir")):
@@ -1037,6 +1061,14 @@ class ManagerGUI(tk.Tk):
 
     def _setup_reconcile(self):
         """The step file is the record of setup; the two flags in the settings file follow it."""
+        try:
+            import mwmanager_journal
+            migrated = mwmanager_journal.Journal(APP_DIR / "journal").migrate_unknown_asset_backups(
+                self.settings["game_dir"])
+            if migrated:
+                self.status.set(f"Migrated {migrated} legacy asset backup files to Off/Original Install.")
+        except (OSError, ValueError, RuntimeError) as exc:
+            self.status.set(f"Legacy asset-backup migration needs attention: {exc}")
         changed = False
         if self._setup_done("initial_full_complete") and self.settings.get("first_run", 0) == 1:
             self.settings["first_run"] = 0
@@ -1150,7 +1182,7 @@ class ManagerGUI(tk.Tk):
                 self._setup_complete("initial_full_complete")
                 self.settings["first_run"] = 0
                 write_settings(self.settings)
-                self._offer_major_master_processing()
+                self._run_initial_catalog(self._offer_major_master_processing)
 
             def run_full():
                 if self._setup_done("initial_full_complete"):
@@ -1278,6 +1310,67 @@ class ManagerGUI(tk.Tk):
 
         self._run_progress_job("Initial setup", "Sorting shipped plugins before Tidy and --full…",
                                worker, completed)
+
+    def _run_initial_catalog(self, on_success):
+        """Build game_catalog.sqlite3 once the initial --full has finished: the core masters and archives first,
+        then every plugin in the load order. (The scanner's own --init does more: it resets the working load order
+        and runs --full in stages, which setup has already done.)"""
+        if self._setup_done("catalog_complete"):
+            self.after(100, on_success)
+            return
+        game = Path(self.settings["game_dir"])
+        python = str(self._console_python())
+        catalog = str(APP_DIR / "database" / "catalog.py")
+        base = [python, "-u", catalog, "--game-dir", str(game), "--ini", str(game / "Morrowind.ini")]
+        plugins = [name for name in read_order() if name.casefold() not in {c.casefold() for c in CORE}]
+        commands = [("Cataloguing the core masters and archives…", base + ["--canonical-core"])]
+        if plugins:
+            commands.append((f"Cataloguing {len(plugins)} plugin(s)…", base + ["--plugin-files", *plugins, "--append"]))
+        log_path = APP_DIR / "outputs" / "mwmanager_initial_setup.log"
+        state_path, game_dir = self._setup_path(), self.settings["game_dir"]
+
+        def worker(report):
+            quiet = {}
+            if os.name == "nt":
+                startup = subprocess.STARTUPINFO()
+                startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startup.wShowWindow = subprocess.SW_HIDE
+                quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with log_path.open("a", encoding="utf-8", errors="replace") as log:
+                for label, command in commands:
+                    recent = []
+                    report(label)
+                    log.write(f"\n=== {label.rstrip('…')} ===\n")
+                    process = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL,
+                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                     encoding="utf-8", errors="replace", bufsize=1, **quiet)
+                    setup_state.begin(state_path, game_dir, "catalog_complete", getattr(process, "pid", None))
+                    for line in process.stdout:
+                        log.write(line)
+                        message = " ".join(line.strip().split())
+                        if message:
+                            recent.append(message)
+                            del recent[:-12]
+                            report(_display_line(line))
+                    result = process.wait()
+                    if result:
+                        problem = (f"{label.rstrip('…')} failed (exit {result}).\n\n" +
+                                   ("\n".join(recent) or "No diagnostic output was produced."))
+                        setup_state.fail(state_path, game_dir, "catalog_complete", problem)
+                        raise RuntimeError(problem)
+            setup_state.complete(state_path, game_dir, "catalog_complete")
+            return True
+
+        def completed(_result, error):
+            if error:
+                self.status.set("The catalog database was not built; it is tried again at the next start.")
+                self._show_report("Catalog failed", log_path)
+                return
+            self.status.set("Catalog database built.")
+            self.after(100, on_success)
+
+        self._run_progress_job("Catalog", "Building the catalog database…", worker, completed)
 
     def _complete_init(self):
         self._setup_complete("initialization_complete")

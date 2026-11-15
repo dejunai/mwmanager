@@ -623,10 +623,10 @@
     },
     {
       "RelativePath": "mwdialog_state.py",
-      "Bytes": 18001,
-      "SHA256": "12f5858a979215edaf872c963745821ad28f50f9f87ed95e13382a470a7dc8d2",
+      "Bytes": 18076,
+      "SHA256": "99f5b44cfbd54ae6892f0da320c7b9cc791561daa7551220b6568934ba967a5c",
       "Source": "<Steam Morrowind>\\mwdialog_state.py",
-      "SourceModified": "2026-11-14T06:30:32"
+      "SourceModified": "2026-11-15T00:43:17"
     },
     {
       "RelativePath": "mwdialog_tes3.py",

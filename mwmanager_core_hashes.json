@@ -1,0 +1,24 @@
+{
+  "about": "SHA-256 of the unaltered core masters and archives, the same in the GOG, Steam and disc releases. Part of MWManager: read to check that the ESM and BSA files found are the originals, never written.",
+  "version": 1,
+  "files": {
+    "Morrowind.esm": [
+      "5c3c8c2cbd20e25901b59b3ece33d36b7ef0e3d60ad8d11828bcc61a5ead1647"
+    ],
+    "Tribunal.esm": [
+      "2ace511f23cc2a9ddd5f3aa59c7919789b9378cf4b17c8ae3375dd6b782f3f2b"
+    ],
+    "Bloodmoon.esm": [
+      "bd27090d0e6ad4c1bf1abc83f1a2dac56fcc82cae7bfe8263c413fb301801357"
+    ],
+    "Morrowind.bsa": [
+      "3dcd5e6bfa08245521a53374bf733ee5c920df49103898a15aa31144ad64cf48"
+    ],
+    "Tribunal.bsa": [
+      "3901e7a146f7a64a4ae9534c80d5974f7ab15adf5c48c4561d9313c0f7831d69"
+    ],
+    "Bloodmoon.bsa": [
+      "7c20956791400d958cb407f0b7c1c19ceaf46719df7eb724d0b450299360bd7c"
+    ]
+  }
+}

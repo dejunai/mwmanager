@@ -180,14 +180,7 @@ def register_archives(ini_path: Path, archives: list[Path], manager_dir: Path | 
             lines.append("")
         added_lines = [f"Archive {i}={name}" for i, name in enumerate(additions)]
         lines += ["[Archives]"] + added_lines
-    install_ledger = ledger_run = original = None
-    if manager_dir is not None:
-        import mwmanager_journal
-        install_ledger = mwmanager_journal.Journal(Path(manager_dir) / "journal")
-        original = install_ledger.preserve_original(ini_path.parent, ini_path)
-        ledger_run = install_ledger.start_run("major_master_deploy.py", {"operation": "register BSA archives",
-                                                                          "archives": additions})
-    elif ini_path.is_file():
+    if manager_dir is None and ini_path.is_file():
         stamp = time.strftime("%Y%m%d-%H%M%S")
         backup = ini_path.with_name(f"{ini_path.name}.mwmanager-predeploy-{stamp}.bak")
         suffix = 1
@@ -198,11 +191,6 @@ def register_archives(ini_path: Path, archives: list[Path], manager_dir: Path | 
     temp = ini_path.with_suffix(ini_path.suffix + ".mwmanager-tmp")
     temp.write_text("\n".join(lines) + "\n", encoding="cp1252", errors="replace")
     os.replace(temp, ini_path)
-    if install_ledger:
-        install_ledger.record(ledger_run["run"], ini_path.name,
-                              "replace" if original["kind"] != "absent" else "create",
-                              mwmanager_journal.sha256_file(ini_path), original, tag="archive-registration")
-        install_ledger.finish_run(ledger_run)
     return added_lines
 
 

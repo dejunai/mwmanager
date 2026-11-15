@@ -1,6 +1,6 @@
 {
  "paths_note": "<Steam Morrowind> is the Steam Morrowind install root; snapshot and working paths are relative to the MWManager folder.",
- "synced_at": "2026-11-14 (America/Los_Angeles); suite sync: MWManager runs the upstream files unchanged",
+ "synced_at": "2026-11-15 (America/Los_Angeles); suite sync: MWManager runs the upstream files unchanged",
  "tracked_tools": [
   {
    "name": "dialog scanner / manager core",
@@ -275,9 +275,9 @@
    "snapshot": "tools\\steam-upstream\\mwdialog_state.py",
    "working": "mwdialog_state.py",
    "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-   "source_sha256": "12f5858a979215edaf872c963745821ad28f50f9f87ed95e13382a470a7dc8d2",
-   "snapshot_sha256": "12f5858a979215edaf872c963745821ad28f50f9f87ed95e13382a470a7dc8d2",
-   "working_sha256": "12f5858a979215edaf872c963745821ad28f50f9f87ed95e13382a470a7dc8d2",
+   "source_sha256": "99f5b44cfbd54ae6892f0da320c7b9cc791561daa7551220b6568934ba967a5c",
+   "snapshot_sha256": "99f5b44cfbd54ae6892f0da320c7b9cc791561daa7551220b6568934ba967a5c",
+   "working_sha256": "99f5b44cfbd54ae6892f0da320c7b9cc791561daa7551220b6568934ba967a5c",
    "working_matches_upstream": true
   },
   {

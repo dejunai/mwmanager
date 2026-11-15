@@ -174,6 +174,25 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         journal.execute_rollback(self.game, plan)
         self.assertEqual(asset.read_bytes(), b"original")
 
+    def test_repair_backup_and_hash_marker_are_deleted_by_rollback(self):
+        import mwmanager_journal
+        asset = self.data / "textures" / "kept.dds"
+        asset.parent.mkdir(parents=True, exist_ok=True)
+        asset.write_bytes(b"original")
+        journal = mwmanager_journal.Journal(self.manager / "journal")
+        journal.capture_baseline(self.game)
+        backup = Path(self.m.backup_asset_original(str(self.data), os.path.join("textures", "kept.dds")))
+        self.m.replace_asset_in_place(str(asset), b"repaired")
+        marker = Path(str(backup) + self.m.REPAIRED_SIDECAR)
+        self.assertTrue(marker.is_file())
+        entries, problems = journal.entries()
+        self.assertEqual(problems, [])
+        self.assertEqual(sum(entry.get("tag") == "asset-repair-backup" for entry in entries), 2)
+        journal.execute_rollback(self.game, journal.plan_rollback(self.game))
+        self.assertEqual(asset.read_bytes(), b"original")
+        self.assertFalse(backup.exists())
+        self.assertFalse(marker.exists())
+
     def test_generated_plugin_writer_is_logged_and_deleted_by_rollback(self):
         import mwmanager_journal
         journal = mwmanager_journal.Journal(self.manager / "journal")

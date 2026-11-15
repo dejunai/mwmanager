@@ -342,80 +342,26 @@ def warn_mcp_beta(game_dir, *, show_ui=True):
     return False
 
 
-def catalog_core_hashes(db_path):
-    """Read the previously catalogued source hashes as the initial trusted baseline."""
-    result = {}
-    if not os.path.isfile(db_path):
-        return result
-    try:
-        db_uri_path = os.path.abspath(db_path).replace(os.sep, "/")
-        with sqlite3.connect(f"file:{db_uri_path}?mode=ro", uri=True) as db:
-            for name in CORE_GAME_ESMS:
-                row = db.execute("SELECT source_sha256 FROM esm_record WHERE lower(source_file)=lower(?) LIMIT 1",
-                                 (name,)).fetchone()
-                if row and row[0] is not None:
-                    result[name] = bytes(row[0]).hex()
-            row = db.execute("SELECT archive_sha256 FROM bsa_asset WHERE lower(archive_file)=lower(?) LIMIT 1",
-                             ("Morrowind.bsa",)).fetchone()
-            if row and row[0] is not None:
-                result["Morrowind.bsa"] = bytes(row[0]).hex()
-    except sqlite3.Error:
-        return {}
-    return result
-
-
 def audit_core_files(data_dir, game_dir, *, initializing=False, dry_run=False, db_path=None):
-    """Compare canonical ESM and shipped BSA hashes; advise restoring originals but never block the run."""
-    key = os.path.normcase(os.path.abspath(game_dir)).casefold()
-    try:
-        with open(CORE_HASH_MANIFEST, encoding="utf-8") as stream:
-            saved = json.load(stream)
-    except (OSError, ValueError, TypeError):
-        saved = {}
-    saved = saved if isinstance(saved, dict) else {}
-    known = saved.get(key, {})
-    if not isinstance(known, dict):
-        known = {}
-    db_path = db_path or os.path.join(MANAGER_DIR, "game_catalog.sqlite3")
-    catalog_hashes = catalog_core_hashes(db_path)
+    """Compare the core ESMs and BSAs with mwmanager_core_hashes.json (shipped with MWManager, never written);
+    advise restoring originals but never block the run."""
+    import mwmanager_prereqs
     lookup = index_dir(data_dir)
-    mismatches, unverified, new_baseline = [], [], {}
+    mismatches = []
     for name in CORE_HASH_FILES:
         path = lookup.get(name.casefold())
-        if not path:
+        known = mwmanager_prereqs.CORE_FILE_HASHES.get(name, ())
+        if not path or not known:
             continue
         actual = sha256_file(path)
-        expected = known.get(name) or catalog_hashes.get(name)
-        if expected:
-            new_baseline[name] = expected
-            if actual.casefold() != expected.casefold():
-                mismatches.append((name, expected, actual))
-        else:
-            new_baseline[name] = actual
-            unverified.append(name)
+        if actual.casefold() not in known:
+            mismatches.append((name, known[0], actual))
     if mismatches:
-        print("\nWARNING: one or more core game files differ from the saved/catalogued SHA-256 hashes:")
+        print("\nWARNING: one or more core game files differ from the original SHA-256 hashes:")
         for name, expected, actual in mismatches:
             print(f"  ALTERED  {name}  expected {expected[:16]}… got {actual[:16]}…")
         print("  MWManager repairs mod content without editing these core files. We recommend restoring the "
               "original files through GOG Galaxy's verify/repair option. You may continue; no action was blocked.")
-    if unverified:
-        print("\nCore file hashes have no prior trusted catalog value for: " + ", ".join(unverified))
-        if initializing:
-            print("  A first-use fingerprint can detect future changes, but cannot prove these files were clean "
-                  "before this initialization. Verify the game installation first if you need that assurance.")
-    if not known and not catalog_hashes:
-        print("\nWARNING: no saved core-file hash baseline is available. Run --init to establish one after "
-              "verifying the game files; continuing is allowed.")
-    if initializing and new_baseline and not dry_run:
-        saved[key] = new_baseline
-        os.makedirs(os.path.dirname(CORE_HASH_MANIFEST), exist_ok=True)
-        with open(CORE_HASH_MANIFEST, "w", encoding="utf-8") as stream:
-            json.dump(saved, stream, indent=2, sort_keys=True)
-            stream.write("\n")
-        print(f"--init: core game SHA-256 baseline saved to {CORE_HASH_MANIFEST}")
-    elif initializing and new_baseline and dry_run and not known:
-        print(f"--dry-run: would save core game SHA-256 baseline to {CORE_HASH_MANIFEST}")
     return bool(mismatches)
 
 

@@ -24,7 +24,7 @@ FEATURE_OF = {"snd": "Reprocessed sounds", "tex": "Reprocessed textures",
               "broken": "Damaged assets", "orphan": "Unused assets", "unused": "Unused assets"}
 
 
-def broken_dest(root_or_mod, rel, sub="broken", plugin="Unknown Plugin"):
+def broken_dest(root_or_mod, rel, sub="broken", plugin="Original Install"):
     """<mod>\\Off\\<plugin>\\<feature>\\<original path>."""
     owner = os.path.splitext(os.path.basename(plugin))[0]
     return os.path.join(root_or_mod, "Off", owner, sub, rel)
@@ -42,14 +42,11 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
 
     def move_out(full, dest, rel):
         nonlocal install_ledger, ledger_run
-        if not m.shipped_game_file(data_dir, rel):
-            shutil.move(full, dest)
-            return
         if install_ledger is None:
             import mwmanager_journal
             install_ledger = mwmanager_journal.Journal(os.path.join(MANAGER_DIR, "journal"))
-            ledger_run = install_ledger.start_run("mwmanager_install.py", {"operation": "initial official asset tidy"})
-        install_ledger.move_original(game_dir, full, dest, ledger_run["run"], tag="official-asset")
+            ledger_run = install_ledger.start_run("mwmanager_install.py", {"operation": "initial asset tidy"})
+        install_ledger.move_original(game_dir, full, dest, ledger_run["run"], tag="original-install-asset")
 
     tmp = os.path.join(tempfile.gettempdir(), f"mwmanager_tmp_assets_{os.getpid()}")
     for kind, full, rel, job in fixes:

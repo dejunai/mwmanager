@@ -40,6 +40,9 @@ Per-install settings and state (`mwmanager.ini`, GUI settings/state, load order,
 yourself: LuaJIT in `tools/luajit/` (used by the Lua check), `texconv.exe` (DirectXTex), and the BSA packer.
 `mlox/` rule files are downloaded by `--init`.
 
+`mwmanager_core_hashes.json` is shipped as immutable verification data; first-run code reads it but never
+regenerates or clears it.
+
 ## Tests
 
 ```

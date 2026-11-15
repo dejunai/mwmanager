@@ -5,7 +5,6 @@ mwmanager_gui_state.json
 mwmanager_sort_order.txt
 mwmanager_sort_order.txt.bak
 mwmanager_loadorder_undo.txt
-mwmanager_core_hashes.json
 mwmanager_mastercheck_cache.json
 mwmanager_master_sizes.json
 mwmanager_mip_exempt.txt
@@ -20,6 +19,7 @@ mwmanager_luafix.json
 major_master_deployments.json
 archive_scan_cache.json
 game_catalog.sqlite3
+mwmanager_setup_state.json
 STEAM_UTILITY_REVIEW.md
 # working folders
 outputs/
@@ -29,6 +29,7 @@ staging/
 disabled_plugins/
 Off/
 downloads/
+pre-reqs/
 journal/
 logs/
 mwdialog_backup/
@@ -37,6 +38,9 @@ mwdialog_backup/
 *.sqlite
 *.sqlite3
 *.bak
+*.tmp
+*.bad
+*.lock
 # downloaded or third-party tools (see README)
 mlox/
 tools/*

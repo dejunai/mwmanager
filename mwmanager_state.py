@@ -51,6 +51,18 @@ def replace_asset_in_place(path, data):
         ledger.record(run["run"], mwmanager_journal.rel_of(data_dir.parent, target),
                       "replace" if original["kind"] != "absent" else "create",
                       mwmanager_journal.sha256_file(target), original, tag="asset-repair")
+        backup = _ASSET_BACKUP_OF.get(os.path.normcase(os.path.abspath(path)))
+        baseline = {mwmanager_journal.key(rel) for rel in ledger.baseline().get("files", {})}
+        for artifact in (backup, backup + REPAIRED_SIDECAR if backup else None):
+            if not artifact or not os.path.isfile(artifact):
+                continue
+            try:
+                rel = mwmanager_journal.rel_of(data_dir.parent, Path(artifact).resolve())
+            except ValueError:
+                continue
+            if mwmanager_journal.key(rel) not in baseline and not ledger.first_original(rel):
+                ledger.record(run["run"], rel, "create", mwmanager_journal.sha256_file(artifact),
+                              {"kind": "absent"}, tag="asset-repair-backup")
         ledger.finish_run(run)
     return result
 
@@ -243,10 +255,15 @@ def off_dest(mod, feature, plugin, rel):
     return os.path.join(mod, "Off", owner, feature, rel)
 
 
+# the Off\\ folder name for a file no plugin owns: shipped assets, or whatever was in Data Files when the user
+# kept an existing install
+ORIGINAL_INSTALL = "Original Install"
+
+
 def backup_asset_original(data_dir, rel, plugin=None, feature="repair"):
     """Keep one pre-repair original under Off/<plugin>/<feature>/<original relative path>."""
     mod, owner_plugin = asset_owner_folder(data_dir, rel)
-    owner = plugin or owner_plugin or "Unknown Plugin"
+    owner = plugin or owner_plugin or ORIGINAL_INSTALL
     if owner.lower().endswith((".esp", ".esm", ".omwaddon")):
         owner = os.path.splitext(os.path.basename(owner))[0]
     root = backup_root_for(mod, data_dir, rel)
@@ -338,7 +355,7 @@ def plugin_off_backup_path(data_dir, rel, feature, plugin=None, unique=True):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         return path
     mod, owner_plugin = asset_owner_folder(data_dir, rel)
-    owner = plugin or owner_plugin or "Unknown Plugin"
+    owner = plugin or owner_plugin or ORIGINAL_INSTALL
     if owner.lower().endswith((".esp", ".esm", ".omwaddon")):
         owner = os.path.splitext(owner)[0]
     root = backup_root_for(mod, data_dir, rel)

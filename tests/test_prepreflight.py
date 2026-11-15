@@ -297,6 +297,9 @@ class FirstLaunchTests(Base):
         self.assertEqual([c[1] for c in progress.asked[0][3]], ["launch", "recheck", "skip", "stop"])
         self.assertIn("Preflight: startup logs found; the setup started successfully.", progress.lines)
         self.assertTrue(any("all 16 Skunk Works" in line for line in progress.lines))
+        audit = json.loads((self.manager / "outputs/mwmanager_preinstall_audit.json").read_text())
+        self.assertTrue(any("all 16 Skunk Works" in line for line in audit["runs"][-1]["status"]))
+        self.assertFalse(any("no log yet" in line for line in audit["runs"][-1]["status"]))
         self.assertEqual(set(before), set(snapshot(game)) - {"mgeXE.log", "MWSE.log"})
 
     def test_recheck_without_logs_keeps_asking_and_stop_blocks_baseline(self):

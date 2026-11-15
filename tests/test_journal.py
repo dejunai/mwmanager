@@ -92,6 +92,9 @@ class BaselineTests(Fixture):
         self.assertEqual(layers["Data Files/MWSE/core/initialize.lua"], "prereq:mwse")
         self.assertEqual(layers["mcpatch/describe.json"], "prereq:mcp")
         self.assertEqual(layers["Saves/one.ess"], "user-data")
+        for name in ("mgeHost64.log", "mgeXE.log", "Morrowind_d3d9.log", "MWSE.log", "Warnings.txt",
+                     "ProgramFlow.txt"):
+            self.assertEqual(mj.classify(name), "user-data")
         self.assertEqual(layers["goggame-1.hashdb"], "store-meta")
         self.assertTrue(record["files"]["Data Files/Morrowind.esm"]["core_ok"])
         self.assertEqual(len(record["warnings"]), 5)                # 2 masters + 3 BSAs absent in the fixture
@@ -252,8 +255,6 @@ class RoundTripTests(Fixture):
         new = write(g / "Data Files/New Mod.esp", b"new plugin")
         j.record(run["run"], "Data Files/New Mod.esp", "create", sha(new), {"kind": "absent"})
         write(g / "Morrowind.ini", b"[General]\r\nvanilla=0\r\n[Game Files]\r\nGameFile1=New Mod.esp\r\n")
-        j.record(run["run"], "Morrowind.ini", "modify", sha(g / "Morrowind.ini"),
-                 {"kind": "baseline", "location": "journal:baseline/Morrowind.ini", "sha256": sha(j.baseline_ini)})
         j.finish_run(run)
         return {rel: sha(g / rel) for rel in ("Data Files/Textures/a.dds", "Data Files/MWSE/core/initialize.lua",
                                                "Data Files/New Mod.esp")}
@@ -334,13 +335,27 @@ class RoundTripTests(Fixture):
         self.assertTrue(moved_source.is_file())
         self.assertFalse(moved_target.exists())
 
-    def test_gui_archive_registration_journals_morrowind_ini(self):
+    def test_legacy_unknown_asset_backups_are_renamed_and_journaled(self):
+        self.journal.capture_baseline(self.game)
+        old = write(self.game / "Data Files/Off/Unknown Plugin/Reprocessed textures/Textures/old.dds", b"old")
+        write(Path(str(old) + ".repaired.sha256"), b"digest\n")
+        self.assertEqual(self.journal.migrate_unknown_asset_backups(self.game), 2)
+        new = self.game / "Data Files/Off/Original Install/Reprocessed textures/Textures/old.dds"
+        self.assertTrue(new.is_file())
+        self.assertFalse(old.exists())
+        plan = self.journal.plan_rollback(self.game)
+        self.assertEqual(plan["unexplained"], [])
+        self.journal.execute_rollback(self.game, plan)
+        self.assertFalse(new.exists())
+
+    def test_gui_archive_registration_relies_on_baseline_ini(self):
         from major_master_deploy import register_archives
         self.journal.capture_baseline(self.game)
         archive = write(self.manager / "staging/New Assets.bsa", b"bsa")
         added = register_archives(self.game / "Morrowind.ini", [archive], self.manager)
         self.assertEqual(added, ["Archive 0=New Assets.bsa"])
         self.assertEqual(list(self.game.glob("Morrowind.ini.mwmanager-predeploy-*.bak")), [])
+        self.assertEqual(self.journal.entries(), ([], []))
         plan = self.journal.plan_rollback(self.game)
         self.assertIn(("restore", "Morrowind.ini"), {(step["op"], step["path"]) for step in plan["steps"]})
         self.journal.execute_rollback(self.game, plan)
