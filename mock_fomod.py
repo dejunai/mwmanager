@@ -27,8 +27,8 @@ from html.parser import HTMLParser
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
-# BAIN packages use both "00 - Core" and "00 Core" folder spellings.
-OPTION_RE = re.compile(r"^(\d{2})(?:\s*-\s*|\s+)(.+)$")
+# BAIN packages use numeric prefix folder spellings ("00 - Core", "00 Core", "00_Core", "000 - Core").
+OPTION_RE = re.compile(r"^(\d{1,3})(?:\s*[-_.:)]\s*|\s+)(.+)$")
 DOC_EXTS = {".txt", ".md", ".rtf", ".pdf", ".docx", ".html", ".htm"}
 GAME_DIRS = {"meshes", "textures", "icons", "sound", "music", "bookart", "splash", "fonts",
              "video", "distantland", "mwse", "mge3", "shaders", "grass", "mcpatch"}
@@ -41,6 +41,22 @@ STAGING_RESERVED = {"off", "docs", "extras", "openmw", "bugreports", "screenshot
 _NEXUS_TEXT_CACHE: dict[str, str] = {}
 _NEXUS_FETCH_ERRORS: dict[str, str] = {}
 _FOMOD_IMAGE_INDEX: dict[str, dict[str, list[Path]]] = {}
+
+# Precompiled helper patterns for fast option evaluation
+HEADING_RE = re.compile(r"^\s*(?:[-*•]\s*)?0*(\d{1,3})\s*(?:[-.:)]|\s+)\s*(.*?)\s*$")
+SECTION_DIVIDER_RE = re.compile(r"^\s*={3,}\s*[^=].*={3,}\s*$")
+EXCLUSIVE_DOC_RE = re.compile(
+    r"\b(?:mutually exclusive|choose (?:only )?one|select (?:only )?one|"
+    r"do not use both|don't use both|either [^.\n\r]{0,100}\bor)\b", re.I
+)
+PATCH_LIKE_RE = re.compile(r"\b(?:compat|patch|addon|add-on|for|with)\b", re.I)
+NORMAL_MAP_RE = re.compile(r"\bnormal[\s_-]*maps?\b|\bnormals\b", re.I)
+OPENMW_RE = re.compile(r"\bopen\s*mw\b|\bomw\b", re.I)
+MWSE_RE = re.compile(r"\bmwse\b", re.I)
+MGE_XE_RE = re.compile(r"\bmge\s*xe\b|\bmge3\b", re.I)
+CORE_STEM_RE = re.compile(r"(?:^|[\s_-])core(?:[\s_-]|$)", re.I)
+CHALLENGE_RE = re.compile(r"captcha|verify you are human|are you a robot|access denied|cloudflare", re.I)
+HTML_SCRIPT_STYLE_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.I | re.S)
 
 
 def _package_display_name(mod_dir: Path) -> str:
@@ -195,15 +211,16 @@ def _load_fomod_preview(path: Path, tk, max_size=(360, 240)):
     except Exception:
         image = None
     if image is None:
+        try:
+            from PIL import Image, ImageTk
+            with Image.open(path) as source:
+                source.thumbnail((max_width, max_height))
+                return ImageTk.PhotoImage(source.copy())
+        except Exception:
+            pass
         ffmpeg = shutil.which("ffmpeg")
         if not ffmpeg:
-            try:
-                from PIL import Image, ImageTk
-                with Image.open(path) as source:
-                    source.thumbnail((max_width, max_height))
-                    return ImageTk.PhotoImage(source.copy())
-            except Exception:
-                return None
+            return None
         try:
             stat = path.stat()
             key = hashlib.sha256(
@@ -430,6 +447,7 @@ def _read_docs(paths: list[Path]) -> str:
                     else:
                         content = path.read_text(encoding="utf-8-sig", errors="replace")
                         if path.suffix.casefold() in {".html", ".htm"}:
+                            content = HTML_SCRIPT_STYLE_RE.sub(" ", content)
                             content = html.unescape(re.sub(r"<[^>]+>", " ", content))
                         elif path.suffix.casefold() == ".rtf":
                             content = re.sub(r"\\'[0-9a-fA-F]{2}|\\[a-zA-Z]+-?\d* ?|[{}]", "", content)
@@ -444,10 +462,9 @@ def _relevant_doc_excerpt(text: str, label: str, plugin_names=(), option_number:
     """Return only README lines tied to this choice, prioritizing its plugin filenames."""
     if option_number is not None:
         lines = text.splitlines()
-        heading = re.compile(r"^\s*(?:[-*•]\s*)?0*(\d{1,3})\s*(?:[-.:)]|\s+)\s*(.*?)\s*$")
         section_start = None
         for index, raw in enumerate(lines):
-            match = heading.match(raw)
+            match = HEADING_RE.match(raw)
             if match and int(match.group(1)) == option_number:
                 section_start = index
                 break
@@ -455,8 +472,8 @@ def _relevant_doc_excerpt(text: str, label: str, plugin_names=(), option_number:
             section_end = len(lines)
             for index in range(section_start + 1, len(lines)):
                 raw = lines[index]
-                match = heading.match(raw)
-                if match or re.match(r"^\s*={3,}\s*[^=].*={3,}\s*$", raw):
+                match = HEADING_RE.match(raw)
+                if match or SECTION_DIVIDER_RE.match(raw):
                     section_end = index
                     break
             scoped = "\n".join(lines[section_start:section_end]).strip()
@@ -569,8 +586,7 @@ def _discover(mod_dir: Path, installed: set[str]) -> list[dict]:
 
     if loose_records:
         all_docs = "\n\n".join(record["docs"] for record in loose_records).casefold()
-        explicit = bool(re.search(r"\b(?:mutually exclusive|choose (?:only )?one|select (?:only )?one|"
-                                  r"do not use both|don't use both|either .{0,100} or)\b", all_docs))
+        explicit = bool(EXCLUSIVE_DOC_RE.search(all_docs))
         plugin_sets = [set().union(*(_plugin_masters(p) for p in _safe_rglob(record["path"])
                                      if p.is_file() and p.suffix.casefold() in PLUGIN_EXTS))
                        for record in loose_records]
@@ -677,16 +693,13 @@ def _discover_plugin_choices(mod_dir: Path, installed: set[str],
     docs_folded = docs.casefold()
     entries = list(candidates.values())
     names_mentioned = sum(Path(rel).name.casefold() in docs_folded for rel, _ in entries)
-    explicit = bool(re.search(r"\b(?:mutually exclusive|choose (?:only )?one|select (?:only )?one|"
-                              r"do not use both|don't use both|either .{0,100} or)\b", docs_folded)) \
-        and names_mentioned >= 2
+    explicit = bool(EXCLUSIVE_DOC_RE.search(docs_folded)) and names_mentioned >= 2
     master_sets = [_plugin_masters(path) - BASE_GAME_MASTERS for _, path in entries]
     same_nontrivial_masters = bool(master_sets[0]) and all(value == master_sets[0] for value in master_sets)
     stems = [re.sub(r"[^a-z0-9]+", " ", Path(rel).stem.casefold()).split() for rel, _ in entries]
     similar_names = any(len(set(left) & set(right)) / max(1, len(set(left) | set(right))) >= 0.5
                         for i, left in enumerate(stems) for right in stems[i + 1:])
-    patch_like = any(re.search(r"\b(?:compat|patch|addon|add-on|for|with)\b", Path(rel).stem.casefold())
-                     for rel, _ in entries)
+    patch_like = any(PATCH_LIKE_RE.search(Path(rel).stem.casefold()) for rel, _ in entries)
     exclusive = explicit or (same_nontrivial_masters and similar_names and not patch_like)
     evidence = ("package documentation says these plugin choices are alternatives"
                 if explicit else "plugin headers share the same non-game master list and filenames look like variants"
@@ -828,7 +841,7 @@ def _nexus_page_text(mod_dir: Path, *, refresh=False) -> str:
         request = urllib.request.Request(page, headers={"User-Agent": "MWManager mod option helper"})
         with urllib.request.urlopen(request, timeout=15) as response:
             content = response.read(600_000).decode("utf-8", "replace")
-        challenge = re.search(r"captcha|verify you are human|are you a robot|access denied|cloudflare", content, re.I)
+        challenge = CHALLENGE_RE.search(content)
         if challenge:
             _NEXUS_FETCH_ERRORS[cache_key] = (
                 "Nexus returned a bot-protection/CAPTCHA page. Open page on Nexus, complete the "
@@ -933,7 +946,7 @@ def _is_hidden_required_option(item: dict) -> bool:
         return True
     if label in GAME_DIRS | {"data files"}:
         return True
-    if item.get("plugin_choice") and re.search(r"(?:^|[\s_-])core(?:[\s_-]|$)", Path(label).stem):
+    if item.get("plugin_choice") and CORE_STEM_RE.search(Path(label).stem):
         return True
     return False
 
@@ -948,14 +961,14 @@ def _is_openmw_normal_map_option(item: dict) -> bool:
     description = " ".join((str(item.get("label", "")),
                             str(item.get("group_label", "")),
                             str(path) if path else ""))
-    return bool(re.search(r"\bnormal[\s_-]*maps?\b|\bnormals\b", description, re.I))
+    return bool(NORMAL_MAP_RE.search(description))
 
 
 def _technology_choice(item: dict) -> str | None:
     """Identify explicit OpenMW/MWSE installer choices by label and payload paths."""
     label = str(item.get("label", ""))
-    openmw_in_label = bool(re.search(r"\bopen\s*mw\b|\bomw\b", label, re.I))
-    mwse_in_label = bool(re.search(r"\bmwse\b", label, re.I))
+    openmw_in_label = bool(OPENMW_RE.search(label))
+    mwse_in_label = bool(MWSE_RE.search(label))
     if openmw_in_label != mwse_in_label:
         return "openmw" if openmw_in_label else "mwse"
     payload = " ".join(str(path) for path in item.get("all_payload_files", {}).values())
@@ -963,9 +976,9 @@ def _technology_choice(item: dict) -> str | None:
     path = item.get("path")
     if isinstance(path, Path) and path.is_dir():
         payload += " " + path.name
-    if re.search(r"\bopen\s*mw\b|\bomw\b", payload, re.I):
+    if OPENMW_RE.search(payload):
         return "openmw"
-    if re.search(r"\bmwse\b", payload, re.I):
+    if MWSE_RE.search(payload):
         return "mwse"
     return None
 
@@ -982,7 +995,7 @@ def _select_vanilla_technology(records: list[dict]) -> list[dict]:
         has_openmw = any(kind == "openmw" for kind in kinds.values())
         for item in items:
             kind = kinds[item["key"]]
-            if re.search(r"\bmge\s*xe\b|\bmge3\b", str(item.get("label", "")), re.I):
+            if MGE_XE_RE.search(str(item.get("label", ""))):
                 item["required"] = True
                 item["preset_technology"] = "mge xe"
                 if item.get("all_payload_files") is not None:
