@@ -208,22 +208,24 @@ class GuiTidySteps(unittest.TestCase):
                 return self._code
         return calls, mock.patch.object(self.gui.subprocess, "Popen", Proc)
 
-    def progress(self, answer):
+    def progress(self):
         messages = []
 
         def progress(message):
             messages.append(message)
-        progress.ask_choice = lambda *a, **k: answer
         return progress, messages
 
-    def test_options_plan_apply_and_refusal(self):
+    def test_options_plan_auto_applies_and_refusal(self):
         pending = ["vortex_tidy plan, 2026-01-01 00:00: 1 mod(s), 1 to change, 0 left alone",
                    "MWMANAGER-PLAN: pending plan.txt"]
         calls, patch = self.fake([(0, pending), (0, ["done"])])
-        progress, _ = self.progress("apply")
+        progress, messages = self.progress()
+        progress.ask_choice = mock.Mock(side_effect=AssertionError("GUI Tidy must not ask to apply its plan"))
         with patch:
             n = self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
         self.assertEqual(n, 1)
+        progress.ask_choice.assert_not_called()
+        self.assertTrue(any("automatically" in message for message in messages))
         self.assertIn("--options", calls[0])
         self.assertNotIn("--apply", calls[0])
         self.assertIn("--apply", calls[1])
@@ -231,18 +233,10 @@ class GuiTidySteps(unittest.TestCase):
         with patch, self.assertRaises(RuntimeError):
             self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
 
-    def test_cancel_applies_nothing(self):
-        pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]
-        calls, patch = self.fake([(0, pending)])
-        progress, _ = self.progress("cancel")
-        with patch, self.assertRaises(self.gui.TidyCancelled):
-            self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
-        self.assertEqual(len(calls), 1)
-
     def test_partial_apply_halts_deployment(self):
         pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]
         calls, patch = self.fake([(0, pending), (1, ["one action failed"])])
-        progress, _ = self.progress("apply")
+        progress, _ = self.progress()
         with patch, self.assertRaisesRegex(RuntimeError, "deployment is halted"):
             self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
         self.assertEqual(len(calls), 2)

@@ -143,7 +143,8 @@ Behaviour changes:
 
 - Tidy is upstream's plan / `--apply`: plan mode writes `outputs\mwmanager_vortex_tidy_plan.txt` and changes
   nothing; `--apply` enacts it only if it is still the plan that was reviewed (exit 2 otherwise, nothing changed).
-  The GUI runs options + plan, shows the plan, and applies it only after **Apply** (Cancel stops there).
+  The GUI runs options + plan and automatically applies the validated plan; command-line plan/apply behavior is
+  unchanged.
 - Asset repairs are off by default: `--fix` / Generate change plugins and patches but no asset file in Data Files
   (stand-ins, texture reduction, text keys, asset health, short paths) unless `--asset-repair` is given or
   `mwmanager.ini` has `[Repair]` `asset_repair = true`. Tidy's asset check is a report unless the switch is on.

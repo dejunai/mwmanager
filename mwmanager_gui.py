@@ -75,25 +75,13 @@ def _atomic_write(path: Path, data: bytes) -> None:
         temporary.unlink(missing_ok=True)
 
 
-class TidyCancelled(Exception):
-    """The Tidy plan was not applied because Cancel was chosen."""
-
-
-def _plan_summary(plan_path: Path | None, limit: int = 30) -> str:
-    try:
-        lines = plan_path.read_text(encoding="utf-8").splitlines() if plan_path else []
-    except OSError:
-        lines = []
-    shown = [line for line in lines if line.strip()][:limit]
-    more = max(0, len([line for line in lines if line.strip()]) - limit)
-    return "\n".join(shown) + (f"\n… and {more:,} more line(s) in {plan_path}" if more else "")
-
-
 def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *, only: str | None = None,
                    reopen: bool = False, env=None, quiet=None, on_line=None, log=None) -> int | None:
-    """MWManager Tidy in its three steps: --options (BAIN/FOMOD choices), plan (nothing changed), then --apply of
-    the reviewed plan after Apply is chosen. Returns the number of mods the plan covered; raises TidyCancelled on
-    Cancel and RuntimeError when a step fails or --apply refuses (exit 2: the plan changed; nothing was changed)."""
+    """Run GUI Tidy options, build its plan, then apply it without prompting.
+
+    Returns the number of mods covered; raises RuntimeError when a step fails or --apply refuses because the plan
+    changed after it was built.
+    """
     base = [str(py), "-u", str(TIDY_SCRIPT), "--staging", str(staging), "--game-data-files", str(data_files)]
     if only:
         base += ["--only", only]
@@ -138,13 +126,7 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
     if state != "pending":
         progress(f"{label}: nothing to tidy.")
         return mods
-    choice = progress.ask_choice(
-        "Apply the Tidy plan?",
-        f"{label}\n\nThe plan below was worked out without changing anything. Apply it now, or Cancel to stop "
-        f"here (the plan stays in {plan_path}).\n\n" + _plan_summary(plan_path),
-        [("Apply", "apply"), ("Cancel", "cancel")], "cancel")
-    if choice != "apply":
-        raise TidyCancelled(f"{label}: Tidy cancelled; nothing was applied.")
+    progress(f"{label}: applying the validated Tidy plan automatically.")
     code, recent, _mods, _plan = step(["--apply", "--yes"], "apply")
     if code == TIDY_REFUSED:
         raise RuntimeError(f"{label}: Tidy refused to apply the plan - it changed since it was reviewed, or there "
@@ -2240,16 +2222,10 @@ class ManagerGUI(tk.Tk):
                         log_install_phase(f"BEGIN package {archive.name}")
                         tidy_env = os.environ.copy()
                         tidy_env["MWMANAGER_SOURCE_ARCHIVE"] = str(archive.resolve())
-                        try:
-                            tidy_mod_count = run_tidy_steps(py, staging_root, data_dir, progress,
-                                                            f"Tidy and options for {archive.name}",
-                                                            only=package.name, env=tidy_env, quiet=quiet,
-                                                            log=log_install_phase)
-                        except TidyCancelled as cancelled:
-                            log_install_phase(str(cancelled))
-                            progress(str(cancelled))
-                            return {"processed": processed, "stopped": True, "cancelled": True,
-                                    "staging": str(destination)}
+                        tidy_mod_count = run_tidy_steps(py, staging_root, data_dir, progress,
+                                                        f"Tidy and options for {archive.name}",
+                                                        only=package.name, env=tidy_env, quiet=quiet,
+                                                        log=log_install_phase)
                         if tidy_mod_count != 1:
                             raise RuntimeError(f"Tidy did not process the staged package for {archive.name} "
                                                f"(reported {tidy_mod_count!r} mod(s)); deployment is halted.")
@@ -3926,11 +3902,8 @@ class ManagerGUI(tk.Tk):
                     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                     startup.wShowWindow = subprocess.SW_HIDE
                     quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
-                try:
-                    run_tidy_steps(py, staging, game_data_files, progress, "Saved mock FOMOD choices",
-                                   reopen=True, quiet=quiet)
-                except TidyCancelled:
-                    return False
+                run_tidy_steps(py, staging, game_data_files, progress, "Saved mock FOMOD choices",
+                               reopen=True, quiet=quiet)
                 return True
 
             def options_reopened(_result, error):
@@ -3938,10 +3911,6 @@ class ManagerGUI(tk.Tk):
                     self._initializing_manager = False
                     self.status.set("Staged mock FOMOD stopped with an error.")
                     messagebox.showerror("Could not reopen staged options", str(error), parent=self)
-                    return
-                if _result is False:
-                    self._initializing_manager = False
-                    self.status.set("Tidy cancelled; the major-master stage was left as it was after the option step.")
                     return
                 self.status.set("Saved mock FOMOD choices applied to the existing major-master stage.")
                 if hasattr(self, "_major_master_refresh"):
@@ -4092,12 +4061,8 @@ class ManagerGUI(tk.Tk):
                                 if clean_line.startswith("ASSET CHECK"):
                                     progress(f"Tidy {name}: checking assets")
 
-                            try:
-                                run_tidy_steps(py, staging_root, game_data_files, progress, f"Tidy {mod_dir.name}",
-                                               only=mod_dir.name, quiet=quiet, on_line=tidy_line)
-                            except TidyCancelled as cancelled:
-                                raise RuntimeError(f"{', '.join(group_masters)} ({archive_label}): {cancelled} "
-                                                   "Staging stopped here; the staged files are kept.") from None
+                            run_tidy_steps(py, staging_root, game_data_files, progress, f"Tidy {mod_dir.name}",
+                                           only=mod_dir.name, quiet=quiet, on_line=tidy_line)
                             progress(f"Checking BSA eligibility for {', '.join(group_masters)} after final Tidy pass…")
                             from major_master_deploy import count_bsa_eligible
                             eligible_assets = count_bsa_eligible(staging_root, group_masters)
