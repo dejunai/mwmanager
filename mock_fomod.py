@@ -1802,6 +1802,12 @@ def _restore_activation(mod_dir: Path, prior_state: dict) -> dict[str, str | Non
     for rel, info in prior_state.get("files", {}).items():
         destination = mod_dir / rel
         backup = mod_dir / info["backup"] if info.get("backup") else None
+        source = Path(info.get("source", ""))
+        # Tidy may consolidate an identical option source into its active target.
+        # Keep that sole surviving copy instead of deleting data we cannot reapply.
+        if destination.exists() and not (source.is_file() or (backup and backup.is_file())):
+            reusable[rel] = None
+            continue
         if destination.exists():
             destination.unlink()
         if backup and backup.is_file():

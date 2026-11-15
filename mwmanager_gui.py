@@ -3936,16 +3936,27 @@ class ManagerGUI(tk.Tk):
                     self.status.set("Staged mock FOMOD stopped with an error.")
                     messagebox.showerror("Could not reopen staged options", str(error), parent=self)
                     return
+                staged = self._staged_major_master_names()
+                self.selected_major_masters.update(staged)
+                self.gui_state["selected_major_masters"] = [name for name in self.major_masters
+                                                            if name.casefold() in self.selected_major_masters]
+                write_gui_state(self.gui_state)
                 self.status.set("Saved mock FOMOD choices applied to the existing major-master stage.")
                 if hasattr(self, "_major_master_refresh"):
                     self._major_master_refresh()
                 if initializing:
                     self._initializing_manager = False
                     self._complete_init()
-                    self.after(100, self.open_major_masters)
                 messagebox.showinfo("Staged options updated",
                                     "The mock FOMOD ran against the existing major-master stage. "
                                     "No archives were extracted and the staging folder was preserved.", parent=self)
+                if staged and messagebox.askyesno(
+                        "Deploy staged major masters?",
+                        "The existing major-master stage is processed and ready. Deploy it to the game now?",
+                        parent=self):
+                    self.after(100, self.deploy_major_masters)
+                elif initializing:
+                    self.after(100, self.open_major_masters)
 
             self.status.set("Reopening mock FOMOD for the existing major-master stage…")
             self._run_progress_job(

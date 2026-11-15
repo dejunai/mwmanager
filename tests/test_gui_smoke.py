@@ -318,6 +318,20 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertTrue(self.getattr_ok(name), name)
         self.assertEqual(self.errors, [])
 
+    def test_reopened_major_master_options_advance_to_deploy(self):
+        package = self.g.APP_DIR / "staging" / "major_masters" / "Tamriel Data"
+        package.mkdir(parents=True)
+        (package / "Tamriel_Data.esm").write_bytes(b"TES3")
+        deployed = []
+        self.app.deploy_major_masters = lambda: deployed.append(True)
+        self.app._run_progress_job = lambda _title, _description, _worker, completed: completed(True, None)
+        with mock.patch.object(self.g.messagebox, "showinfo"), \
+                mock.patch.object(self.g.messagebox, "askyesno", return_value=True):
+            self.app.stage_major_masters()
+            self.pump(0.2)
+        self.assertEqual(deployed, [True])
+        self.assertIn("tamriel_data.esm", self.app.selected_major_masters)
+
     def test_first_window_lists_detected_installs_and_hands_them_to_options(self):
         import mwmanager_detect
         game = Path(self.app.settings["game_dir"])

@@ -234,6 +234,16 @@ class TidySteps(unittest.TestCase):
         self.assertFalse(source.exists())
         self.assertTrue(survivor.is_file())
 
+    def test_reopen_keeps_active_file_when_tidy_consolidated_its_source(self):
+        import mock_fomod
+        root = self.staging / "ModA-1-1-0"
+        active = root / "ModA.esm"
+        mk(active, b"TES3")
+        prior = {"files": {"ModA.esm": {"backup": None,
+                                          "source": str(root / "Extras" / "00 Core" / "ModA.esm")}}}
+        self.assertEqual(mock_fomod._restore_activation(root, prior), {"ModA.esm": None})
+        self.assertEqual(active.read_bytes(), b"TES3")
+
     def test_apply_refuses_a_changed_or_missing_plan(self):
         rc, out = self.run_tidy("--apply", "--yes")
         self.assertEqual(rc, 2, out)
