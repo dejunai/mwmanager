@@ -4,10 +4,11 @@ to the game install, and the checks that make --rollback and redeploy possible.
 Everything lives in MWManager's own folder (journal\\). Nothing is written into the game install and nothing
 under Data Files\\MWSE\\mods.
 
-  baseline\\baseline.json  a snapshot of the install as the user starts from it - a fresh install or a
-                           playthrough that already has mods - with size, date, sha256 and a label per file:
-                           prereq:mwse / prereq:mge_xe / prereq:mcp, game-exe, user-data, store-meta, start
-                           (everything else). Rollback returns to this snapshot. Files are only compared with
+  baseline\\baseline.json  a snapshot of the store install before prerequisites are installed.
+  prerequisites\\prerequisites.json
+                           the prerequisite layer captured after MWSE, MCP and MGE XE are ready. Normal rollback
+                           returns here; a GOG-only rollback then applies the baseline as a second stage.
+                           Files are only compared with
                            their own snapshot entry, never with a store list; the one exception is the three
                            masters and three BSAs, which are checked against known store-independent hashes
                            and reported (not refused) when modified. A copy of Morrowind.ini is kept too.
@@ -43,17 +44,19 @@ WIDTH = 115
 
 PREREQ_RULES = (
     ("prereq:mcp", ("mcpatch/*", "morrowind code patch.exe", "mcp readme.txt", "mcp history.txt",
-                    "morrowind.original.exe")),
+                    "morrowind.original.exe", "mwedit/customfunctions.dat")),
     ("prereq:mge_xe", ("d3d8.dll", "d3d9.dll", "dinput8.dll", "mgexegui.exe", "mgegui.exe", "mgehost64.exe",
                        "mge xe readme.md", "mgexe.toml", "mge.ini", "mge3/*", "data files/distantland/*",
                        "data files/shaders/*", "data files/textures/mge/*", "data files/mwse/mods/mge xe options/*",
                        "data files/meshes/*_dist.nif", "data files/xe sky variations.esp")),
-    ("prereq:mwse", ("mwse.dll", "mwse-update.exe", "mwse-version.txt", "lua51.dll", "csse.dll",
+    ("prereq:mwse", ("mwse.dll", "mwse-update.exe", "mwse-update.exe.config", "mwse-update.pdb",
+                     "mwse-update.exe.tmp", "newtonsoft.json.dll.tmp",
+                     "mwse-version.txt", "lua51.dll", "csse.dll",
                      "libcrypto-1_1.dll", "libssl-1_1.dll", "newtonsoft.json.dll", "newtonsoft.json.xml",
                      "morrowind.pdb", "data files/mwse/core/*", "data files/mwse/lib/*", "data files/mwse/config/*",
                      "data files/mwse/.vscode/*", "data files/mwse/mods/readme.txt", "data files/textures/mwse/*",
                      "data files/meshes/mwse/*")),
-    ("user-data", ("saves/*", "*.log", "mwse_minidump.dmp", "programflow.txt")),
+    ("user-data", ("saves/*", "*.log", "warnings.txt", "mwse_minidump.dmp", "programflow.txt")),
     ("store-meta", ("goggame-*", "goglog.ini", "gog.ico", "support.ico", "unins000.*", "*.lnk",
                     "steam_api*.dll", "steam_appid.txt", ".egstore/*")),
     ("game-exe", ("morrowind.exe",)),
@@ -141,6 +144,7 @@ class Journal:
         self.root = Path(root) if root else DEFAULT_ROOT
         self.baseline_file = self.root / "baseline" / "baseline.json"
         self.baseline_ini = self.root / "baseline" / "Morrowind.ini"
+        self.prerequisites_file = self.root / "prerequisites" / "prerequisites.json"
         self.ledger = self.root / "install.jsonl"
         self.runs = self.root / "runs.jsonl"
         self.mods_file = self.root / "mods.json"
@@ -150,11 +154,63 @@ class Journal:
     def has_baseline(self) -> bool:
         return self.baseline_file.is_file()
 
+    @staticmethod
+    def _identity_path(game_dir: Path) -> Path | None:
+        candidates = sorted(game_dir.glob("goggame-*.hashdb"))
+        candidates += [game_dir / name for name in ("steam_api.dll", "steam_api64.dll",
+                                                      "Morrowind Launcher.exe", "Bethesda.TXT")]
+        return next((path for path in candidates if path.is_file()), None)
+
+    def baseline_matches_install(self, game_dir) -> tuple[bool, str]:
+        """Reject a baseline from an install that was repaired, reinstalled, or replaced in place."""
+        if not self.has_baseline():
+            return False, "no baseline exists"
+        game_dir = Path(game_dir).resolve()
+        try:
+            baseline = self.baseline()
+        except (OSError, ValueError):
+            return False, "the baseline file is unreadable"
+        if baseline.get("game_dir_name", "").casefold() != game_dir.name.casefold():
+            return False, "the selected install folder does not match the recorded baseline"
+        identity = baseline.get("install_identity")
+        if not identity:  # version 1 baselines already contain the same file facts
+            recorded = baseline.get("files", {})
+            path = self._identity_path(game_dir)
+            if path:
+                rel = rel_of(game_dir, path)
+                info = recorded.get(rel) or next((v for r, v in recorded.items() if key(r) == key(rel)), None)
+                identity = dict(info or {}, path=rel)
+        if not identity or not identity.get("path"):
+            return False, "the baseline has no store-install identity"
+        current = game_dir / identity["path"]
+        if not current.is_file():
+            return False, f"the recorded install marker is missing: {identity['path']}"
+        stat = current.stat()
+        if stat.st_size != identity.get("size") or stat.st_mtime_ns != identity.get("mtime_ns"):
+            return False, f"the store-install marker changed: {identity['path']}"
+        if sha256_file(current) != identity.get("sha256"):
+            return False, f"the store-install marker content changed: {identity['path']}"
+        return True, "baseline belongs to this install"
+
+    def archive_current(self, reason: str) -> Path:
+        """Move an obsolete journal aside without discarding any rollback evidence."""
+        target = self.root / "history" / f"install-{_dt.datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4]}"
+        target.mkdir(parents=True, exist_ok=False)
+        for path in (self.baseline_file.parent, self.prerequisites_file.parent, self.ledger, self.runs, self.mods_file,
+                     self.inputs, self.root / "originals"):
+            if path.exists():
+                destination = target / path.name
+                os.replace(path, destination)
+        (target / "reason.txt").write_text(reason.rstrip() + "\n", encoding="utf-8")
+        return target
+
     def capture_baseline(self, game_dir, *, force: bool = False, hashdb: Path | None = None) -> dict:
         """Read-only on the install. Refuses to overwrite an existing baseline unless force=True."""
         game_dir = Path(game_dir).resolve()
         if self.has_baseline() and not force:
             raise FileExistsError(f"A baseline already exists: {self.baseline_file}")
+        if self.has_baseline():
+            self.archive_current("Baseline replaced explicitly with --force-baseline.")
         hashdb = hashdb or find_hashdb(game_dir)
         try:                                    # optional extra: GOG's own list, only when present
             gog = read_hashdb(hashdb) if hashdb else {}
@@ -170,6 +226,12 @@ class Journal:
             gog_entry = gog.get(key(rel))
             files[rel] = {"size": st.st_size, "mtime_ns": st.st_mtime_ns, "sha256": sha, "md5": md5,
                           "layer": classify(rel), "store_match": (gog_entry[1] == md5) if gog_entry else None}
+            if files[rel]["layer"].startswith("prereq:") or files[rel]["layer"] == "game-exe":
+                kept = self.root / "baseline" / "files" / sha
+                if not kept.exists():
+                    kept.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(path, kept)
+                files[rel]["backup"] = f"journal:baseline/files/{sha}"
             if key(rel) in core:
                 name, known = core.pop(key(rel))
                 files[rel]["core_ok"] = sha in known
@@ -182,7 +244,14 @@ class Journal:
         summary = {}
         for item in files.values():
             summary[item["layer"]] = summary.get(item["layer"], 0) + 1
-        record = {"version": 1, "captured": now(), "game_dir_name": game_dir.name,
+        identity_path = self._identity_path(game_dir)
+        identity = None
+        if identity_path:
+            identity_stat = identity_path.stat()
+            identity = {"path": rel_of(game_dir, identity_path), "size": identity_stat.st_size,
+                        "mtime_ns": identity_stat.st_mtime_ns, "sha256": sha256_file(identity_path)}
+        record = {"version": 2, "captured": now(), "game_dir_name": game_dir.name,
+                  "install_identity": identity,
                   "gog": {"hashdb": hashdb.name if hashdb else None,
                           "hashdb_sha256": sha256_file(hashdb) if hashdb else None, "files": len(gog)},
                   "summary": summary, "warnings": warnings, "files": files}
@@ -195,6 +264,87 @@ class Journal:
         tmp.write_text(json.dumps(record, indent=0, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.baseline_file)
         return record
+
+    def capture_prerequisites(self, game_dir) -> dict:
+        """Record the installed prerequisite layer and keep exact copies for the default rollback target."""
+        game_dir = Path(game_dir).resolve()
+        baseline = {key(rel): info for rel, info in self.baseline()["files"].items()}
+        files = {}
+        for path in walk_files(game_dir):
+            rel = rel_of(game_dir, path)
+            layer = classify(rel)
+            prior = baseline.get(key(rel))
+            digest = sha256_file(path)
+            if not (layer.startswith("prereq:") or layer == "game-exe" or
+                    key(rel) == "mwedit/customfunctions.dat"):
+                continue
+            stat = path.stat()
+            kept = self.root / "prerequisites" / "files" / digest
+            if not kept.exists():
+                kept.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(path, kept)
+            files[rel] = {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns, "sha256": digest,
+                          "layer": layer, "baseline_sha256": prior["sha256"] if prior else None,
+                          "backup": f"journal:prerequisites/files/{digest}"}
+        record = {"version": 1, "captured": now(), "game_dir_name": game_dir.name, "files": files}
+        self.prerequisites_file.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.prerequisites_file.with_suffix(".tmp")
+        temporary.write_text(json.dumps(record, indent=0, sort_keys=True), encoding="utf-8")
+        os.replace(temporary, self.prerequisites_file)
+        return record
+
+    def prerequisites(self) -> dict:
+        if not self.prerequisites_file.is_file():
+            return {"files": {}}
+        return json.loads(self.prerequisites_file.read_text(encoding="utf-8"))
+
+    def preserve_file(self, path) -> dict:
+        """Keep a content-addressed copy of a recoverable original."""
+        if not self.has_baseline():
+            raise RuntimeError("game files cannot be changed before the install baseline is recorded")
+        path = Path(path).resolve()
+        if not path.is_file():
+            return {"kind": "absent"}
+        digest = sha256_file(path)
+        kept = self.root / "originals" / digest
+        if kept.exists() and sha256_file(kept) != digest:
+            raise RuntimeError(f"journal original is corrupt: {kept}")
+        if not kept.exists():
+            kept.parent.mkdir(parents=True, exist_ok=True)
+            temporary = kept.with_suffix(".tmp")
+            shutil.copy2(path, temporary)
+            os.replace(temporary, kept)
+        return {"kind": "journal", "location": f"journal:originals/{digest}", "sha256": digest}
+
+    def preserve_original(self, game_dir, path) -> dict:
+        """Keep a content-addressed copy before a game file is overwritten or removed."""
+        game_dir, path = Path(game_dir).resolve(), Path(path).resolve()
+        rel_of(game_dir, path)  # validates scope
+        return self.preserve_file(path)
+
+    def record_deployment(self, game_dir, operations: list[dict], *, tool: str, tag: str,
+                          inputs: dict | None = None, moves: list[dict] | None = None) -> dict:
+        """Bridge a completed GUI deployment's operation list into the install rollback ledger."""
+        game_dir = Path(game_dir).resolve()
+        if not self.has_baseline():
+            raise RuntimeError("deployment requires an install baseline so rollback can remove it")
+        run = self.start_run(tool, inputs)
+        for operation in operations:
+            target = Path(operation["target"]).resolve()
+            rel = rel_of(game_dir, target)
+            backup = Path(operation["backup"]).resolve() if operation.get("backup") else None
+            original = self.preserve_file(backup) if backup else {"kind": "absent"}
+            if not target.is_file():
+                raise FileNotFoundError(f"deployed file disappeared before journaling: {target}")
+            self.record(run["run"], rel, "replace" if backup else "create", sha256_file(target),
+                        original, tag=tag)
+        for move in moves or []:
+            source, target = Path(move["source"]).resolve(), Path(move["target"]).resolve()
+            original = self.preserve_file(target)
+            self.record(run["run"], rel_of(game_dir, source), "move", None, original, tag=tag)
+            self.record(run["run"], rel_of(game_dir, target), "create", original.get("sha256"),
+                        {"kind": "absent"}, tag=tag)
+        return self.finish_run(run)
 
     def baseline(self) -> dict:
         return json.loads(self.baseline_file.read_text(encoding="utf-8"))
@@ -266,6 +416,33 @@ class Journal:
         if mod:
             entry["mod"] = mod
         return self._append(self.ledger, entry)
+
+    def move_original(self, game_dir, source, destination, run: str, *, tag: str | None = None) -> dict:
+        """Move an original file while preserving a journal-owned copy for reliable rollback."""
+        if not self.has_baseline():
+            raise RuntimeError("original files cannot be moved before the install baseline is recorded")
+        game_dir, source, destination = Path(game_dir).resolve(), Path(source).resolve(), Path(destination).resolve()
+        try:
+            source_rel = rel_of(game_dir, source)
+        except ValueError as exc:
+            raise ValueError(f"the moved original is outside the game install: {source}") from exc
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        original = self.preserve_original(game_dir, source)
+        digest = original["sha256"]
+        if destination.exists():
+            raise FileExistsError(destination)
+        self.record(run, source_rel, "move", None,
+                    original, tag=tag)
+        try:
+            destination_rel = rel_of(game_dir, destination)
+        except ValueError:
+            destination_rel = None
+        if destination_rel is not None:
+            self.record(run, destination_rel, "create", digest, {"kind": "absent"}, tag=tag)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(destination))
+        return {"source": source_rel, "destination": str(destination), "sha256": digest}
 
     # ------------------------------------------------------------------------------------- runs / inputs
     def store_input(self, value) -> str:
@@ -352,9 +529,16 @@ class Journal:
         return dict(result, status="ready", archive=str(archive))
 
     # ------------------------------------------------------------------------------------ verify / state
+    def checkpoint_state(self, preserve_prerequisites: bool = True) -> dict[str, str | None]:
+        state = {key(rel): info["sha256"] for rel, info in self.baseline()["files"].items()}
+        if preserve_prerequisites:
+            for rel, info in self.prerequisites()["files"].items():
+                state[key(rel)] = info["sha256"]
+        return state
+
     def expected_state(self) -> dict[str, str | None]:
         """{casefolded rel: sha256 or None (should not exist)} after the last recorded change."""
-        state = {key(rel): info["sha256"] for rel, info in self.baseline()["files"].items()}
+        state = self.checkpoint_state()
         for entry in self.entries()[0]:
             state[key(entry["path"])] = entry.get("after_sha256")
         return state
@@ -386,7 +570,15 @@ class Journal:
         originals = self._originals(entries)
         backup_keys = {key(o["location"].partition(":")[2]) for o in originals.values()
                        if o.get("location", "").startswith("game:")}
-        expected = ({k: i["sha256"] for k, i in stats.items()} if against == "baseline" else self.expected_state())
+        if against == "baseline":
+            expected = self.checkpoint_state(False)
+        elif against == "prerequisites":
+            expected = self.checkpoint_state(True)
+            for rel, info in self.prerequisites()["files"].items():
+                stats[key(rel)] = info
+                layers[key(rel)] = info["layer"]
+        else:
+            expected = self.expected_state()
         if against == "deployed":
             for original in originals.values():
                 if original.get("location", "").startswith("game:"):
@@ -454,13 +646,14 @@ class Journal:
         return target
 
     # -------------------------------------------------------------------------------------- rollback
-    def plan_rollback(self, game_dir) -> dict:
-        """Steps that return the install to the baseline. Prerequisites and user data are kept."""
+    def plan_rollback(self, game_dir, *, preserve_prerequisites: bool = True) -> dict:
+        """Return to the prerequisite checkpoint by default; optionally add a store-only second stage."""
         game_dir = Path(game_dir).resolve()
         base = self.baseline()
         entries, problems = self.entries()
         originals = self._originals(entries)
-        steps, refuse, used_backups = [], list(problems), []
+        steps, prerequisite_steps, refuse, used_backups = [], [], list(problems), []
+        rollback_checkpoint = self.checkpoint_state(True)
         for k, original in sorted(originals.items(), key=lambda kv: -max(e["seq"] for e in entries
                                                                           if key(e["path"]) == kv[0])):
             rel = original["path"]
@@ -468,6 +661,9 @@ class Journal:
                 steps.append({"op": "delete", "path": rel})
                 continue
             current = game_dir / rel
+            checkpoint_hash = rollback_checkpoint.get(k)
+            if checkpoint_hash is not None and current.is_file() and sha256_file(current) == checkpoint_hash:
+                continue
             if current.is_file() and sha256_file(current) == original["sha256"]:
                 continue                                  # already the original
             try:
@@ -478,20 +674,58 @@ class Journal:
             if not source.is_file() or sha256_file(source) != original["sha256"]:
                 refuse.append(f"{rel}: original missing or changed at {original['location']}")
                 continue
-            base_info = base["files"].get(rel) or next((i for r, i in base["files"].items() if key(r) == k), None)
-            if base_info and base_info["sha256"] != original["sha256"]:
-                refuse.append(f"{rel}: the recorded original does not match the baseline")
+            if checkpoint_hash is not None and checkpoint_hash != original["sha256"]:
+                refuse.append(f"{rel}: the recorded original does not match the prerequisite checkpoint")
                 continue
             steps.append({"op": "restore", "path": rel, "from": original["location"]})
             if key(original["location"].partition(":")[2]).startswith(BACKUP_PREFIXES) and \
                     original["location"].startswith("game:"):
                 used_backups.append(original["location"])
         ini = game_dir / "Morrowind.ini"
-        if "morrowind.ini" not in originals and self.baseline_ini.is_file() and (not ini.is_file() or sha256_file(ini) != sha256_file(self.baseline_ini)):
-            steps.append({"op": "restore-ini", "path": "Morrowind.ini", "from": "journal:baseline/Morrowind.ini"})
+        prereq_ini = next((info for rel, info in self.prerequisites()["files"].items()
+                           if key(rel) == "morrowind.ini"), None)
+        ini_source = prereq_ini.get("backup") if prereq_ini else "journal:baseline/Morrowind.ini"
+        ini_hash = prereq_ini.get("sha256") if prereq_ini else (
+            sha256_file(self.baseline_ini) if self.baseline_ini.is_file() else None)
+        if "morrowind.ini" not in originals and ini_hash and (not ini.is_file() or sha256_file(ini) != ini_hash):
+            steps.append({"op": "restore", "path": "Morrowind.ini", "from": ini_source})
+        if not preserve_prerequisites:
+            for rel, info in self.prerequisites()["files"].items():
+                baseline_info = base["files"].get(rel) or next(
+                    (item for name, item in base["files"].items() if key(name) == key(rel)), None)
+                if baseline_info is None:
+                    prerequisite_steps.append({"op": "delete", "path": rel})
+                elif baseline_info["sha256"] != info["sha256"]:
+                    source = ("journal:baseline/Morrowind.ini" if key(rel) == "morrowind.ini"
+                              and self.baseline_ini.is_file() else baseline_info.get("backup"))
+                    if source:
+                        prerequisite_steps.append({"op": "restore", "path": rel, "from": source})
+                    else:
+                        refuse.append(f"{rel}: no store-original copy was retained")
+            planned = {key(step["path"]) for step in prerequisite_steps}
+            for path in walk_files(game_dir):
+                rel = rel_of(game_dir, path)
+                k = key(rel)
+                if k in planned or not classify(rel).startswith("prereq:"):
+                    continue
+                baseline_info = base["files"].get(rel) or next(
+                    (item for name, item in base["files"].items() if key(name) == k), None)
+                if baseline_info is None:
+                    prerequisite_steps.append({"op": "delete", "path": rel})
+                elif sha256_file(path) != baseline_info["sha256"]:
+                    if baseline_info.get("backup"):
+                        prerequisite_steps.append({"op": "restore", "path": rel,
+                                                   "from": baseline_info["backup"]})
+                    else:
+                        refuse.append(f"{rel}: no store-original copy was retained")
         journaled = {key(e["path"]) for e in entries}
-        unexplained = [p for p in self.verify(game_dir)["unexplained"] if key(p) not in journaled]
-        return {"steps": steps, "refuse": refuse, "unexplained": unexplained,
+        prereq_paths = {key(rel) for rel in self.prerequisites()["files"]}
+        planned_paths = {key(step["path"]) for step in steps + prerequisite_steps}
+        against = "prerequisites" if preserve_prerequisites else "baseline"
+        unexplained = [p for p in self.verify(game_dir, against=against)["unexplained"]
+                       if key(p) not in journaled and key(p) not in prereq_paths and key(p) not in planned_paths]
+        return {"steps": steps, "prerequisite_steps": prerequisite_steps, "refuse": refuse,
+                "unexplained": unexplained,
                 "cleanup_after_verify": sorted(set(used_backups))}
 
     def execute_rollback(self, game_dir, plan: dict) -> None:
@@ -499,7 +733,7 @@ class Journal:
         if plan["refuse"]:
             raise RuntimeError("rollback refused: " + "; ".join(plan["refuse"]))
         game_dir = Path(game_dir).resolve()
-        for step in plan["steps"]:
+        for step in plan["steps"] + plan.get("prerequisite_steps", []):
             target = game_dir / step["path"]
             if step["op"] == "delete":
                 if target.is_file():
@@ -531,7 +765,7 @@ class Journal:
 
 # ------------------------------------------------------------------------------------------------- CLI
 def print_report(lines: list[str], title: str) -> None:
-    print(title)
+    print(wrap(title, bullet=False))
     for line in lines:
         print(wrap(line))
 
@@ -547,6 +781,14 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
         summary = [f"{layer}: {count} file(s)" for layer, count in sorted(record["summary"].items())]
         print_report(summary + [f"Warning: {w}" for w in record["warnings"]],
                      f"Baseline captured: {journal.baseline_file}")
+        return 0
+    if args.capture_prerequisites:
+        if not journal.has_baseline():
+            print_report(["Capture the store baseline first."], "Prerequisites not captured:")
+            return 2
+        record = journal.capture_prerequisites(game_dir)
+        print_report([f"Prerequisite-layer files: {len(record['files'])}"],
+                     f"Prerequisites captured: {journal.prerequisites_file}")
         return 0
     if args.mod_rollback:
         if not args.dry_run:
@@ -575,29 +817,68 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
         print_report(lines, f"Verify against {args.verify_against}: {'OK' if report['ok'] else 'differences found'}")
         return 0 if report["ok"] else 1
     if args.rollback:
-        if not args.dry_run:
-            print_report(["Only --rollback --dry-run is available in this version; it reports what a rollback "
-                          "would do and changes nothing."], "Rollback not run:")
-            return 2
-        plan = journal.plan_rollback(game_dir)
+        plan = journal.plan_rollback(game_dir, preserve_prerequisites=not args.gog_only)
         lines = [f"{s['op']}: {s['path']}" + (f" (from {s['from']})" if s.get("from") else "") for s in plan["steps"]]
+        lines += [f"GOG-only second stage: {s['op']}: {s['path']}" +
+                  (f" (from {s['from']})" if s.get("from") else "")
+                  for s in plan["prerequisite_steps"]]
         lines += [f"REFUSE: {r}" for r in plan["refuse"]]
         lines += [f"Not explained by the journal (left alone, review): {p}" for p in plan["unexplained"]]
         lines += [f"After a verified rollback, remove the used backup {c}" for c in plan["cleanup_after_verify"]]
-        print_report(lines or ["The install already matches the baseline."], "Rollback plan (dry run, nothing changed):")
-        return 1 if plan["refuse"] else 0
+        if args.dry_run:
+            print_report(lines or ["The install already matches the baseline."],
+                         "Rollback plan (dry run, nothing changed):")
+            return 1 if plan["refuse"] else 0
+        if plan["refuse"] or plan["unexplained"]:
+            print_report(lines, "Rollback refused:")
+            return 1
+        journal.execute_rollback(game_dir, plan)
+        against = "baseline" if args.gog_only else "prerequisites"
+        report = journal.verify(game_dir, against=against, full_hash=True)
+        if not report["ok"]:
+            problems = report["changed"] + report["missing"] + report["extra"] + \
+                report["journal_problems"] + report["original_problems"]
+            print_report(problems, "Rollback files were applied, but verification failed; backups were retained:")
+            return 1
+        removed = journal.cleanup_used_backups(game_dir, plan, apply=True)
+        archived = journal.archive_ledger()
+        manager_dir = journal.root.parent
+        settings_path = manager_dir / "mwmanager_gui_settings.json"
+        try:
+            settings = json.loads(settings_path.read_text(encoding="utf-8"))
+            settings.update(first_run=1, init_complete=0)
+            settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+        except (OSError, ValueError, AttributeError):   # missing or damaged settings: setup starts over anyway
+            pass
+        try:
+            import mwmanager_setup_state as setup_state
+            state_path = manager_dir / "mwmanager_setup_state.json"
+            setup_state.start(state_path, game_dir)
+            setup_state.complete(state_path, game_dir, "paths_confirmed")
+            # preflight_complete is not marked, even when the prerequisites were kept: the rollback also took
+            # out the MWSE Lua suite and the moved add-on documents, which the preflight puts back
+        except OSError:
+            pass
+        print_report([f"Verified against {against} with full hashes.",
+                      f"Removed {len(removed)} used backup file(s).",
+                      f"Archived the completed ledger at {archived}."], "Rollback complete:")
+        return 0
     return 2
 
 
 def add_arguments(ap: argparse.ArgumentParser) -> None:
     ap.add_argument("--capture-baseline", action="store_true",
-                    help="snapshot every file of the install as you start from it, fresh or already modded, so "
-                         "--rollback can return to it (read-only on the install)")
+                    help="snapshot the clean store install before prerequisites (read-only on the install)")
+    ap.add_argument("--capture-prerequisites", action="store_true",
+                    help="record MWSE, MCP and MGE XE as the default rollback checkpoint")
     ap.add_argument("--force-baseline", action="store_true", help="replace an existing baseline")
     ap.add_argument("--verify", action="store_true", help="compare the install with the baseline or deployed state")
-    ap.add_argument("--verify-against", choices=("baseline", "deployed"), default="baseline")
+    ap.add_argument("--verify-against", choices=("baseline", "prerequisites", "deployed"), default="baseline")
     ap.add_argument("--full-hash", action="store_true", help="hash every file instead of trusting size and date")
-    ap.add_argument("--rollback", action="store_true", help="with --dry-run: report how to return to the baseline")
+    ap.add_argument("--rollback", action="store_true",
+                    help="return to the prerequisite checkpoint; --dry-run reports the plan without changes")
+    ap.add_argument("--gog-only", action="store_true",
+                    help="with --rollback: add a second stage that removes prerequisites too")
     ap.add_argument("--mod-rollback", metavar="MOD_KEY", help="with --dry-run: check a mod can be re-extracted")
     ap.add_argument("--archive-dir", help="folder to look for a mod's archive in")
     ap.add_argument("--open-download", action="store_true",

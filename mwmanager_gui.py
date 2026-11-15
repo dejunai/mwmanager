@@ -17,6 +17,7 @@ import tkinter as tk
 from tkinter import filedialog, ttk
 
 import mwmanager_dialogs as messagebox  # themed prompts
+import mwmanager_setup_state as setup_state
 
 from mwmanager_theme import COLORS, FONTS, SPACE, apply_theme, center, tree_tags
 
@@ -28,12 +29,16 @@ PATH_SETTING_KEYS = {"game_dir", "archive_downloads_dir", "always_elevate_game_d
 LEGACY_PATH_KEYS = {"archive_downloads_dir": ("downloads_dir",)}
 # Where archives come from: a detected mod manager ("vortex", later "mo2", ...) or "unmanaged" (a folder the user
 # chose). Older settings stored uses_vortex (true/false); it is read once and replaced.
-RUNTIME_KEYS = {"vortex_detected", "vortex_exe"}
+RUNTIME_KEYS = {"vortex_detected", "vortex_exe", "paths_confirmed"}
 LEGACY_PREFERENCE_KEYS = {"uses_vortex"}
 SORT_FILE = APP_DIR / "mwmanager_sort_order.txt"
 CORE = ("Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm")
 ESM_FIX_PATCH = "mwmanager - ESM fixes.esp"
 XE_SKY_PLUGIN = "XE Sky Variations.esp"
+OFFICIAL_SHIPPED_ESPS = (
+    "adamantiumarmor.esp", "AreaEffectArrows.esp", "bcsounds.esp", "EBQ_Artifact.esp",
+    "entertainers.esp", "LeFemmArmor.esp", "master_index.esp", "Siege at Firemoth.esp",
+)
 END_PATCHES = (
     "mwmanager PlaceholderCell ESP Patch.esp",
     "mwmanager Cell Fixes.esp",
@@ -61,6 +66,15 @@ TIDY_SCRIPT = APP_DIR / "mwmanager_install.py"
 TIDY_REFUSED = 2                                      # mwmanager_install.py --apply: plan missing or changed
 
 
+def _atomic_write(path: Path, data: bytes) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    try:
+        temporary.write_bytes(data)
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 class TidyCancelled(Exception):
     """The Tidy plan was not applied because Cancel was chosen."""
 
@@ -83,11 +97,16 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
     base = [str(py), "-u", str(TIDY_SCRIPT), "--staging", str(staging), "--game-data-files", str(data_files)]
     if only:
         base += ["--only", only]
+    if quiet is None and os.name == "nt":
+        startup = subprocess.STARTUPINFO()
+        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startup.wShowWindow = subprocess.SW_HIDE
+        quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
 
     def step(extra, what):
         if log:
             log(f"START {label}: {what}")
-        process = subprocess.Popen(base + extra, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        process = _popen(base + extra, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                                    bufsize=1, env=env, **(quiet or {}))
         recent, mods, plan = [], None, (None, None)
@@ -132,7 +151,8 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
                            f"was none. Nothing was changed; run it again to review the new plan.\n\n"
                            + "\n".join(recent)[-4000:])
     if code:
-        progress(f"{label}: some Tidy actions could not be applied; they stay listed in {plan_path}.")
+        raise RuntimeError(f"{label}: Tidy could not apply every action (exit code {code}). The remaining actions "
+                           f"stay in {plan_path}; deployment is halted.\n\n" + "\n".join(recent)[-4000:])
     return mods
 
 
@@ -161,7 +181,7 @@ def write_disabled_plugins(entries: dict[str, str]) -> None:
     lines = ["; Plugins disabled by MWManager are kept in MWManager\\disabled_plugins.",
              "; --reenable restores and enables them.", ""]
     lines.extend(f"{name}\t{reason}" for name, reason in entries.items())
-    DISABLED_RECORD.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _atomic_write(DISABLED_RECORD, ("\n".join(lines) + "\n").encode("utf-8"))
 
 
 def _read_ready_plugin_stages() -> list[dict]:
@@ -202,6 +222,122 @@ def _remove_ready_plugin_stage(package: Path) -> None:
     ready = [item for item in _read_ready_plugin_stages()
              if str(Path(item["staging_package"]).resolve()).casefold() != package_key]
     _write_ready_plugin_stages(ready)
+
+
+_CHILDREN = set()                 # the processes of running steps: ended when the window is closed
+
+
+def _popen(*args, **kwargs):
+    """subprocess.Popen for a step MWManager waits on: remembered, so closing the window ends it too."""
+    process = subprocess.Popen(*args, **kwargs)
+    for old in [p for p in _CHILDREN if _ended(p)]:       # forget the ones that have finished
+        _CHILDREN.discard(old)
+    _CHILDREN.add(process)
+    return process
+
+
+def _ended(process) -> bool:
+    poll = getattr(process, "poll", None)
+    return poll is None or poll() is not None
+
+
+def _end_children() -> None:
+    """End every step still running (and what it started). A step left alive would keep changing Data Files
+    while the next MWManager resumes the same step."""
+    for process in list(_CHILDREN):
+        if not _ended(process):
+            try:
+                setup_state.end_process(process.pid)
+                process.wait(timeout=10)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        _CHILDREN.discard(process)
+
+
+def _single_instance(wait_seconds: float = 6.0):
+    """Hold outputs\\mwmanager.lock while this process lives. None when another MWManager has it (a restart
+    starts the new one just before the old one goes, so it waits a few seconds first)."""
+    import time
+    path = APP_DIR / "outputs" / "mwmanager.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(path, "a+")
+    deadline = time.monotonic() + wait_seconds
+    while True:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return handle
+        except OSError:
+            if time.monotonic() >= deadline:
+                handle.close()
+                return None
+            time.sleep(0.25)
+
+
+class _ShellProgram:
+    """A program started the way Explorer starts it, in its own folder, that can be waited on.
+
+    The Morrowind Code Patch (and MGEXEgui) read their files relative to the working directory, and Windows
+    asks for administrator rights before starting the Code Patch, which a plain CreateProcess refuses
+    (error 740). ShellExecuteEx does both: it shows the consent prompt, and lpDirectory sets the folder the
+    program starts in even when it is elevated. poll() is None while it runs, then its exit code."""
+
+    def __init__(self, path, arguments=""):
+        import ctypes
+        from ctypes import wintypes
+
+        class Info(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD), ("fMask", wintypes.ULONG), ("hwnd", wintypes.HWND),
+                        ("lpVerb", wintypes.LPCWSTR), ("lpFile", wintypes.LPCWSTR),
+                        ("lpParameters", wintypes.LPCWSTR), ("lpDirectory", wintypes.LPCWSTR),
+                        ("nShow", ctypes.c_int), ("hInstApp", wintypes.HINSTANCE), ("lpIDList", ctypes.c_void_p),
+                        ("lpClass", wintypes.LPCWSTR), ("hkeyClass", wintypes.HKEY), ("dwHotKey", wintypes.DWORD),
+                        ("hIcon", wintypes.HANDLE), ("hProcess", wintypes.HANDLE)]
+
+        path = Path(path)
+        info = Info()
+        info.cbSize = ctypes.sizeof(Info)
+        info.fMask = 0x00000040 | 0x00000100          # SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC
+        info.lpFile = str(path)
+        info.lpParameters = arguments or None
+        info.lpDirectory = str(path.parent)
+        info.nShow = 1                                # SW_SHOWNORMAL
+        shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+        shell32.ShellExecuteExW.argtypes = [ctypes.POINTER(Info)]
+        shell32.ShellExecuteExW.restype = wintypes.BOOL
+        if not shell32.ShellExecuteExW(ctypes.byref(info)):
+            error = ctypes.get_last_error()
+            if error == 1223:                         # ERROR_CANCELLED: the consent prompt was declined
+                raise OSError(f"{path.name} was not started: the administrator prompt was declined")
+            raise OSError(error, ctypes.FormatError(error).strip() or f"could not start {path.name}")
+        self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        self._kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        self._kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self._handle = info.hProcess                  # None when Windows handed the file to a running program
+        self._code = None
+
+    @property
+    def waitable(self) -> bool:
+        return bool(self._handle) or self._code is not None
+
+    def poll(self):
+        if self._code is not None or not self._handle:
+            return self._code
+        if self._kernel32.WaitForSingleObject(self._handle, 0) == 0x102:      # WAIT_TIMEOUT: still running
+            return None
+        from ctypes import byref, wintypes
+        code = wintypes.DWORD(0)
+        ok = self._kernel32.GetExitCodeProcess(self._handle, byref(code))
+        self._code = int(code.value) if ok else 0     # an elevated program may not give its code: it ended
+        self._kernel32.CloseHandle(self._handle)
+        self._handle = None
+        return self._code
 
 
 def center_window(window, parent, width: int, height: int) -> None:
@@ -506,7 +642,9 @@ def read_settings() -> dict:
         pass
     paths = ini["Paths"] if ini.has_section("Paths") else {}
     configured_game = str(paths.get("game_dir", "")).strip()
-    data["game_dir"] = str(_valid_morrowind_install(configured_game) or default_game_dir())
+    confirmed_game = _valid_morrowind_install(configured_game)
+    data["paths_confirmed"] = bool(confirmed_game)
+    data["game_dir"] = str(confirmed_game or default_game_dir())
     data["archive_downloads_dir"] = next((str(paths.get(key, "")).strip()
                                           for key in ("archive_downloads_dir", *LEGACY_PATH_KEYS["archive_downloads_dir"])
                                           if str(paths.get(key, "")).strip()), "")
@@ -723,7 +861,7 @@ def read_game_ini_order(game_dir: Path) -> list[str]:
 
 def write_order(order: list[str]) -> None:
     lines = ["; MWManager active load order. Core masters are fixed at the top.", "", *order, ""]
-    SORT_FILE.write_text("\n".join(lines), encoding="utf-8")
+    _atomic_write(SORT_FILE, "\n".join(lines).encode("utf-8"))
 
 
 def plugins_in_data(data_dir: Path) -> list[str]:
@@ -843,8 +981,13 @@ class ManagerGUI(tk.Tk):
                                                if name.casefold() in self.active_names}
                                               | self._staged_major_master_names()))
         self.pending_order_rules = []
+        if self.settings.get("paths_confirmed"):
+            self._setup_reconcile()
         first_run = self.settings.get("first_run", 0) == 1
-        if not first_run:
+        paths_confirmed = bool(self.settings.get("paths_confirmed"))
+        if first_run and paths_confirmed and not self._setup_done("paths_confirmed"):
+            self._setup_complete("paths_confirmed")  # migrate an interrupted run created before checkpoints
+        if not first_run or paths_confirmed:
             offer_elevation(Path(self.settings["game_dir"]))
         if not first_run:
             self._initialize_plugin_baseline()
@@ -852,8 +995,13 @@ class ManagerGUI(tk.Tk):
         self._build_menu()
         self._build_ui()
         if first_run:
-            self.game_label.config(text="Confirm the Morrowind and downloads paths before MWManager scans plugins.")
-            self.after(150, self._open_detected_paths)
+            if paths_confirmed:
+                self.game_label.config(text="Saved paths loaded. Resuming the incomplete preflight…")
+                self.refresh()
+                self.after(150, self._begin_first_run)
+            else:
+                self.game_label.config(text="Confirm the Morrowind and downloads paths before MWManager scans plugins.")
+                self.after(150, self._open_detected_paths)
         else:
             self.refresh()
         if not first_run and self.settings.get("init_complete", 0) != 1:
@@ -867,6 +1015,63 @@ class ManagerGUI(tk.Tk):
         core = [order_by_name.get(name.casefold(), name) for name in CORE]
         rest = [n for n in self.order if n.casefold() not in {c.casefold() for c in CORE}]
         self.order = core + rest
+
+    def _setup_path(self):
+        return APP_DIR / "mwmanager_setup_state.json"
+
+    def _setup_done(self, step):
+        return setup_state.done(self._setup_path(), self.settings["game_dir"], step)
+
+    def _setup_complete(self, step):
+        return setup_state.complete(self._setup_path(), self.settings["game_dir"], step)
+
+    def _setup_start(self):
+        setup_state.start(self._setup_path(), self.settings["game_dir"])
+        self._setup_complete("paths_confirmed")
+
+    def _setup_begin(self, step, pid=None):
+        return setup_state.begin(self._setup_path(), self.settings["game_dir"], step, pid)
+
+    def _setup_fail(self, step, error):
+        return setup_state.fail(self._setup_path(), self.settings["game_dir"], step, error)
+
+    def _setup_reconcile(self):
+        """The step file is the record of setup; the two flags in the settings file follow it."""
+        changed = False
+        if self._setup_done("initial_full_complete") and self.settings.get("first_run", 0) == 1:
+            self.settings["first_run"] = 0
+            changed = True
+        if self._setup_done("initialization_complete") and self.settings.get("init_complete", 0) != 1:
+            self.settings["first_run"], self.settings["init_complete"] = 0, 1
+            changed = True
+        if changed:
+            write_settings(self.settings)
+
+    def _setup_resume_check(self) -> bool:
+        """Say which step was interrupted. If the process that was doing it is still alive (MWManager was
+        ended without closing its window), offer to end it; False when the user leaves it running."""
+        step, entry = setup_state.interrupted(self._setup_path(), self.settings["game_dir"])
+        if not step:
+            return True
+        label = setup_state.LABELS.get(step, step)
+        live_step, live = setup_state.running(self._setup_path(), self.settings["game_dir"])
+        pid = live.get("pid") if live_step else None
+        if pid and pid != os.getpid():
+            label = setup_state.LABELS.get(live_step, live_step)
+            if not messagebox.askyesno(
+                    "A setup step is still running",
+                    f"MWManager stopped during {label}, but the process doing it (PID {pid}) is still running "
+                    "and may still be changing Data Files.\n\nEnd it and run the step again?\n\n"
+                    "Choose No to leave it running; start MWManager again when it has finished.",
+                    icon="warning", default="no", parent=self):
+                self.status.set(f"Setup is waiting: {label} is still running (PID {pid}).")
+                return False
+            setup_state.end_process(pid)
+        note = f"Resuming setup: {label} was interrupted (attempt {int(entry.get('attempts') or 0) + 1})."
+        if entry.get("last_error"):
+            note += " Last error: " + str(entry["last_error"]).splitlines()[0][:160]
+        self.status.set(note)
+        return True
 
     def _initialize_plugin_baseline(self):
         game_dir = str(Path(self.settings["game_dir"]).resolve())
@@ -924,13 +1129,57 @@ class ManagerGUI(tk.Tk):
         if not self._ensure_archive_downloads():
             self.status.set("First-run setup is waiting for an archive download folder.")
             return
+        if not self._setup_resume_check():
+            return
 
         def worker(progress):
             from preinstall import run_preinstall
-            return run_preinstall(Path(self.settings["game_dir"]), APP_DIR, progress)
+            return run_preinstall(Path(self.settings["game_dir"]), APP_DIR, progress, first_run=True,
+                                  archive_source=self.settings.get("archive_source"),
+                                  archive_dir=self.settings.get("archive_downloads_dir"))
+
+        def continue_after_preflight():
+            self.order = read_order()
+            existing = {name.casefold() for name in plugins_in_data(Path(self.settings["game_dir"]) / "Data Files")}
+            self.active_names.intersection_update(existing)
+            self.refresh()
+            self._update_action_buttons()
+            self.status.set("Preflight complete. Sorting plugins before Tidy and the initial --full cycle…")
+
+            def full_completed():
+                self._setup_complete("initial_full_complete")
+                self.settings["first_run"] = 0
+                write_settings(self.settings)
+                self._offer_major_master_processing()
+
+            def run_full():
+                if self._setup_done("initial_full_complete"):
+                    full_completed()
+                    return
+                data_dir = Path(self.settings["game_dir"]) / "Data Files"
+                if (data_dir / XE_SKY_PLUGIN).is_file():
+                    self.active_names.add(XE_SKY_PLUGIN.casefold())
+                self.refresh()
+                game = self.settings["game_dir"]
+                state_path = self._setup_path()
+                # the --full pass itself is a checkpoint: closing during the conflict scan that follows does not
+                # repeat it. A conflict review takes it back, because the rebuild after it must run the pass.
+                skip = self._setup_done("initial_full_pass_complete")
+                self._setup_begin("initial_full_complete")
+                if not skip:
+                    self._setup_begin("initial_full_pass_complete")
+                self.generate_patches(
+                    mode="full", force=True, asset_repair=True, on_success=full_completed, skip_first_pass=skip,
+                    on_first_pass=lambda: setup_state.complete(state_path, game, "initial_full_pass_complete"),
+                    on_review=lambda: setup_state.reset(state_path, game, "initial_full_pass_complete"),
+                    on_spawn=lambda pid: setup_state.set_pid(state_path, game, "initial_full_complete", pid),
+                    on_failure=lambda error: setup_state.fail(state_path, game, "initial_full_complete", error))
+
+            self.after(200, lambda: self._run_initial_tidy(run_full))
 
         def completed(result, error):
             if error:
+                self._setup_fail("preflight_complete", error)
                 self.status.set("First-run preflight stopped with an error.")
                 messagebox.showerror("First-run preflight failed", str(error), parent=self)
                 return
@@ -941,22 +1190,97 @@ class ManagerGUI(tk.Tk):
                 self._cancel_until_restart()
                 return
             if not result:
+                self._setup_fail("preflight_complete", "stopped at a prompt before it finished")
                 self.status.set("First-run setup remains incomplete; retry it after resolving the prompts.")
                 return
-            self.settings["first_run"] = 0
-            write_settings(self.settings)
-            self.order = read_order()
-            existing = {name.casefold() for name in plugins_in_data(Path(self.settings["game_dir"]) / "Data Files")}
-            self.active_names.intersection_update(existing)
-            self.refresh()
-            self._update_action_buttons()
-            self.status.set("Preflight complete. Choose whether to process the major masters.")
-            self.after(200, self._offer_major_master_processing)
+            self._setup_complete("preflight_complete")
+            continue_after_preflight()
 
-        self._run_progress_job("First-run preflight", "Checking prerequisites and initial setup…",
+        if self._setup_done("preflight_complete"):
+            continue_after_preflight()
+        else:
+            self._setup_begin("preflight_complete")
+            self._run_progress_job("First-run preflight", "Checking prerequisites and initial setup…",
+                                   worker, completed)
+
+    def _run_initial_tidy(self, on_success):
+        """Apply the live Data Files tidy and sort every shipped plugin before the first full pass."""
+        data_dir = Path(self.settings["game_dir"]) / "Data Files"
+        present = {name.casefold() for name in plugins_in_data(data_dir)}
+        self.active_names.update(name.casefold() for name in OFFICIAL_SHIPPED_ESPS
+                                 if name.casefold() in present)
+        if (data_dir / XE_SKY_PLUGIN).is_file():
+            self.active_names.add(XE_SKY_PLUGIN.casefold())
+        self.refresh()
+        self.save()
+        python = str(self._console_python())
+        commands = []
+        if not self._setup_done("sort_complete"):
+            commands.append(("sort_complete", "Sorting the shipped plugins before --full…",
+                             [python, "-u", str(APP_DIR / "mwmanager.py"), str(data_dir), "--sort", "--yes",
+                              "--no-follow-up"]))
+        if not self._setup_done("tidy_complete"):
+            commands.append(("tidy_complete", "Tidying Data Files and applying safe fixes…",
+                             [python, "-u", str(TIDY_SCRIPT), "--init", "--game-data-files", str(data_dir),
+                              "--apply", "--yes"]))
+        log_path = APP_DIR / "outputs" / "mwmanager_initial_setup.log"
+
+        if not commands:
+            self.after(100, on_success)
+            return
+
+        def worker(report):
+            quiet = {}
+            if os.name == "nt":
+                startup = subprocess.STARTUPINFO()
+                startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startup.wShowWindow = subprocess.SW_HIDE
+                quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
+            env = os.environ.copy()
+            env["MWMANAGER_GUI"] = "1"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            # a resume adds to the log of the steps already done; a fresh setup starts it over
+            mode = "a" if len(commands) < 2 else "w"
+            game = self.settings["game_dir"]
+            with log_path.open(mode, encoding="utf-8", errors="replace") as log:
+                for step, label, command in commands:
+                    recent = []
+                    report(label)
+                    log.write(f"\n=== {label.rstrip('…')} ===\n")
+                    process = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL,
+                                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                               encoding="utf-8", errors="replace", bufsize=1, env=env, **quiet)
+                    setup_state.begin(self._setup_path(), game, step, getattr(process, "pid", None))
+                    for line in process.stdout:
+                        log.write(line)
+                        message = " ".join(line.strip().split())
+                        if message:
+                            recent.append(message)
+                            del recent[:-12]
+                            report(_display_line(line))
+                    result = process.wait()
+                    if result:
+                        log.write(f"\nExited with code {result}.\n")
+                        problem = (f"{label.rstrip('…')} failed (exit {result}).\n\n" +
+                                   ("\n".join(recent) or "No diagnostic output was produced."))
+                        setup_state.fail(self._setup_path(), game, step, problem)
+                        raise RuntimeError(problem)
+                    self._setup_complete(step)
+            return True
+
+        def completed(_result, error):
+            if error:
+                self.status.set("Initial Tidy stopped; --full was not started.")
+                self._show_report("Initial setup failed", log_path)
+                return
+            self.status.set("Shipped-plugin sort and Initial Tidy complete. Running the initial --full cycle…")
+            self.after(100, on_success)
+
+        self._run_progress_job("Initial setup", "Sorting shipped plugins before Tidy and --full…",
                                worker, completed)
 
     def _complete_init(self):
+        self._setup_complete("initialization_complete")
         self.settings["init_complete"] = 1
         write_settings(self.settings)
         self.status.set("MWManager initialization complete.")
@@ -1068,7 +1392,25 @@ class ManagerGUI(tk.Tk):
             if source != "unmanaged" and folder and mwmanager_detect.source_for_folder(managers, folder) != source:
                 source = "unmanaged"                 # edited by hand: it is the user's own folder now
             dialog.destroy()
-            self.open_options(first_run=first_run, game=str(game), downloads=folder, archive_source=source)
+            if not first_run:
+                self.open_options(first_run=False, game=str(game), downloads=folder, archive_source=source)
+                return
+            self.settings.update({"game_dir": str(game), "archive_downloads_dir": folder,
+                                  "archive_source": source, "first_run": 1, "init_complete": 0})
+            write_settings(self.settings)
+            self._setup_start()
+            offer_elevation(game)
+            ini_order = read_game_ini_order(game)
+            self.order = ini_order or read_order()
+            self.active_names = {name.casefold() for name in ini_order} if ini_order else set()
+            self.gui_state["game_dir"] = str(game.resolve())
+            self.gui_state["known_plugins"] = plugins_in_data(game / "Data Files")
+            write_gui_state(self.gui_state)
+            self._ensure_core()
+            self.refresh()
+            self._update_action_buttons()
+            self.status.set("Paths saved. Starting preflight for the selected install…")
+            self.after(150, self._begin_first_run)
 
         def cancel():
             dialog.destroy()
@@ -1085,52 +1427,18 @@ class ManagerGUI(tk.Tk):
         return dialog
 
     def _offer_major_master_processing(self):
-        """Ask before scanning downloads or opening the major-master workflow."""
+        """Temporary first-run handoff; do not start the major-master workflow yet."""
         import mwmanager_dialogs as messagebox
-        data_dir = Path(self.settings["game_dir"]) / "Data Files"
-        installed = {name.casefold() for name in self.major_masters if (data_dir / name).is_file()}
-        staged = self._staged_major_master_names()
-        missing = [name for name in self.major_masters if name.casefold() not in installed]
-        if not missing:
-            answer = messagebox.askyesnocancel(
-                "Major masters already installed",
-                "All configured major masters are already present in this install.\n\n"
-                "Yes: review enable/disable order or remove the deployed masters.\n"
-                "No: finish setup and continue to MWManager.\n"
-                "Cancel: stop here and leave initialization pending.", parent=self)
-            if answer is True:
-                self._complete_init()
-                self.open_major_masters()
-            elif answer is False:
-                self._complete_init()
-            else:
-                self._cancel_until_restart()
+        if self._setup_done("initialization_complete"):
+            self._complete_init()                      # already done: only the settings flag was behind
             return
-
-        staged_missing = [name for name in missing if name.casefold() in staged]
-        unstaged = [name for name in missing if name.casefold() not in staged]
-        summary = (f"Installed: {len(installed)} of {len(self.major_masters)}\n"
-                   f"Staged and ready: {len(staged_missing)}\n"
-                   f"Not yet staged: {len(unstaged)}\n\n")
-        if unstaged:
-            summary += ("Yes: scan the selected downloads folder for available masters, review missing downloads, "
-                        "and stage the ones you choose.\n")
-        else:
-            summary += "Yes: open the master window to review and deploy staged masters.\n"
-        summary += ("No: finish setup without processing masters now.\n"
-                    "Cancel: stop here and leave initialization pending.")
-        answer = messagebox.askyesnocancel("Ready to process major masters?", summary, parent=self)
-        if answer is True:
-            if staged_missing and not unstaged:
-                self._complete_init()
-                self.open_major_masters()
-            else:
-                self._initializing_manager = True
-                self.stage_major_masters(force_scan=True)
-        elif answer is False:
-            self._complete_init()
-        else:
-            self._cancel_until_restart()
+        messagebox.showinfo(
+            "Major masters",
+            "Pre-flight and the initial --full cycle are complete.\n\n"
+            "The major masters interface would start now. It is not started in this build.",
+            parent=self)
+        self._complete_init()
+        self.status.set("Initial setup complete; major-master processing was not started.")
 
     def _launch_vortex(self) -> bool:
         exe = Path(self.settings.get("vortex_exe") or "")
@@ -1148,7 +1456,13 @@ class ManagerGUI(tk.Tk):
         try:
             self.settings["first_run"] = 1
             write_settings(self.settings)
-            subprocess.Popen([sys.executable, str(Path(__file__).resolve())], cwd=str(APP_DIR))
+            quiet = {}
+            if os.name == "nt":
+                startup = subprocess.STARTUPINFO()
+                startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startup.wShowWindow = subprocess.SW_HIDE
+                quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
+            subprocess.Popen([sys.executable, str(Path(__file__).resolve())], cwd=str(APP_DIR), **quiet)
         except OSError as exc:
             messagebox.showerror("Could not restart MWManager",
                                  f"Close MWManager and launch it again to continue first-run setup.\n\n{exc}",
@@ -1420,6 +1734,35 @@ class ManagerGUI(tk.Tk):
         dialog.focus_set()
         self.wait_window(dialog)
 
+    def _show_report(self, title: str, path: Path) -> None:
+        """Display a generated text report inside MWManager."""
+        try:
+            contents = path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            messagebox.showerror(title, f"Could not read {path}: {exc}", parent=self)
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title(title)
+        dialog.transient(self)
+        center_window(dialog, self, 900, 620)
+        dialog.minsize(680, 420)
+        frame = ttk.Frame(dialog, padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text=str(path), style="Muted.TLabel", wraplength=850).pack(anchor="w", pady=(0, 8))
+        body = ttk.Frame(frame)
+        body.pack(fill="both", expand=True)
+        text = tk.Text(body, wrap="word", font=FONTS["mono"], state="normal")
+        scrollbar = ttk.Scrollbar(body, orient="vertical", command=text.yview)
+        text.configure(yscrollcommand=scrollbar.set)
+        text.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        text.insert("1.0", contents)
+        text.configure(state="disabled")
+        ttk.Button(frame, text="Close", command=dialog.destroy).pack(anchor="e", pady=(10, 0))
+        dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
+        dialog.lift()
+        dialog.focus_force()
+
     def install_plugins(self):
         """Choose regular plugin archives from Vortex or a manually selected archive."""
         source = messagebox.askyesnocancel(
@@ -1630,7 +1973,7 @@ class ManagerGUI(tk.Tk):
 
         def run_logged(command, progress, label, env=None):
             log_install_phase(f"START {label}: {command[0]} {Path(command[1]).name if len(command) > 1 else ''}")
-            process = subprocess.Popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            process = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                        stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                        errors="replace", bufsize=1, env=env, **quiet)
             recent = []
@@ -1663,7 +2006,7 @@ class ManagerGUI(tk.Tk):
                 progress(f"Reviewing {len(unresolved):,} unresolved cell conflict pair(s)…")
                 command = [str(py), "-u", str(manager_script), str(data_dir),
                            "--cell-conflicts", "--only-new", "--defer-follow-up"]
-                conflict = subprocess.Popen(command, cwd=str(APP_DIR), creationflags=
+                conflict = _popen(command, cwd=str(APP_DIR), creationflags=
                                             getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
                 if conflict.wait():
                     raise RuntimeError("The interactive cell-conflict review did not complete.")
@@ -1673,7 +2016,8 @@ class ManagerGUI(tk.Tk):
         def worker(progress):
             staging_root.mkdir(parents=True, exist_ok=True)
             from preinstall import run_preinstall
-            preflight_result = run_preinstall(game_dir, APP_DIR, progress)
+            preflight_result = run_preinstall(game_dir, APP_DIR, progress,
+                                              archive_dir=self.settings.get("archive_downloads_dir"))
             if preflight_result == "restart":
                 return {"processed": 0, "stopped": True, "restart": True,
                         "staging": str(staging_root)}
@@ -1728,9 +2072,9 @@ class ManagerGUI(tk.Tk):
                     linked, _skipped, operations = deploy_package(
                         package, data_dir, label, APP_DIR / "protected_replacer_textures.json")
                     archives = sorted(package.glob("*.bsa"), key=lambda path: path.name.casefold())
-                    registrations = register_archives(data_dir.parent / "Morrowind.ini", archives)
+                    registrations = register_archives(data_dir.parent / "Morrowind.ini", archives, APP_DIR)
                     plugins = item.get("selected_plugins", item.get("plugins", []))
-                    record_deployment(APP_DIR, item, package, operations, archives, registrations)
+                    record_deployment(APP_DIR, item, package, operations, archives, registrations, data_dir)
                     index_deployment(APP_DIR, data_dir, plugins, archives)
                     _remove_ready_plugin_stage(package)
                     progress(f"Deployed {linked:,} files from {label}.")
@@ -2010,7 +2354,11 @@ class ManagerGUI(tk.Tk):
         self.generate_patches(mode="full", force=True)
         return "break"
 
-    def generate_patches(self, mode="all", force=False):
+    def generate_patches(self, mode="all", force=False, on_success=None, asset_repair=False, *,
+                         skip_first_pass=False, on_first_pass=None, on_review=None, on_spawn=None,
+                         on_failure=None):
+        """skip_first_pass / on_first_pass / on_review / on_spawn / on_failure: setup's checkpoints (called from
+        the worker, so they must not touch Tk). on_review: a conflict review is starting, the pass runs again."""
         if not force and not self.generate_button.instate(["!disabled"]):
             return
         if not force:
@@ -2027,6 +2375,13 @@ class ManagerGUI(tk.Tk):
         mode = "full" if mode == "full" else "all"
         pass_flag = "--full" if mode == "full" else "--all"
         command = [str(self._console_python()), "-u", str(script), str(data_dir), "--sort", pass_flag, "--yes"]
+        if asset_repair:
+            command.append("--asset-repair")
+        report_path = APP_DIR / "outputs" / "mwmanager_report.txt"
+        try:
+            report_before = report_path.stat().st_mtime_ns
+        except OSError:
+            report_before = None
 
         def worker(report):
             quiet = {}
@@ -2035,13 +2390,17 @@ class ManagerGUI(tk.Tk):
                 startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startup.wShowWindow = subprocess.SW_HIDE
                 quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
+            env = os.environ.copy()
+            env["MWMANAGER_GUI"] = "1"
             recent = []
 
             def run_full_pass(label):
                 report(label)
-                process = subprocess.Popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                process = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                                           errors="replace", bufsize=1, **quiet)
+                                           errors="replace", bufsize=1, env=env, **quiet)
+                if on_spawn:
+                    on_spawn(getattr(process, "pid", None))
                 for line in process.stdout:
                     message = " ".join(line.strip().split())
                     if message:
@@ -2053,8 +2412,13 @@ class ManagerGUI(tk.Tk):
                     raise RuntimeError("MWManager's full plugin checks did not complete.\n\n" +
                                        ("\n".join(recent)[-5000:] or f"mwmanager.py exited with code {result}"))
 
-            report(f"MWMANAGER-STAGE: 1 of 4 — Sorting plugins and running --{mode} checks")
-            run_full_pass(f"Running --{mode} checks and generating patches…")
+            if skip_first_pass:
+                report(f"MWMANAGER-STAGE: 1 of 4 — The --{mode} pass finished before the interruption; not repeated")
+            else:
+                report(f"MWMANAGER-STAGE: 1 of 4 — Sorting plugins and running --{mode} checks")
+                run_full_pass(f"Running --{mode} checks and generating patches…")
+                if on_first_pass:
+                    on_first_pass()
 
             # Find unanswered cell conflicts without blocking the GUI process. The existing
             # resolver is opened only when there are decisions to make.
@@ -2062,9 +2426,9 @@ class ManagerGUI(tk.Tk):
             unresolved_path = APP_DIR / "outputs" / "mwmanager_new_conflicts.txt"
             scan_command = [str(self._console_python()), "-u", str(script), str(data_dir),
                             "--cell-conflicts", "--no-interactive"]
-            scan = subprocess.Popen(scan_command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+            scan = _popen(scan_command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                     stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                                    errors="replace", bufsize=1, **quiet)
+                                    errors="replace", bufsize=1, env=env, **quiet)
             scan_output = []
             for line in scan.stdout:
                 message = " ".join(line.strip().split())
@@ -2083,15 +2447,17 @@ class ManagerGUI(tk.Tk):
             except OSError:
                 unresolved = []
             if unresolved:
+                if on_review:
+                    on_review()
                 report(f"MWMANAGER-STAGE: 3 of 4 — Reviewing {len(unresolved):,} cell-conflict pair(s)")
                 report(f"Reviewing {len(unresolved):,} unresolved cell conflict pair(s)…")
                 conflict_command = [str(self._console_python()), "-u", str(script), str(data_dir),
                                     "--cell-conflicts", "--only-new", "--defer-follow-up"]
                 if os.name == "nt":
-                    conflict_process = subprocess.Popen(
+                    conflict_process = _popen(
                         conflict_command, cwd=str(APP_DIR), creationflags=subprocess.CREATE_NEW_CONSOLE)
                 else:
-                    conflict_process = subprocess.Popen(conflict_command, cwd=str(APP_DIR))
+                    conflict_process = _popen(conflict_command, cwd=str(APP_DIR))
                 conflict_result = conflict_process.wait()
                 if conflict_result:
                     raise RuntimeError("The cell-conflict review did not complete.\n\n" +
@@ -2104,8 +2470,17 @@ class ManagerGUI(tk.Tk):
 
         def completed(_result, error):
             if error:
+                if on_failure:
+                    on_failure(error)
                 self.status.set("Patch generation stopped; changes are still pending.")
-                messagebox.showerror("Generate Patches failed", str(error), parent=self)
+                try:
+                    report_changed = report_path.stat().st_mtime_ns != report_before
+                except OSError:
+                    report_changed = False
+                if report_changed:
+                    self._show_report("MWManager report", report_path)
+                else:
+                    messagebox.showerror("Generate Patches failed", str(error), parent=self)
                 self._update_action_buttons()
                 return
             self.order = read_order()
@@ -2117,6 +2492,8 @@ class ManagerGUI(tk.Tk):
             write_gui_state(self.gui_state)
             self.refresh()
             self.status.set("Plugin checks and patch generation completed. Play is ready.")
+            if on_success:
+                self.after(100, on_success)
 
         self._run_progress_job("Generate Patches", "Checking plugins and generating patches…", worker, completed)
 
@@ -2141,7 +2518,7 @@ class ManagerGUI(tk.Tk):
                     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                     startup.wShowWindow = subprocess.SW_HIDE
                     quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
-                process = subprocess.Popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                process = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                            errors="replace", bufsize=1, **quiet)
                 recent = []
@@ -2272,6 +2649,12 @@ class ManagerGUI(tk.Tk):
         protected = {name.casefold() for name in CORE} | merged | LOCKED_PATCHES
         disabled_now = [name for name in disk_names
                         if name.casefold() not in enabled and name.casefold() not in protected]
+        state_paths = (DISABLED_RECORD, SORT_FILE, APP_DIR / "mwmanager_rules.txt")
+        try:
+            previous_state = {path: path.read_bytes() if path.is_file() else None for path in state_paths}
+        except OSError as exc:
+            messagebox.showerror("Could not save load order", str(exc), parent=self)
+            return
         moved = []
         try:
             for name in disabled_now:
@@ -2297,9 +2680,27 @@ class ManagerGUI(tk.Tk):
         disabled = read_disabled_plugins()
         for name in disabled_now:
             disabled[name] = "disabled in MWManager load-order panel"
-        write_disabled_plugins(disabled)
-        write_order(names)
-        self._write_manual_order_rules()
+        try:
+            write_disabled_plugins(disabled)
+            write_order(names)
+            self._write_manual_order_rules()
+        except OSError as exc:
+            for source, target in reversed(moved):
+                try:
+                    if target.is_file() and not source.exists():
+                        os.replace(target, source)
+                except OSError:
+                    pass
+            for path, content in previous_state.items():
+                try:
+                    if content is None:
+                        path.unlink(missing_ok=True)
+                    else:
+                        _atomic_write(path, content)
+                except OSError:
+                    pass
+            messagebox.showerror("Could not save load order", str(exc), parent=self)
+            return
         self.order = names
         self.active_names = {n.casefold() for n in names}
         self.refresh()
@@ -2383,11 +2784,7 @@ class ManagerGUI(tk.Tk):
         if not self.pending_order_rules:
             return
         rules_path = APP_DIR / "mwmanager_rules.txt"
-        try:
-            current = rules_path.read_text(encoding="cp1252") if rules_path.is_file() else ""
-        except OSError as exc:
-            messagebox.showerror("Could not save manual order rules", str(exc), parent=self)
-            return
+        current = rules_path.read_text(encoding="cp1252") if rules_path.is_file() else ""
         if not current.strip():
             current = ("; MWManager load-order rules\n\n"
                        "[NearStart]\n" + ESM_FIX_PATCH + "\n\n[NearEnd]\n" +
@@ -2400,11 +2797,8 @@ class ManagerGUI(tk.Tk):
                 seen.add(key)
                 fresh.append((first, second))
         block = "[Order]\n" + "\n".join(name for pair in fresh for name in pair) + "\n\n"
-        try:
-            rules_path.write_text(block + current.lstrip("\r\n"), encoding="cp1252", newline="\r\n")
-        except OSError as exc:
-            messagebox.showerror("Could not save manual order rules", str(exc), parent=self)
-            return
+        text = (block + current.lstrip("\r\n")).replace("\r\n", "\n").replace("\n", "\r\n")
+        _atomic_write(rules_path, text.encode("cp1252"))
         self.pending_order_rules.clear()
 
     def open_sort_rules(self):
@@ -2751,7 +3145,8 @@ class ManagerGUI(tk.Tk):
 
             def preflight_worker(progress):
                 from preinstall import run_preinstall
-                return run_preinstall(Path(self.settings["game_dir"]), APP_DIR, progress)
+                return run_preinstall(Path(self.settings["game_dir"]), APP_DIR, progress,
+                                      archive_dir=self.settings.get("archive_downloads_dir"))
 
             def preflight_completed(result, error):
                 if hasattr(self, "deploy_master_button"):
@@ -3180,10 +3575,18 @@ class ManagerGUI(tk.Tk):
             answered.wait()
             return response.get("choice")
 
+        def run_program_with_reference(path, reference_title, reference_text):
+            response = {"returncode": None, "error": None}
+            answered = threading.Event()
+            events.put(("run_program", str(path), reference_title, reference_text, response, answered))
+            answered.wait()
+            return response["returncode"], response["error"]
+
         report.ask_yes_no = ask_yes_no
         report.ask_choice = ask_choice
         report.launch_vortex = launch_vortex
         report.wait_for_vortex_purge = wait_for_vortex_purge
+        report.run_program_with_reference = run_program_with_reference
 
         def run():
             try:
@@ -3272,6 +3675,66 @@ class ManagerGUI(tk.Tk):
                     purge_dialog.protocol("WM_DELETE_WINDOW", lambda: finish_purge("cancel"))
                     center_window(purge_dialog, self, max(460, purge_dialog.winfo_reqwidth()),
                                   purge_dialog.winfo_reqheight())
+                elif event[0] == "run_program":
+                    _kind, path, reference_title, reference_text, response, answered = event
+                    reference = tk.Toplevel(dialog)
+                    reference.title(reference_title)
+                    reference.transient(self)
+                    reference.attributes("-topmost", True)
+                    reference.resizable(True, True)
+                    body = ttk.Frame(reference, padding=12)
+                    body.pack(fill="both", expand=True)
+                    ttk.Label(body, text="Keep this reference open while configuring the program.",
+                              style="H3.TLabel", wraplength=560).pack(fill="x", pady=(0, 8))
+                    details = tk.Text(body, wrap="word", width=76, height=28, font=FONTS["mono"],
+                                      relief="flat", borderwidth=0, padx=10, pady=8)
+                    details.insert("1.0", reference_text)
+                    details.configure(state="disabled")
+                    details.pack(fill="both", expand=True)
+                    instruction = "MWManager continues automatically when the program closes."
+                    ttk.Label(body, text=instruction, wraplength=560).pack(fill="x", pady=(8, 0))
+                    reference.protocol("WM_DELETE_WINDOW", reference.iconify)
+                    reference.geometry(f"620x700+{max(0, reference.winfo_screenwidth() - 660)}+40")
+                    reference.lift()
+                    try:
+                        if os.name == "nt":
+                            # in its own folder, through the shell (see _ShellProgram): the Code Patch finds
+                            # nothing and closes at once when it starts anywhere else
+                            process = _ShellProgram(path)
+                            if not process.waitable:
+                                process = None
+                        else:
+                            process = subprocess.Popen([path], cwd=str(Path(path).parent), close_fds=True)
+                        append_status(f"Opened {Path(path).name}; waiting for it to close…")
+                    except OSError as exc:
+                        response["error"] = str(exc)
+                        reference.destroy()
+                        answered.set()
+                        continue
+
+                    def program_finished(reference=reference, response=response, answered=answered):
+                        response["returncode"] = 0
+                        if reference.winfo_exists():
+                            reference.destroy()
+                        answered.set()
+
+                    if process is None:
+                        ttk.Button(body, text="Program closed — continue", command=program_finished).pack(
+                            anchor="e", pady=(12, 0))
+                        continue
+
+                    def wait_for_program(process=process, reference=reference,
+                                         response=response, answered=answered):
+                        code = process.poll()
+                        if code is None:
+                            dialog.after(250, wait_for_program)
+                            return
+                        response["returncode"] = code
+                        if reference.winfo_exists():
+                            reference.destroy()
+                        answered.set()
+
+                    dialog.after(250, wait_for_program)
                 else:
                     finished = event[1:]
             if finished is None:
@@ -3315,6 +3778,7 @@ class ManagerGUI(tk.Tk):
                 f"\u201c{running}\u201d is still running. Quitting now can leave it half-finished.\n\nQuit anyway?",
                 icon="warning", default="no", parent=self):
             return
+        _end_children()
         self.destroy()
 
     def stage_major_masters(self, *, force_scan=False):
@@ -3646,6 +4110,7 @@ class ManagerGUI(tk.Tk):
                 self.settings["first_run"] = 1
                 self.settings["init_complete"] = 0
                 write_settings(self.settings)
+                self._setup_start()
                 dialog.destroy()
                 offer_elevation(game)
                 ini_order = read_game_ini_order(game)
@@ -3663,6 +4128,7 @@ class ManagerGUI(tk.Tk):
             if game_changed:
                 self.settings["first_run"] = 1
                 self.settings["init_complete"] = 0
+                self._setup_start()
             write_settings(self.settings)
             dialog.destroy()
             if game_changed:
@@ -3715,8 +4181,18 @@ class ManagerGUI(tk.Tk):
 
 
 def main():
+    lock = _single_instance()
+    if lock is None:
+        messagebox.showerror("MWManager is already running",
+                             "Another MWManager window is open for this folder. Close it first: two of them "
+                             "would run the same setup step at the same time.")
+        return
     app = ManagerGUI()
-    app.mainloop()
+    try:
+        app.mainloop()
+    finally:
+        _end_children()
+        lock.close()
 
 
 if __name__ == "__main__":

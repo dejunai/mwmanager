@@ -1,10 +1,10 @@
 """Persistent, interactive Nexus browser for MWManager's FOMOD helper.
 
 The browser is a visible WebView2 window in a small child process. Its profile
-is private to MWManager and persistent, so users can sign in and complete a
-CAPTCHA once without exposing or copying cookies from another browser. Page
-text is handed back to MWManager over an atomic local-file mailbox; credentials
-and cookies are never read by the Python application.
+is private to MWManager and persistent, so users can sign in, complete a
+CAPTCHA and download files without exposing or copying cookies into the Python
+application. Page text is handed back to MWManager over an atomic local-file
+mailbox; credentials and cookies are never read by MWManager.
 """
 from __future__ import annotations
 
@@ -45,6 +45,13 @@ def _read_json(path: Path) -> dict:
 def _valid_nexus_url(url: str) -> bool:
     parsed = urlparse(str(url))
     return parsed.scheme == "https" and parsed.hostname in {"www.nexusmods.com", "nexusmods.com"}
+
+
+def _valid_browser_url(url: str) -> bool:
+    parsed = urlparse(str(url))
+    return parsed.scheme == "https" and parsed.hostname in {
+        "www.nexusmods.com", "nexusmods.com", "github.com", "www.github.com",
+    }
 
 
 def _pid_running(pid: int) -> bool:
@@ -248,14 +255,14 @@ def _startup_error() -> str:
     return str(value.get("error", "")).strip()
 
 
-def _launch_if_needed(url: str) -> None:
+def _launch_if_needed(url: str, command: dict | None = None) -> None:
     root = _root()
     pid_file = root / "browser.pid"
     if _tracked_browser_pid():
         return
     pid_file.unlink(missing_ok=True)
     (_root() / "browser-error.json").unlink(missing_ok=True)
-    command = {"id": secrets.token_hex(12), "action": "open", "url": url}
+    command = command or {"id": secrets.token_hex(12), "action": "open", "url": url}
     _write_json(root / "command.json", command)
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     process = subprocess.Popen(
@@ -282,20 +289,22 @@ def _launch_if_needed(url: str) -> None:
         time.sleep(0.05)
 
 
-def open_page(url: str) -> None:
-    """Open or navigate the persistent, interactive MWManager Nexus browser."""
-    if not _valid_nexus_url(url):
-        raise ValueError("Only HTTPS Nexus Mods pages can be opened in the MWManager browser.")
+def open_page(url: str, download_dir=None) -> None:
+    """Open an approved prerequisite page and optionally download directly into its component folder."""
+    if not _valid_browser_url(url):
+        raise ValueError("Only approved HTTPS prerequisite pages can be opened in the MWManager browser.")
     if importlib.util.find_spec("webview") is None:
         raise RuntimeError(
             "MWManager's embedded browser is not installed yet. Install the packages listed in "
             "requirements-nexus-browser.txt, then reopen MWManager."
         )
     root = _root()
+    command = {"id": secrets.token_hex(12), "action": "open", "url": url,
+               "download_dir": str(Path(download_dir).resolve()) if download_dir else ""}
     if _tracked_browser_pid():
-        _write_json(root / "command.json", {"id": secrets.token_hex(12), "action": "open", "url": url})
+        _write_json(root / "command.json", command)
     else:
-        _launch_if_needed(url)
+        _launch_if_needed(url, command)
 
 
 def _challenge_page(title: str, text: str) -> bool:
@@ -381,6 +390,11 @@ def _run_embedded_browser() -> None:
             "(pywebview) and retry."
         ) from exc
 
+    # Nexus downloads must stay in this visible, cookie-bearing browser so the
+    # user can complete any security check before WebView2 shows Save As.
+    webview.settings["ALLOW_DOWNLOADS"] = True
+    webview.settings["OPEN_EXTERNAL_LINKS_IN_BROWSER"] = False
+
     root = _root()
     profile = root / "webview2-profile"
     profile.mkdir(parents=True, exist_ok=True)
@@ -404,7 +418,7 @@ def _run_embedded_browser() -> None:
             self._window = None
 
         def navigate(self, url):
-            if _valid_nexus_url(url):
+            if _valid_browser_url(url):
                 self._window.load_url(url)
                 return True
             return False
@@ -413,10 +427,34 @@ def _run_embedded_browser() -> None:
     initial = _read_json(command_file)
     last_command = str(initial.get("id", ""))
     url = initial.get("url", "https://www.nexusmods.com/morrowind/")
-    if not _valid_nexus_url(url):
+    if not _valid_browser_url(url):
         url = "https://www.nexusmods.com/morrowind/"
+    download_folder = {"path": Path(initial["download_dir"]) if initial.get("download_dir") else None}
+    if download_folder["path"]:
+        download_folder["path"].mkdir(parents=True, exist_ok=True)
+    if os.name == "nt":
+        from webview.platforms import edgechromium
+        original_download_handler = edgechromium.EdgeChrome.on_download_starting
+
+        # shortcut: pywebview has no public download-directory API; remove this patch when it gains one.
+        def download_to_component(self, sender, args):
+            folder = download_folder["path"]
+            if folder is None:
+                return original_download_handler(self, sender, args)
+            if not webview.settings["ALLOW_DOWNLOADS"]:
+                args.Cancel = True
+                return
+            target = folder / Path(str(args.ResultFilePath)).name
+            if target.exists():
+                stem, suffix, number = target.stem, target.suffix, 2
+                while target.exists():
+                    target = folder / f"{stem} ({number}){suffix}"
+                    number += 1
+            args.ResultFilePath = str(target)
+
+        edgechromium.EdgeChrome.on_download_starting = download_to_component
     window = webview.create_window(
-        "MWManager — Nexus Browser", url=url, js_api=api,
+        "MWManager — Prerequisite Browser", url=url, js_api=api,
         width=1180, height=820, min_size=(760, 520), confirm_close=False,
     )
     api._window = window
@@ -485,7 +523,11 @@ def _run_embedded_browser() -> None:
                     last_command = command_id
                     if command.get("action") == "open":
                         new_url = str(command.get("url", ""))
-                        if _valid_nexus_url(new_url):
+                        new_folder = str(command.get("download_dir", "")).strip()
+                        if new_folder:
+                            download_folder["path"] = Path(new_folder)
+                            download_folder["path"].mkdir(parents=True, exist_ok=True)
+                        if _valid_browser_url(new_url):
                             window.load_url(new_url)
                     elif command.get("action") == "close":
                         # Graceful close: pywebview tears WebView2 down normally, so the

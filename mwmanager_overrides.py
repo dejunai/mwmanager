@@ -9,6 +9,31 @@ sky plugin kept before the generated tail. Everything else comes from upstream u
 from mwdialog_check import *  # noqa: F401,F403  (names resolve in mwdialog_check when composed)
 
 
+_upstream_write_plugin_bytes = write_plugin_bytes
+
+
+def write_plugin_bytes(path, data, keep_times=None):
+    """Journal every generated or repaired Data Files plugin at the shared writer boundary."""
+    target = Path(path).resolve()
+    data_dir = next((parent for parent in (target.parent, *target.parents)
+                     if parent.name.casefold() == "data files"), None)
+    ledger = run = original = None
+    if data_dir is not None:
+        import mwmanager_journal
+        candidate = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
+        if candidate.has_baseline():
+            ledger = candidate
+            original = ledger.preserve_original(data_dir.parent, target)
+            run = ledger.start_run("mwmanager.py", {"operation": "write plugin", "path": target.name})
+    result = _upstream_write_plugin_bytes(path, data, keep_times=keep_times)
+    if ledger:
+        ledger.record(run["run"], mwmanager_journal.rel_of(data_dir.parent, target),
+                      "replace" if original["kind"] != "absent" else "create",
+                      mwmanager_journal.sha256_file(target), original, tag="plugin-write")
+        ledger.finish_run(run)
+    return result
+
+
 class World(World):
     """Upstream World with MWManager's changes: placeholder Bink videos for missing ones, missing voice files
     and shared responses handled through patch records during --full."""
@@ -2972,10 +2997,13 @@ def full_check(args, game_dir, stage):
                 errors += 1
     if errors:
         print(f"--full: {errors} error(s) left after {stage}; stopping here so nothing builds on them.")
-        try:
-            subprocess.Popen(["notepad", report_path])
-        except OSError:
-            print(f"Open {report_path} to see them.")
+        if os.environ.get("MWMANAGER_GUI") == "1":
+            print(f"MWManager will display {report_path} in its report viewer.")
+        else:
+            try:
+                subprocess.Popen(["notepad", report_path])
+            except OSError:
+                print(f"Open {report_path} to see them.")
     else:
         print("--full: no errors.")
     return errors
@@ -3021,6 +3049,8 @@ def run_full(args):
         print(f"--full: replaying your {len(read_conflict_answers(game_dir))} remembered conflict answer(s) from "
               f"{CONFLICT_ANSWERS_FILE} (--fresh-answers to start without them)")
     common = ["--fix-log", args.fix_log, "--encoding", args.encoding, "--no-interactive", "--yes"]
+    if asset_repair_enabled(args):
+        common.append("--asset-repair")
     if getattr(args, "init_scope", False):
         # Keep every internal full-pass subprocess scoped to the --init plugin list and base-game archive.
         common += ["--init-scope", "--plugins", *args.plugins]

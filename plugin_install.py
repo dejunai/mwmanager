@@ -574,15 +574,11 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
             if target.exists():
                 if not target.is_file():
                     raise IsADirectoryError(f"A directory blocks deployment of {target}")
-                if source.suffix.casefold() == ".lua":
-                    # The source archive is retained under Vortex Downloads; don't duplicate an old Lua in Off.
-                    target.unlink()
-                else:
-                    backup = off_root / rel
-                    backup.parent.mkdir(parents=True, exist_ok=True)
-                    if backup.exists():
-                        backup = backup.with_name(backup.name + ".previous")
-                    os.replace(target, backup)
+                backup = off_root / rel
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                if backup.exists():
+                    backup = backup.with_name(backup.name + ".previous")
+                os.replace(target, backup)
             copied = False
             try:
                 os.link(source, target)
@@ -766,7 +762,7 @@ def _write_deployment_state(manager: Path, state: dict) -> None:
 
 
 def record_deployment(manager: Path, item: dict, package: Path, operations: list[dict],
-                      archives: list[Path], registrations: list[str]) -> dict:
+                      archives: list[Path], registrations: list[str], data_dir: Path | None = None) -> dict:
     state = _read_deployment_state(manager)
     source_archive = item.get("archive")
     _apply_nexus_id_fallback(item, Path(source_archive)) if source_archive else None
@@ -780,6 +776,11 @@ def record_deployment(manager: Path, item: dict, package: Path, operations: list
              "registered_archives": registrations, "operations": operations}
     state["deployments"].append(entry)
     _write_deployment_state(manager, state)
+    if data_dir is not None:
+        import mwmanager_journal
+        mwmanager_journal.Journal(manager / "journal").record_deployment(
+            Path(data_dir).parent, operations, tool="plugin_install.py", tag="plugin-deployment",
+            inputs={"archive": source_archive or label, "plugins": entry["plugins"]})
     return entry
 
 

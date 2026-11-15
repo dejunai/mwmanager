@@ -1,9 +1,8 @@
-"""Detect the user-installed prerequisites MWManager relies on, and point to their official download pages.
+"""Detect prerequisite installs and archives, and point to their official download pages.
 
-MWSE, MGE XE and the Morrowind Code Patch are installed by the user, never by MWManager. Detection is
-read-only. When something is missing, MWManager only opens the official page (in its embedded Nexus browser
-when that is available, otherwise the system browser); it never downloads or installs anything. MWSE's own
-updater (MWSE-Update.exe) is only ever started by preflight after the user clicks to run it.
+When something is missing, MWManager offers a matching archive or opens the official page in its embedded Nexus
+browser. Downloads remain interactive so the user can complete Nexus security checks and choose the destination.
+Installers, MWSE-Update.exe and configuration programs are only started after the user confirms the prompt.
 """
 from __future__ import annotations
 
@@ -12,21 +11,21 @@ import re
 import struct
 from pathlib import Path
 
-# Official pages (checked 2026-11-13). The embedded browser only opens nexusmods.com pages; anything else
-# opens in the system browser.
+# Official pages (checked 2026-11-14). The embedded browser accepts the approved Nexus and GitHub pages.
 PAGES = {
     "mwse": {"name": "MWSE (Morrowind Script Extender)",
              "page": "https://www.nexusmods.com/morrowind/mods/45468?tab=files",
              "also": "https://github.com/MWSE/MWSE/releases",
              "note": "Extract into the Morrowind folder and run MWSE-Update.exe. The MGE XE installer can also "
                      "install MWSE."},
-    "mge_xe": {"name": "MGE XE",
-               "page": "https://www.nexusmods.com/morrowind/mods/41102?tab=files",
+    "mge_xe": {"name": "MGE XE, Greatness7 build",
+               "page": "https://www.nexusmods.com/morrowind/mods/59957?tab=files",
                "also": "https://github.com/Greatness7/MGE-XE/releases",
-               "note": "Any MGE XE build works; the Greatness7 build is recommended. Install the Code Patch "
-                       "first."},
+               "note": "Download the Greatness7 build. Extract it over the Morrowind folder after installing "
+                       "the Code Patch, then run MGEXEgui.exe once."},
     "mge_g7": {"name": "MGE XE, Greatness7 build (recommended)",
-               "page": "https://github.com/Greatness7/MGE-XE/releases",
+               "page": "https://www.nexusmods.com/morrowind/mods/59957?tab=files",
+               "also": "https://github.com/Greatness7/MGE-XE/releases",
                "note": "Extract over the Morrowind folder, then run MGEXEgui.exe once so it writes mgeXE.toml."},
     "mcp": {"name": "Morrowind Code Patch",
             "page": "https://www.nexusmods.com/morrowind/mods/19510?tab=files",
@@ -35,7 +34,16 @@ PAGES = {
                  "page": "https://www.nexusmods.com/morrowind/mods/26348?tab=files",
                  "note": "Required. Install over the base Code Patch, then run 'Morrowind Code Patch.exe' again."},
 }
-INSTALL_ORDER = ("mcp", "mcp_beta", "mge_xe", "mwse")
+INSTALL_ORDER = ("mwse", "mcp", "mcp_beta", "mge_xe")
+ARCHIVE_SUFFIXES = {".zip", ".7z", ".rar", ".exe"}
+ARCHIVE_HINTS = {
+    "mwse": ("mwse", "45468"),
+    "mcp": ("morrowind code patch", "19510"),
+    "mcp_beta": ("mcp beta", "skunk", "26348"),
+    "mge_xe": ("mge xe", "mgexe", "59957", "greatness7"),
+}
+NEXUS_MOD_IDS = {"mwse": 45468, "mcp": 19510, "mcp_beta": 26348, "mge_xe": 59957}
+NEXUS_GRAPHQL = "https://api.nexusmods.com/v2/graphql"
 MWSE_LATEST_API = "https://api.github.com/repos/MWSE/MWSE/releases/tags/build-automatic"
 MCP_DESCRIBE_NAMES = ("describe.json", "description.json")
 # The three masters and three BSAs are identical across stores: these SHA-256 values were read from GOG's
@@ -160,7 +168,7 @@ def detect(game_dir) -> dict:
 
 
 def missing_keys(found: dict) -> list[str]:
-    """Pages to offer, in install order: base Code Patch, Skunk Works, MGE XE, MWSE."""
+    """Pages to offer in guided first-install order: MWSE, MCP, Skunk Works, MGE XE."""
     keys = []
     mcp = found.get("mcp", {})
     if not mcp.get("present"):
@@ -168,7 +176,79 @@ def missing_keys(found: dict) -> list[str]:
     elif not mcp.get("skunk_works_beta"):
         keys.append("mcp_beta")
     keys += [k for k in ("mge_xe", "mwse") if not found.get(k, {}).get("present")]
-    return keys
+    return [key for key in INSTALL_ORDER if key in keys]
+
+
+def prerequisite_archives(key: str, *roots) -> list[Path]:
+    """Matching prerequisite installers/archives, newest first, without opening their contents."""
+    hints = ARCHIVE_HINTS[key]
+    found = []
+    for root in roots:
+        root = Path(root) if root else None
+        if not root or not root.is_dir():
+            continue
+        for path in root.rglob("*"):
+            if not path.is_file() or path.suffix.casefold() not in ARCHIVE_SUFFIXES:
+                continue
+            name = path.name.casefold().replace("_", " ").replace("-", " ")
+            if key == "mge_xe" and "41102" in name:
+                continue
+            if key == "mwse" and not ("45468" in name or name.startswith("mwse update ")
+                                      or path.stem.casefold() == "mwse"):
+                continue
+            if key == "mcp" and any(token in name for token in ("beta", "skunk", "26348")):
+                continue
+            if any(hint in name for hint in hints):
+                found.append(path)
+    return sorted(set(found), key=lambda path: (path.stat().st_mtime, path.name.casefold()), reverse=True)
+
+
+def cached_archive_status(key: str, archive: Path, timeout: float = 5) -> tuple[str, str]:
+    """Return current/outdated/unknown using Nexus' latest primary-file metadata."""
+    if key not in NEXUS_MOD_IDS:
+        return "unknown", "not a Nexus prerequisite"
+    from urllib.request import Request, urlopen
+
+    def query(document, variables):
+        request = Request(NEXUS_GRAPHQL,
+                          data=json.dumps({"query": document, "variables": variables}).encode("utf-8"),
+                          headers={"Content-Type": "application/json", "Application-Name": "MWManager",
+                                   "Application-Version": "0.1", "User-Agent": "MWManager/0.1"})
+        with urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if payload.get("errors"):
+            raise ValueError(payload["errors"][0].get("message", "Nexus query failed"))
+        return payload.get("data") or {}
+
+    try:
+        game = query("query { game(domainName: \"morrowind\") { id } }", {})
+        game_id = game["game"]["id"]
+        data = query("query($modId: ID!, $gameId: ID!) { modFiles(modId: $modId, gameId: $gameId) "
+                     "{ name version date primary category } }",
+                     {"modId": str(NEXUS_MOD_IDS[key]), "gameId": str(game_id)})
+        files = data.get("modFiles") or []
+        candidates = [item for item in files if item.get("primary")]
+        if not candidates:
+            candidates = [item for item in files if str(item.get("category", "")).upper() == "MAIN"]
+        latest = max(candidates or files, key=lambda item: int(item.get("date") or 0))
+    except Exception as exc:
+        return "unknown", f"Nexus could not be checked ({exc.__class__.__name__}: {exc})"
+
+    name = re.sub(r"\s*\(\d+\)$", "", Path(archive).stem.casefold())
+    epochs = [int(value) for value in re.findall(r"(?<!\d)(1[0-9]{9}|2[0-9]{9})(?!\d)", name)]
+    latest_date = int(latest.get("date") or 0)
+    if epochs and latest_date:
+        return ("outdated", str(latest.get("version") or latest.get("name") or latest_date)) \
+            if max(epochs) < latest_date else ("current", str(latest.get("version") or latest_date))
+
+    # Older MCP downloads lack Nexus' timestamp but retain the version in their filename.
+    if key in {"mcp", "mcp_beta"}:
+        cached_numbers = [int(value) for value in re.findall(r"\d+", name) if len(value) < 9]
+        latest_numbers = [int(value) for value in re.findall(r"\d+", str(latest.get("version") or ""))]
+        if latest_numbers and len(cached_numbers) >= len(latest_numbers):
+            return ("current", str(latest.get("version"))) \
+                if cached_numbers[-len(latest_numbers):] == latest_numbers else ("outdated", str(latest.get("version")))
+    return "unknown", "the cached filename does not identify its Nexus version"
 
 
 def latest_mwse_build(timeout: float = 8) -> tuple[str | None, str | None]:
@@ -337,12 +417,12 @@ def summary_lines(found: dict) -> list[str]:
     return lines
 
 
-def open_download_page(key: str) -> str:
-    """Open the official page for `key`; never downloads anything. Returns "embedded" or "system"."""
+def open_download_page(key: str, download_dir=None) -> str:
+    """Open the official page for an interactive download; return "embedded" or "system"."""
     url = PAGES[key]["page"]
     try:
         import mwnexus_browser
-        mwnexus_browser.open_page(url)
+        mwnexus_browser.open_page(url, download_dir=download_dir)
         return "embedded"
     except Exception:
         import webbrowser

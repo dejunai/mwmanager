@@ -17,32 +17,42 @@ browse to any folder you keep archives in. `mwmanager.ini` stores it as `archive
 options window with those paths; preflight starts only when that window is saved. `File > Detected
 installs…` reopens the first window later. `python mwmanager_detect.py` prints the same detection.
 
-Preflight is only these checks, and it only reads the game folder:
+Preflight performs these checks before offering any prerequisite installation:
 
-1. **Morrowind.exe** exists. It is never hashed: it differs by store and the Code Patch rewrites it.
-2. **Morrowind.esm, Tribunal.esm, Bloodmoon.esm and their three BSAs** exist and match built-in SHA-256
+1. **Archive support.** MWManager accepts ZIP, 7z and RAR packages. It uses full 7-Zip from `PATH`, the
+   standard Windows install folder, or `MWManager\tools\7zip`. If none is found, preflight offers to download
+   the current official Windows installer and installs it privately under that tools folder. The installer is
+   retained as `tools\7zip-installer.exe`.
+2. **Morrowind.exe** exists. It is never hashed: it differs by store and the Code Patch rewrites it.
+3. **Morrowind.esm, Tribunal.esm, Bloodmoon.esm and their three BSAs** exist and match built-in SHA-256
    values, which are the same on every store. A modified file is a warning you can continue past.
-3. **Morrowind.ini** exists, in any state. Start the game's launcher once if it is missing.
-4. **Morrowind Code Patch with MCP Beta: Skunk Works** ([Code Patch](https://www.nexusmods.com/morrowind/mods/19510),
+4. **Morrowind.ini** exists, in any state. Start the game's launcher once if it is missing.
+5. **MWSE** ([Nexus](https://www.nexusmods.com/morrowind/mods/45468)): `MWSE.dll` must exist. `MWSE-Update.exe`
+   writes the installed build's commit to `mwse-version.txt`; preflight compares it with the build the
+   updater would install and highly recommends running the updater immediately after MWSE installation.
+6. **Morrowind Code Patch with MCP Beta: Skunk Works** ([Code Patch](https://www.nexusmods.com/morrowind/mods/19510),
    [Skunk Works](https://www.nexusmods.com/morrowind/mods/26348)). Required. The check is
    `mcpatch\describe.json` (`description.json` is accepted too): its first category must be `"Beta"`.
-5. **MGE XE**, any build ([official](https://www.nexusmods.com/morrowind/mods/41102)). The
-   [Greatness7 build](https://github.com/Greatness7/MGE-XE/releases) is recommended; it keeps its settings in
-   `mgeXE.toml`, written the first time `MGEXEgui.exe` runs, so that file confirms G7. Without it preflight
-   recommends G7 but does not stop.
-6. **MWSE** ([Nexus](https://www.nexusmods.com/morrowind/mods/45468)): `MWSE.dll` must exist. `MWSE-Update.exe`
-   writes the installed build's commit to `mwse-version.txt`; preflight compares it with the build the
-   updater would install (MWSE's `build-automatic` GitHub release). If MWSE is behind, or has never been
-   updated, preflight offers to run `MWSE-Update.exe`; it runs only when you click Yes. Offline, the status is
-   reported as unknown. MWManager always recommends the latest MWSE.
+7. **MGE XE**. Fresh installs use only the
+   [Greatness7 G7 fork](https://www.nexusmods.com/morrowind/mods/59957); the Hrnchamd Nexus fork is not offered.
+   G7 keeps its settings in `mgeXE.toml`, written the first time `MGEXEgui.exe` runs, so that file confirms it.
+   A different build already installed is accepted, but preflight recommends G7 without stopping.
 
-**Install order: Code Patch (with Skunk Works) first, then MGE XE, then MWSE.** MGE XE starts the game with
-the patched executable and records what it sees at startup; the Code Patch features applied are logged near
-the top of the logs (preflight reads line 2 of `mgeXE.log`, and the `Morrowind Code Patch installed
-features:` line MWSE writes at the top of `MWSE.log`, where current builds put it). Installing the Code Patch
-after MGE XE means that record describes an unpatched or differently patched game. Preflight reports the
-logged features, including whether all 16 Skunk Works beta features (180-195) were applied, as information
-only; if there is no log yet it says to run the game once with MGE XE to confirm.
+**Guided install order: MWSE, Code Patch, Skunk Works, then MGE XE.** For each missing component MWManager
+searches both the selected Archive Downloads folder and `MWManager\pre-reqs`. The prompt offers the newest
+matching archived version or a fresh download. Known Nexus-41102 MGE XE archives are excluded. Fresh downloads
+are saved under `pre-reqs\<component>\`; Nexus
+remains visible for CAPTCHA/security checks. ZIP/7z/RAR packages are path-checked before extraction, retained in
+`pre-reqs`, and portable payloads are copied into the selected Morrowind folder. Executable installers are
+launched only after confirmation.
+
+After Skunk Works is installed, MWManager opens the Code Patch interface with category-specific guidance and
+reminds the user to click **Apply chosen patches**. After MGE XE, it opens `MGEXEgui.exe` once to generate the
+Greatness7 TOML and keeps recommended settings visible: VSync off; shaders on for a current GPU; Very High
+shaders with Depth of Field on for an above-average system; frame limiter 300; Pause rendering in menus,
+Crosshair autohide, Allow yes to all, and Allow screenshots enabled; and Light Attenuation Constant 0.382,
+Linear 0 with per-pixel lighting, and Quadratic 2.619. The first
+game launch then records the final configured Code Patch, MGE XE and MWSE setup in `mgeXE.log` and `MWSE.log`.
 
 **Confirm your setup works: launch Morrowind once.** `mgeXE.log` and `MWSE.log` only appear after the game
 has started once. When they are missing, or older than the installed Code Patch, MGE XE or MWSE (for example
@@ -56,17 +66,31 @@ changes anything. The prompt has four buttons:
 - **Skip** continues after a warning; the setup is then recorded as not confirmed.
 - **Stop** ends preflight.
 
-MWManager never downloads or installs the Code Patch, MGE XE or MWSE. When one is missing, preflight offers
-its official page (MWManager's browser for Nexus pages, the system browser otherwise), in install order.
+MWManager does not bypass Nexus or GitHub download controls. It opens the official page, lets the user complete
+the download, retains the selected file under `pre-reqs`, and then processes it locally.
 
 After preflight passes, the first run offers to record a snapshot of the install as it is (a fresh install
 or an existing playthrough with mods) in `journal\baseline`. Rollback returns the game folder to that
 snapshot. From the command line: `mwmanager.py "<game>\Data Files" --capture-baseline`, `--verify`,
 `--rollback --dry-run`.
 
+The baseline is bound to a store-install marker (the GOG hash database when present, otherwise a stable
+store/launcher file). If repair, verify, or reinstall replaces that marker, preflight refuses to reuse the old
+baseline. With confirmation it moves the complete prior baseline, ledger, inputs, and preserved originals under
+`journal\history`, then records the selected install again. Nothing is discarded.
+
+Every GUI deployment also joins `journal\install.jsonl`: regular mod files, major-master files, replaced Lua,
+Morrowind.ini archive registrations, generated/repaired ESPs, generated assets, official-file moves, and the
+pre-`--full` MWSE Lua suite. Originals are copied into the journal's content-addressed `originals` folder before
+they are changed. The component-specific deployment manifests remain for uninstall/redeploy, but are not used as
+a substitute for the install rollback ledger.
+
 ## Tools
 
 These are used by the repair workflows, not by preflight.
+
+The managed 7-Zip copy comes from [7-zip.org](https://www.7-zip.org/), is licensed under the GNU LGPL, and
+remains replaceable in `tools\7zip`; source and license information are available from that site.
 
 1. **texconv.exe** — Microsoft DirectXTex texture converter, required by asset repair for DDS conversion and mipmap generation. The current MWManager package includes it under `tools` with its MIT license notice. If it is missing, initialization offers a window button to the [official texconv page](https://github.com/microsoft/DirectXTex/wiki/Texconv).
 2. **FFmpeg** — required by `--full` to normalize audio: WAV to 16-bit PCM, game sounds to mono, audio to 44.1 kHz, and MP3 files without oversized metadata tags. MWManager does not bundle a third-party FFmpeg build. The distribution plan is to ship a specifically built LGPL-only FFmpeg with the exact source, build recipe, notices, and replaceable shared libraries needed for compliance; until that build is prepared and verified, missing FFmpeg opens a window button to the official [FFmpeg download page](https://ffmpeg.org/download.html), which lists Windows builds. Put `ffmpeg.exe` in MWManager `tools` or add it to `PATH`; MWManager does not place tools in the game folder.
@@ -95,7 +119,9 @@ FFmpeg's upstream project uses LGPL by default, while enabling optional GPL or n
 
 After catalog initialization succeeds, `--init` runs the one-time Data Files document tidy: loose root-level documents move into `Data Files/docs`; a document whose filename matches an installed ESP/ESM stays unprefixed, and unmatched documents receive `No Known Mod - ` before the original filename. Completion is recorded per game installation in MWManager `outputs`. The tidy is journaled for undo. After it succeeds (or has already completed), `--init` continues as `--full --yes`, processing the three core ESMs, the existing independent load-order entries, and the shipped standalone ESPs as ordinary plugins and building the applicable MWManager patches. `--init --dry-run` shows the document and full-processing plans without changing files. During `--init`, MWManager also lints Lua files in the installed `Data Files\MWSE` core folder and writes findings to `outputs/mwmanager_core_mwse_lua_report.json`. The pass applies conservative repairs to installed core Lua, saves originals under `backups/mwse-core`, and writes a sendable report to `outputs/mwmanager_core_mwse_bugreport.txt`. `--init --dry-run` prints the lint plan without creating the report.
 
-`--init` also installs the mw* MWSE Lua suite (`reference/mwse-lua-guards/`, byte-identical to the Steam install's copies): each of its 13 mods goes to `Data Files/MWSE/mods/<name>/` and its metadata file to `Data Files/`. MWManager's earlier consolidated `MWSE/mods/MWManager` package (with `mwquickfixes`) is moved to `Data Files/MWSE/backups/mods/`. Settings in `Data Files/MWSE/config/` are left as they are. `--init --dry-run` lists these moves without making them.
+The GUI first run installs the 15-mod mw* MWSE Lua suite after core integrity and existing-plugin decisions, and after the clean baseline is recorded, but before the initial `--full` cycle. CLI `--init` installs the same suite. Its source is `reference/mwse-lua-guards/` (byte-identical to the Steam install's copies), plus MWManager's `mwmanagermenu`, which presents their settings under one Mod Config Menu entry. Each mod goes to `Data Files/MWSE/mods/<name>/` and its metadata file to `Data Files/`. MWManager's earlier consolidated `MWSE/mods/MWManager` package (with `mwquickfixes`) is moved to `Data Files/MWSE/backups/mods/`. Settings in `Data Files/MWSE/config/` are left as they are. `--init --dry-run` lists these moves without making them.
+
+Before the GUI's initial `--full`, all eight installed shipped ESP add-ons and XE Sky Variations are enabled, then `mwmanager_install.py --init --game-data-files <path> --apply --yes` tidies the live initial installation and applies safe plugin and asset repairs. A standalone `--sort --yes --no-follow-up` then sorts that complete shipped load order before `--full`. Tidy's per-file asset facts are committed to `outputs/mwmanager_asset_cache.sqlite` before `--full`, so the following scan reuses unchanged model, texture, sound, BSA, and reference results; repaired or replaced files are checked again. Damaged shipped assets are retained under `Data Files/Off/Official Assets/<original path>`; any shipped asset moved there is also preserved and recorded in the install journal. Originals of shipped ESPs patched in place are retained under MWManager's `backups/plugins/Official Add-Ons/`. The following `--full` also enables asset repair so missing vanilla assets receive the normal recorded stand-ins before its final error gate. Every generated stand-in is listed in `outputs/mwmanager_generated_files.txt` and journaled as a new install file, so rollback deletes it; generation is refused until an install baseline exists. GUI-launched subprocesses are hidden, and a failed full report is shown in MWManager rather than external Notepad.
 
 
 ## Major community masters

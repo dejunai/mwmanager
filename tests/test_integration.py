@@ -78,6 +78,10 @@ class AssetRepairSwitch(unittest.TestCase):
         self.assertIn("if not asset_repair_enabled(args):", src)
         self.assertIn('"--asset-repair"', src)
 
+    def test_full_pass_propagates_requested_asset_repairs(self):
+        src = (ROOT / "mwmanager_overrides.py").read_text(encoding="utf-8")
+        self.assertIn('if asset_repair_enabled(args):\n        common.append("--asset-repair")', src)
+
 
 class TidySteps(unittest.TestCase):
     """options -> plan -> --apply, the refusal (exit 2) and --undo, in a temporary staging folder."""
@@ -113,6 +117,32 @@ class TidySteps(unittest.TestCase):
 
     def files(self):
         return sorted(p.relative_to(self.staging).as_posix() for p in self.staging.rglob("*") if p.is_file())
+
+    def test_init_targets_live_data_files_and_auto_applies(self):
+        with mock.patch.object(self.t, "run_initial_tidy", return_value=0) as run:
+            rc = self.t.mwmanager_main(["--init", "--game-data-files", str(self.data), "--apply", "--yes"])
+        self.assertEqual(rc, 0)
+        run.assert_called_once_with(str(self.data), apply_changes=True)
+
+    def test_initial_tidy_commits_asset_cache_before_full(self):
+        assets = mock.Mock()
+        with mock.patch.object(self.t, "run_data_files_tidy", return_value=0), \
+                mock.patch.object(self.t._scanner, "main", return_value=0) as scan, \
+                mock.patch.object(self.t._scanner, "asset_health_module", return_value=assets):
+            rc = self.t.run_initial_tidy(str(self.data), apply_changes=True)
+        self.assertEqual(rc, 0)
+        self.assertIn("--asset-check", scan.call_args.args[0])
+        self.assertIn("--asset-repair", scan.call_args.args[0])
+        assets.close_caches.assert_called_once_with()
+
+    def test_initial_tidy_continues_after_repairs(self):
+        assets = mock.Mock()
+        with mock.patch.object(self.t, "run_data_files_tidy", return_value=0), \
+                mock.patch.object(self.t._scanner, "main", return_value=1), \
+                mock.patch.object(self.t._scanner, "asset_health_module", return_value=assets):
+            rc = self.t.run_initial_tidy(str(self.data), apply_changes=True)
+        self.assertEqual(rc, 0)
+        assets.close_caches.assert_called_once_with()
 
     def test_plan_then_apply_then_undo(self):
         start = self.files()
@@ -208,6 +238,45 @@ class GuiTidySteps(unittest.TestCase):
         with patch, self.assertRaises(self.gui.TidyCancelled):
             self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
         self.assertEqual(len(calls), 1)
+
+    def test_partial_apply_halts_deployment(self):
+        pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]
+        calls, patch = self.fake([(0, pending), (1, ["one action failed"])])
+        progress, _ = self.progress("apply")
+        with patch, self.assertRaisesRegex(RuntimeError, "deployment is halted"):
+            self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
+        self.assertEqual(len(calls), 2)
+
+    def test_load_order_write_failure_restores_moved_plugins_and_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            data = base / "game" / "Data Files"
+            data.mkdir(parents=True)
+            for name in (*self.gui.CORE, "Extra.esp"):
+                (data / name).write_bytes(b"TES3")
+            disabled = base / "mwmanager_disabled.txt"
+            order = base / "mwmanager_sort_order.txt"
+            rules = base / "mwmanager_rules.txt"
+            disabled.write_bytes(b"old disabled\n")
+            order.write_bytes(b"old order\n")
+            rules.write_bytes(b"old rules\n")
+            owner = mock.Mock()
+            owner.settings = {"game_dir": str(data.parent)}
+            owner.order = list(self.gui.CORE)
+            owner.active_names = {name.casefold() for name in self.gui.CORE}
+            owner.merge_inputs = []
+            owner.pending_order_rules = []
+            with (mock.patch.object(self.gui, "APP_DIR", base),
+                  mock.patch.object(self.gui, "DISABLED_RECORD", disabled),
+                  mock.patch.object(self.gui, "SORT_FILE", order),
+                  mock.patch.object(self.gui, "write_order", side_effect=OSError("disk full")),
+                  mock.patch.object(self.gui.messagebox, "showerror")):
+                self.gui.ManagerGUI.save(owner)
+            self.assertTrue((data / "Extra.esp").is_file())
+            self.assertFalse((base / "disabled_plugins" / "Extra.esp").exists())
+            self.assertEqual(disabled.read_bytes(), b"old disabled\n")
+            self.assertEqual(order.read_bytes(), b"old order\n")
+            self.assertEqual(rules.read_bytes(), b"old rules\n")
 
 
 if __name__ == "__main__":

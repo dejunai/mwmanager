@@ -12,6 +12,7 @@ import tempfile
 import textwrap
 import time
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -46,6 +47,19 @@ FAKE = textwrap.dedent(r'''
 
 
 class CloseBrowser(unittest.TestCase):
+    def test_embedded_browser_enables_interactive_downloads(self):
+        source = Path(B.__file__).read_text(encoding="utf-8")
+        self.assertIn('webview.settings["ALLOW_DOWNLOADS"] = True', source)
+        self.assertIn('args.ResultFilePath = str(target)', source)
+
+    def test_github_is_approved_and_component_download_folder_is_sent(self):
+        target = Path(self.tmp.name) / "pre-reqs" / "mge_xe"
+        with mock.patch.object(B, "_tracked_browser_pid", return_value=123):
+            B.open_page("https://github.com/Greatness7/MGE-XE/releases", download_dir=target)
+        command = B._read_json(self.root / "command.json")
+        self.assertEqual(command["url"], "https://github.com/Greatness7/MGE-XE/releases")
+        self.assertEqual(command["download_dir"], str(target.resolve()))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.old_lad = os.environ.get("LOCALAPPDATA")

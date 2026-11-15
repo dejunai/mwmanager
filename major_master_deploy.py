@@ -145,7 +145,7 @@ def _pack_assets(package: Path, plugin_name: str, tool: Path) -> list[Path]:
         return moved
 
 
-def register_archives(ini_path: Path, archives: list[Path]) -> list[str]:
+def register_archives(ini_path: Path, archives: list[Path], manager_dir: Path | None = None) -> list[str]:
     """Register archives and return only the exact entries this call added."""
     if not archives:
         return []
@@ -180,7 +180,14 @@ def register_archives(ini_path: Path, archives: list[Path]) -> list[str]:
             lines.append("")
         added_lines = [f"Archive {i}={name}" for i, name in enumerate(additions)]
         lines += ["[Archives]"] + added_lines
-    if ini_path.is_file():
+    install_ledger = ledger_run = original = None
+    if manager_dir is not None:
+        import mwmanager_journal
+        install_ledger = mwmanager_journal.Journal(Path(manager_dir) / "journal")
+        original = install_ledger.preserve_original(ini_path.parent, ini_path)
+        ledger_run = install_ledger.start_run("major_master_deploy.py", {"operation": "register BSA archives",
+                                                                          "archives": additions})
+    elif ini_path.is_file():
         stamp = time.strftime("%Y%m%d-%H%M%S")
         backup = ini_path.with_name(f"{ini_path.name}.mwmanager-predeploy-{stamp}.bak")
         suffix = 1
@@ -191,6 +198,11 @@ def register_archives(ini_path: Path, archives: list[Path]) -> list[str]:
     temp = ini_path.with_suffix(ini_path.suffix + ".mwmanager-tmp")
     temp.write_text("\n".join(lines) + "\n", encoding="cp1252", errors="replace")
     os.replace(temp, ini_path)
+    if install_ledger:
+        install_ledger.record(ledger_run["run"], ini_path.name,
+                              "replace" if original["kind"] != "absent" else "create",
+                              mwmanager_journal.sha256_file(ini_path), original, tag="archive-registration")
+        install_ledger.finish_run(ledger_run)
     return added_lines
 
 
@@ -408,7 +420,7 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
                 if progress: progress("Tamriel Rebuilt includes the selected Firemoth remover; preserving the shipped Siege at Firemoth plugin.")
                 continue
             source = data_dir / "Siege at Firemoth.esp"
-            target = data_dir / "Off" / "Official Addons" / source.name
+            target = data_dir / "Off" / "Official Add-Ons" / source.name
             if not source.is_file():
                 continue
             if target.exists():
@@ -418,7 +430,7 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
             digest = sha256(source)
             os.replace(source, target)
             moves.append({"source": str(source), "target": str(target), "sha256": digest})
-            if progress: progress("Moved shipped Siege at Firemoth.esp to Off/Official Addons because Tamriel Rebuilt was deployed without Remove Firemoth.")
+            if progress: progress("Moved shipped Siege at Firemoth.esp to Off/Official Add-Ons because Tamriel Rebuilt was deployed without Remove Firemoth.")
         for package, plugins in package_info:
             for base, dirs, files in os.walk(package):
                 dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS]
@@ -466,7 +478,7 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
                 if archive.name.casefold() not in seen_archives:
                     archives.append(archive)
                     seen_archives.add(archive.name.casefold())
-        registered_archives = register_archives(ini_path, archives)
+        registered_archives = register_archives(ini_path, archives, manager_dir)
         # Index after deployment. The catalog keeps full record bodies and BSA member provenance.
         catalog = manager_dir / "database"
         import sys
@@ -535,6 +547,10 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
             except OSError:
                 pass
         raise
+    import mwmanager_journal
+    mwmanager_journal.Journal(manager_dir / "journal").record_deployment(
+        data_dir.parent, operations, moves=moves, tool="major_master_deploy.py", tag="major-master-deployment",
+        inputs={"masters": ready, "include_assets": include_assets})
     return {"ready": ready, "linked": linked, "backed_up": [str(x[0]) for x in backed_up],
             "skipped_identical": skipped, "archives": [p.name for p in archives],
             "record_count": len(ready), "conflicts": conflicts,

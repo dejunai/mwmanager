@@ -8,6 +8,7 @@ import tempfile
 import time
 import types
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
@@ -111,6 +112,51 @@ class Base(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
 
+class ArchiveToolTests(unittest.TestCase):
+    class Response:
+        def __init__(self, data):
+            self.data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            pass
+
+        def read(self, *_):
+            return self.data
+
+    def test_downloads_official_full_7zip_into_manager_tools(self):
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        page = b'<a href="https://github.com/ip7z/7zip/releases/download/26.06/7z2606-x64.exe">Download</a>'
+        opened = []
+
+        def opener(url, **_):
+            opened.append(url)
+            return self.Response(page if url == preinstall.SEVEN_ZIP_DOWNLOAD_PAGE else b"MZinstaller")
+
+        def runner(command, **_):
+            destination = Path(command[-1].split("=", 1)[1])
+            write(destination / "7z.exe", b"MZ")
+            return types.SimpleNamespace(returncode=0)
+
+        progress = Progress(yes_no=[True])
+        with mock.patch.object(preinstall, "_seven_zip", return_value=None), \
+                mock.patch.object(preinstall.os, "name", "nt"), \
+                mock.patch.object(preinstall.platform, "machine", return_value="AMD64"):
+            self.assertTrue(preinstall.ensure_archive_tool(root, progress, opener=opener, runner=runner))
+        self.assertEqual(opened[0], preinstall.SEVEN_ZIP_DOWNLOAD_PAGE)
+        self.assertTrue((root / "tools/7zip/7z.exe").is_file())
+        self.assertTrue((root / "tools/7zip-installer.exe").is_file())
+
+    def test_declining_missing_archive_tool_stops(self):
+        progress = Progress(yes_no=[False])
+        with mock.patch.object(preinstall, "_seven_zip", return_value=None), \
+                mock.patch.object(preinstall.os, "name", "nt"):
+            self.assertFalse(preinstall.ensure_archive_tool(Path("manager"), progress))
+
+
 class DetectTests(Base):
     def registry(self, gog, steam_lib, vortex_exe, downloads_vortex=True):
         un = r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
@@ -205,6 +251,10 @@ class FirstLaunchTests(Base):
         self.manager.mkdir()
 
     def preflight(self, game, progress, launcher):
+        import mwmanager_journal
+        journal = mwmanager_journal.Journal(self.manager / "journal")
+        if not journal.has_baseline():
+            journal.capture_baseline(game)
         with mock.patch.object(preinstall, "_offer_baseline", return_value=True) as baseline:
             result = preinstall.run_preinstall(game, self.manager, progress, check_latest=lambda: (LATEST, None),
                                                launcher=launcher)
@@ -318,6 +368,35 @@ class CodePatchLogTests(Base):
 
 
 class PrereqTests(Base):
+    def test_nexus_metadata_marks_older_timestamped_cache_outdated(self):
+        def response(payload):
+            item = mock.MagicMock()
+            item.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+            return item
+
+        replies = [response({"data": {"game": {"id": "100"}}}),
+                   response({"data": {"modFiles": [
+                       {"name": "MCP Beta", "version": "2.5 beta 20", "date": 1700000000,
+                        "primary": 1, "category": "MAIN"}]}})]
+        archive = self.tmp / "MCP beta-26348-2-5beta19-1631467698.7z"
+        with mock.patch("urllib.request.urlopen", side_effect=replies):
+            status, version = mp.cached_archive_status("mcp_beta", archive)
+        self.assertEqual((status, version), ("outdated", "2.5 beta 20"))
+
+    def test_nexus_version_ignores_browser_duplicate_suffix(self):
+        def response(payload):
+            item = mock.MagicMock()
+            item.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+            return item
+
+        replies = [response({"data": {"game": {"id": "100"}}}),
+                   response({"data": {"modFiles": [
+                       {"name": "Morrowind Code Patch", "version": "2.4", "date": 1494630880,
+                        "primary": 1, "category": "MAIN"}]}})]
+        archive = self.tmp / "Morrowind Code Patch-19510-2-4 (2).7z"
+        with mock.patch("urllib.request.urlopen", side_effect=replies):
+            self.assertEqual(mp.cached_archive_status("mcp", archive), ("current", "2.4"))
+
     def test_mcp_first_entry_must_be_beta(self):
         game = make_game(self.tmp / "g")
         mcp = mp.detect(game)["mcp"]
@@ -372,6 +451,10 @@ class PreflightTests(Base):
         self.manager.mkdir()
 
     def run_preflight(self, game, progress, latest=LATEST, runner=None):
+        import mwmanager_journal
+        journal = mwmanager_journal.Journal(self.manager / "journal")
+        if not journal.has_baseline():
+            journal.capture_baseline(game)
         with mock.patch.object(preinstall, "_offer_baseline", return_value=True) as baseline:
             result = preinstall.run_preinstall(game, self.manager, progress,
                                                check_latest=lambda: (latest, None if latest else "offline"),
@@ -398,6 +481,122 @@ class PreflightTests(Base):
         self.assertEqual(report["recommendations"], [])
         self.assertNotIn("unmanaged_plugins", report)
 
+    def test_official_addon_docs_move_without_touching_other_readmes(self):
+        game = make_game(self.tmp / "g")
+        write(game / "Data Files/README - Area Effect Arrows 1.0.txt", "official")
+        write(game / "Data Files/My Mod Readme.txt", "mod")
+        import mwmanager_journal as journal
+        ledger = journal.Journal(self.manager / "journal")
+        ledger.capture_baseline(game)
+        lines = preinstall.move_official_addon_docs(game, self.manager)
+        destination = game / "Data Files/docs/Official Add-Ons/README - Area Effect Arrows 1.0.txt"
+        self.assertTrue(destination.is_file())
+        self.assertTrue((game / "Data Files/My Mod Readme.txt").is_file())
+        self.assertEqual(len(lines), 1)
+        entries, problems = ledger.entries()
+        self.assertEqual(problems, [])
+        self.assertEqual([(entry["action"], entry.get("tag")) for entry in entries],
+                         [("move", "official-add-on-document"), ("create", "official-add-on-document")])
+        plan = ledger.plan_rollback(game)
+        ledger.execute_rollback(game, plan)
+        self.assertTrue((game / "Data Files/README - Area Effect Arrows 1.0.txt").is_file())
+        self.assertFalse(destination.exists())
+
+    def test_official_plugin_override_is_journaled_for_rollback(self):
+        import core_addons
+        import mwmanager_journal as journal
+        game = make_game(self.tmp / "g")
+        source = write(game / "Data Files/Siege at Firemoth.esp", b"official plugin")
+        digest = hashlib.sha256(source.read_bytes()).hexdigest()
+        (self.manager / core_addons.PLUGIN_OVERRIDE_CONFIG).write_text(json.dumps({"rules": [{
+            "trigger_master": "TR_Mainland.esm", "replaced_plugin": source.name,
+            "expected_original_sha256": digest, "off_path": "Off/Official Add-Ons",
+        }]}), encoding="utf-8")
+        ledger = journal.Journal(self.manager / "journal")
+        ledger.capture_baseline(game)
+        core_addons.apply_plugin_replacement_overrides("TR_Mainland.esm", game / "Data Files", self.manager)
+        self.assertFalse(source.exists())
+        self.assertTrue((self.manager / "Off/Official Add-Ons/Siege at Firemoth.esp").is_file())
+        entries, problems = ledger.entries()
+        self.assertEqual(problems, [])
+        self.assertEqual([(entry["action"], entry.get("tag")) for entry in entries],
+                         [("move", "official-add-on-plugin")])
+        ledger.execute_rollback(game, ledger.plan_rollback(game))
+        self.assertEqual(source.read_bytes(), b"official plugin")
+
+    def test_gog_manifest_mod_files_can_be_quarantined_recoverably(self):
+        game = make_game(self.tmp / "g")
+        mod = game / "Data Files/A Mod.esp"
+        write(mod, b"TES3")
+        import mwmanager_journal as journal
+        original = {journal.key(journal.rel_of(game, path)): (journal.rel_of(game, path), "")
+                    for path in journal.walk_files(game) if path != mod}
+        with mock.patch.object(journal, "find_hashdb", return_value=game / "goggame-1.hashdb"), \
+                mock.patch.object(journal, "read_hashdb", return_value=original):
+            files, complete = preinstall.detected_mod_files(game)
+        self.assertEqual((files, complete), ([mod], True))
+        root = preinstall.quarantine_mod_files(game, self.manager, files)
+        self.assertFalse(mod.exists())
+        self.assertTrue((root / "Data Files/A Mod.esp").is_file())
+        self.assertIn("Data Files/A Mod.esp", json.loads((root / "manifest.json").read_text())["files"])
+
+    def test_gog_generated_runtime_files_are_not_reported_as_mods(self):
+        import mwmanager_journal as journal
+        game = make_game(self.tmp / "g")
+        generated = [write(game / name, b"generated") for name in
+                     ("MWSE-Update.exe.tmp", "Newtonsoft.Json.dll.tmp", "Warnings.txt",
+                      "mwedit/customfunctions.dat")]
+        mod = write(game / "Data Files/A Mod.esp", b"TES3")
+        original = {journal.key(journal.rel_of(game, path)): (journal.rel_of(game, path), "")
+                    for path in journal.walk_files(game) if path not in [*generated, mod]}
+        with mock.patch.object(journal, "find_hashdb", return_value=game / "goggame-1.hashdb"), \
+                mock.patch.object(journal, "read_hashdb", return_value=original):
+            files, complete = preinstall.detected_mod_files(game)
+        self.assertEqual((files, complete), ([mod], True))
+
+    def test_resumed_first_run_does_not_report_journaled_plugins_as_mods(self):
+        import mwmanager_journal as journal
+        game = make_game(self.tmp / "g")
+        generated = write(game / "Data Files/mwmanager - ESM fixes.esp", b"generated")
+        mod = write(game / "Data Files/A Mod.esp", b"TES3")
+        ledger = journal.Journal(self.manager / "journal")
+        ledger.capture_baseline(game)
+        run = ledger.start_run("mwmanager.py")
+        ledger.record(run["run"], journal.rel_of(game, generated), "create",
+                      hashlib.sha256(generated.read_bytes()).hexdigest(), {"kind": "absent"})
+        ledger.finish_run(run)
+        original = {journal.key(journal.rel_of(game, path)): (journal.rel_of(game, path), "")
+                    for path in journal.walk_files(game) if path not in (generated, mod)}
+        with mock.patch.object(journal, "find_hashdb", return_value=game / "goggame-1.hashdb"), \
+                mock.patch.object(journal, "read_hashdb", return_value=original):
+            files, complete = preinstall.detected_mod_files(game, self.manager)
+        self.assertEqual((files, complete), ([mod], True))
+
+    def test_first_run_installs_lua_suite_after_plugin_decision_and_baseline(self):
+        game = make_game(self.tmp / "g")
+        write(game / "Morrowind Launcher.exe", b"MZ")
+        import mwmanager_journal
+        mwmanager_journal.Journal(self.manager / "journal").capture_baseline(game)
+        order = []
+        progress = Progress()
+        with mock.patch.object(preinstall, "confirm_first_launch", return_value=True), \
+                mock.patch.object(preinstall, "_prepare_first_run",
+                                  side_effect=lambda *args: order.append("plugins") or True), \
+                mock.patch.object(preinstall, "_offer_baseline",
+                                  side_effect=lambda *args: order.append("baseline") or True), \
+                mock.patch.object(preinstall, "move_official_addon_docs",
+                                  side_effect=lambda *args: order.append("docs") or []), \
+                mock.patch.object(preinstall, "_install_mwse_lua_suite",
+                                  side_effect=lambda *args: order.append("lua") or True):
+            self.assertTrue(preinstall.run_preinstall(
+                game, self.manager, progress, first_run=True, check_latest=lambda: (LATEST, None)))
+        self.assertEqual(order, ["plugins", "baseline", "docs", "lua"])
+
+    def test_store_recovery_instructions_match_install(self):
+        game = self.tmp / "Steam/steamapps/common/Morrowind"
+        game.mkdir(parents=True)
+        self.assertIn("Steam > Morrowind", preinstall.recovery_text(game))
+
     def test_missing_exe_ini_and_core_files_block(self):
         game = make_game(self.tmp / "g", ini=False)
         (game / "Morrowind.exe").unlink()
@@ -419,14 +618,97 @@ class PreflightTests(Base):
 
     def test_missing_skunk_works_offers_its_page(self):
         game = make_game(self.tmp / "g", mcp_first="Game mechanics")
-        progress = Progress(choices=["mcp_beta"])
+        progress = Progress(yes_no=[False], choices=["mcp_beta"])
         with mock.patch.object(mp, "open_download_page", return_value="embedded") as opened:
             result, baseline = self.run_preflight(game, progress)
         self.assertFalse(result)
         baseline.assert_not_called()
-        opened.assert_called_once_with("mcp_beta")
+        download_dir = opened.call_args.args[1]
+        self.assertEqual(download_dir.parent, self.manager / "pre-reqs" / "mcp_beta")
+        self.assertTrue(download_dir.name.startswith("download-"))
         self.assertIn('"Game mechanics", not "Beta"', progress.asked[0][2])
         self.assertIn("mods/26348", progress.asked[0][2])
+
+    def test_prerequisite_archive_is_kept_safely_and_installed(self):
+        game = self.tmp / "game"
+        game.mkdir()
+        downloads = self.tmp / "downloads"
+        downloads.mkdir()
+        archive = downloads / "MWSE-45468.zip"
+        with zipfile.ZipFile(archive, "w") as package:
+            package.writestr("MWSE/MWSE.dll", b"dll")
+            package.writestr("MWSE/MWSE-Update.exe", b"updater")
+            package.writestr("MWSE/Data Files/MWSE/core/initialize.lua", b"-- core")
+        progress = Progress()
+        self.assertTrue(preinstall.install_prerequisite_archive(
+            "mwse", archive, game, self.manager, progress,
+            runner=mock.Mock(side_effect=AssertionError("portable archive should not launch an installer"))))
+        self.assertEqual((game / "MWSE.dll").read_bytes(), b"dll")
+        self.assertTrue((game / "Data Files/MWSE/core/initialize.lua").is_file())
+        self.assertTrue((self.manager / "pre-reqs/mwse/MWSE-45468.zip").is_file())
+
+    def test_archive_detection_separates_mcp_base_and_beta(self):
+        downloads = self.tmp / "downloads"
+        downloads.mkdir()
+        base = write(downloads / "Morrowind Code Patch-19510.zip", b"base")
+        beta = write(downloads / "MCP Beta Skunk Works-26348.7z", b"beta")
+        self.assertEqual(mp.prerequisite_archives("mcp", downloads), [base])
+        self.assertEqual(mp.prerequisite_archives("mcp_beta", downloads), [beta])
+
+    def test_archive_detection_does_not_treat_mwse_mods_as_the_runtime(self):
+        downloads = self.tmp / "downloads"
+        downloads.mkdir()
+        runtime = write(downloads / "MWSE-Update for Nightly Builds-45468.zip", b"runtime")
+        write(downloads / "MWSE Logger-51423.7z", b"mod")
+        write(downloads / "Graphic Herbalism MWSE-46599.7z", b"mod")
+        self.assertEqual(mp.prerequisite_archives("mwse", downloads), [runtime])
+
+    def test_mge_archive_detection_rejects_hrnchamd_nexus_download(self):
+        downloads = self.tmp / "downloads"
+        downloads.mkdir()
+        write(downloads / "MGE XE-41102-0-15-0.7z", b"wrong fork")
+        g7 = write(downloads / "MGE-XE G7 Fork-59957.7z", b"g7")
+        self.assertEqual(mp.prerequisite_archives("mge_xe", downloads), [g7])
+
+    def test_mcp_and_mge_launch_prompts_include_requested_guidance(self):
+        game = self.tmp / "game"
+        write(game / "Morrowind Code Patch.exe", b"MZ")
+        write(game / "MGEXEgui.exe", b"MZ")
+        progress = Progress(yes_no=[True, True])
+        runner = mock.Mock(return_value=types.SimpleNamespace(returncode=0))
+        self.assertTrue(preinstall._post_prerequisite("mcp_beta", game, progress, LATEST, runner=runner))
+        self.assertTrue(preinstall._post_prerequisite("mge_xe", game, progress, LATEST, runner=runner))
+        mcp_text, mge_text = progress.asked[0][2], progress.asked[1][2]
+        for text in ("Beta", "Game mechanics", "Over the shoulder 3rd person camera",
+                     "NPC AI casts zero cost powers", "Don't loot on dispose", "Level-up skills tooltip",
+                     "International", "Bugs", "Apply chosen patches"):
+            self.assertIn(text, mcp_text)
+        for text in ("VSync off", "Enable shaders", "Very High", "Depth of Field", "frame limiter to 300",
+                     "Pause rendering in menus", "Crosshair autohide", "Allow yes to all", "Allow screenshots",
+                     "Constant 0.382", "Linear 0", "Quadratic 2.619"):
+            self.assertIn(text, mge_text)
+        self.assertEqual([Path(call.args[0][0]).name for call in runner.call_args_list],
+                         ["Morrowind Code Patch.exe", "MGEXEgui.exe"])
+
+    def test_gui_launch_keeps_guidance_visible_and_waits_for_each_program(self):
+        game = self.tmp / "game"
+        write(game / "Morrowind Code Patch.exe", b"MZ")
+        write(game / "MGEXEgui.exe", b"MZ")
+        progress = Progress(yes_no=[True, True])
+        launched = []
+
+        def run_with_reference(path, title, guidance):
+            launched.append((Path(path).name, title, guidance))
+            return 0, None
+
+        progress.run_program_with_reference = run_with_reference
+        runner = mock.Mock(side_effect=AssertionError("GUI launch path should own the process"))
+        self.assertTrue(preinstall._post_prerequisite("mcp_beta", game, progress, LATEST, runner=runner))
+        self.assertTrue(preinstall._post_prerequisite("mge_xe", game, progress, LATEST, runner=runner))
+        self.assertEqual([item[0] for item in launched], ["Morrowind Code Patch.exe", "MGEXEgui.exe"])
+        self.assertIn("Apply chosen patches", launched[0][2])
+        self.assertIn("frame limiter to 300", launched[1][2])
+        self.assertIn("Quadratic 2.619", launched[1][2])
 
     def test_nothing_installed_lists_pages_in_install_order(self):
         game = self.tmp / "bare"
@@ -439,16 +721,78 @@ class PreflightTests(Base):
             self.assertFalse(self.run_preflight(game, progress)[0])
         opened.assert_not_called()
         message = progress.asked[0][2]
-        order = [message.index(p) for p in ("mods/19510", "mods/26348", "mods/41102", "mods/45468")]
+        order = [message.index(p) for p in
+                 ("mods/45468", "mods/19510", "mods/26348", "mods/59957")]
         self.assertEqual(order, sorted(order))
 
     def test_missing_mge_offers_g7_first(self):
         game = make_game(self.tmp / "g", mge=None)
-        progress = Progress(choices=["mge_g7"])
+        progress = Progress(yes_no=[False], choices=["mge_g7"])
         with mock.patch.object(mp, "open_download_page", return_value="system") as opened:
             self.assertFalse(self.run_preflight(game, progress)[0])
-        opened.assert_called_once_with("mge_g7")
+        download_dir = opened.call_args.args[1]
+        self.assertEqual(download_dir.parent, self.manager / "pre-reqs" / "mge_xe")
+        self.assertTrue(download_dir.name.startswith("download-"))
         self.assertEqual(progress.asked[0][3][0][1], "mge_g7")
+        self.assertNotIn("mge_xe", [value for _label, value in progress.asked[0][3]])
+
+    def test_manager_cache_suppresses_mod_manager_archive_choice(self):
+        game = make_game(self.tmp / "g", mge=None)
+        cached = self.manager / "pre-reqs" / "mge_xe" / "MGE XE cached.7z"
+        vortex = self.tmp / "vortex" / "MGE XE vortex.7z"
+        progress = Progress(choices=["none"])
+        report = {"missing_keys": ["mge_xe"], "blockers": ["MGE XE is missing"],
+                  "game_dir": str(game)}
+
+        def archives(_key, root):
+            return [cached] if Path(root) == self.manager / "pre-reqs" else [vortex]
+
+        with mock.patch.object(mp, "prerequisite_archives", side_effect=archives), \
+                mock.patch.object(mp, "cached_archive_status", return_value=("current", "1.0")):
+            self.assertFalse(preinstall._offer_missing(report, progress, game, self.manager,
+                                                       archive_dir=vortex.parent))
+        choices = progress.asked[0][3]
+        self.assertEqual(choices[0][1], "cache")
+        self.assertIn("MWManager cached", choices[0][0])
+        self.assertNotIn("archive", [value for _label, value in choices])
+
+    def test_newer_nexus_file_suppresses_stale_cache_and_vortex(self):
+        game = make_game(self.tmp / "g", mge=None)
+        cached = self.manager / "pre-reqs" / "mge_xe" / "MGE XE old.7z"
+        vortex = self.tmp / "vortex" / "MGE XE vortex.7z"
+        progress = Progress(choices=["none"])
+        report = {"missing_keys": ["mge_xe"], "blockers": ["MGE XE is missing"],
+                  "game_dir": str(game)}
+
+        def archives(_key, root):
+            return [cached] if Path(root) == self.manager / "pre-reqs" else [vortex]
+
+        with mock.patch.object(mp, "prerequisite_archives", side_effect=archives), \
+                mock.patch.object(mp, "cached_archive_status", return_value=("outdated", "0.16")):
+            self.assertFalse(preinstall._offer_missing(report, progress, game, self.manager,
+                                                       archive_dir=vortex.parent))
+        values = [value for _label, value in progress.asked[0][3]]
+        self.assertNotIn("cache", values)
+        self.assertNotIn("archive", values)
+        self.assertIn("newer MGE XE, Greatness7 build (0.16)", progress.lines[0])
+
+    def test_missing_prerequisite_can_be_installed_and_rechecked_in_place(self):
+        game = make_game(self.tmp / "g", mcp_first="Game mechanics")
+
+        class InstallingProgress(Progress):
+            def ask_yes_no(inner, title, message):
+                inner.asked.append(("yes_no", title, message))
+                write(game / "mcpatch/describe.json", json.dumps([{"category": "Beta"}]))
+                return True
+
+        progress = InstallingProgress(choices=["mcp_beta"])
+        runner = mock.Mock(return_value=types.SimpleNamespace(returncode=0))
+        with mock.patch.object(mp, "open_download_page", return_value="system"), \
+                mock.patch.object(preinstall, "confirm_first_launch", return_value=True):
+            result, _ = self.run_preflight(game, progress, runner=runner)
+        self.assertTrue(result)
+        self.assertEqual(Path(runner.call_args.args[0][0]).name, "Morrowind Code Patch.exe")
+        self.assertIn("Preflight: re-checking after prerequisite installation…", progress.lines)
 
     def test_non_g7_mge_is_a_recommendation_not_a_block(self):
         game = make_game(self.tmp / "g", mge="other")

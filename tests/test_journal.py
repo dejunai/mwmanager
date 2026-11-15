@@ -87,6 +87,8 @@ class BaselineTests(Fixture):
         self.assertEqual(layers["Data Files/Existing Mod.esp"], "start")
         self.assertEqual(layers["Data Files/MWSE/mods/old/main.lua"], "start")
         self.assertEqual(layers["MWSE.dll"], "prereq:mwse")
+        self.assertEqual(mj.classify("MWSE-Update.exe.config"), "prereq:mwse")
+        self.assertEqual(mj.classify("MWSE-Update.pdb"), "prereq:mwse")
         self.assertEqual(layers["Data Files/MWSE/core/initialize.lua"], "prereq:mwse")
         self.assertEqual(layers["mcpatch/describe.json"], "prereq:mcp")
         self.assertEqual(layers["Saves/one.ess"], "user-data")
@@ -111,8 +113,90 @@ class BaselineTests(Fixture):
         self.assertFalse(any("a.dds" in w or "Morrowind.exe" in w for w in record["warnings"]))
         self.assertTrue(any("Tribunal.esm is missing" in w for w in record["warnings"]))
 
+    def test_reinstall_marker_change_invalidates_and_force_archives_baseline(self):
+        self.journal.capture_baseline(self.game)
+        self.assertTrue(self.journal.baseline_matches_install(self.game)[0])
+        marker = self.game / "goggame-1.hashdb"
+        stat = marker.stat()
+        os.utime(marker, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+        matches, reason = self.journal.baseline_matches_install(self.game)
+        self.assertFalse(matches)
+        self.assertIn("marker changed", reason)
+        self.journal.record("old", "Data Files/old.esp", "create", "0" * 64, {"kind": "absent"})
+        replacement = self.journal.capture_baseline(self.game, force=True)
+        self.assertEqual(replacement["version"], 2)
+        history = list((self.journal.root / "history").glob("install-*"))
+        self.assertEqual(len(history), 1)
+        self.assertTrue((history[0] / "baseline" / "baseline.json").is_file())
+        self.assertTrue((history[0] / "install.jsonl").is_file())
+        self.assertFalse(self.journal.ledger.exists())
+
+    def test_prerequisites_are_a_separate_default_rollback_checkpoint(self):
+        for rel in ("MWSE.dll", "Data Files/MWSE/core/initialize.lua", "mcpatch/describe.json"):
+            (self.game / rel).unlink()
+        self.journal.capture_baseline(self.game)
+        self.assertNotIn("MWSE.dll", self.journal.baseline()["files"])
+
+        write(self.game / "MWSE.dll", b"prerequisite mwse")
+        write(self.game / "Morrowind.exe", b"code patched exe")
+        write(self.game / "Data Files/not-a-prerequisite.esp", b"mod")
+        checkpoint = self.journal.capture_prerequisites(self.game)
+        self.assertIn("MWSE.dll", checkpoint["files"])
+        self.assertNotIn("Data Files/not-a-prerequisite.esp", checkpoint["files"])
+        partial = write(self.game / "MWSE-Update.exe.tmp", b"partial updater output")
+
+        original = self.journal.preserve_original(self.game, self.game / "MWSE.dll")
+        write(self.game / "MWSE.dll", b"changed by a later mod")
+        self.journal.record("mod", "MWSE.dll", "modify", sha(self.game / "MWSE.dll"), original)
+        normal = self.journal.plan_rollback(self.game)
+        self.assertEqual(normal["prerequisite_steps"], [])
+        self.journal.execute_rollback(self.game, normal)
+        self.assertEqual((self.game / "MWSE.dll").read_bytes(), b"prerequisite mwse")
+
+        store_only = self.journal.plan_rollback(self.game, preserve_prerequisites=False)
+        self.assertIn(("delete", "MWSE.dll"),
+                      {(step["op"], step["path"]) for step in store_only["prerequisite_steps"]})
+        self.assertIn(("delete", "MWSE-Update.exe.tmp"),
+                      {(step["op"], step["path"]) for step in store_only["prerequisite_steps"]})
+        self.journal.execute_rollback(self.game, store_only)
+        self.assertFalse((self.game / "MWSE.dll").exists())
+        self.assertFalse(partial.exists())
+        self.assertEqual((self.game / "Morrowind.exe").read_bytes(), b"vanilla exe")
+
+    def test_rollback_skips_a_journal_original_when_current_file_matches_prerequisite_checkpoint(self):
+        plugin = self.game / "Data Files/XE Sky Variations.esp"
+        self.journal.capture_baseline(self.game)
+        write(plugin, b"downloaded prerequisite")
+        original = self.journal.preserve_original(self.game, plugin)
+        write(plugin, b"tidied prerequisite")
+        self.journal.record("tidy", "Data Files/XE Sky Variations.esp", "replace", sha(plugin), original)
+        self.journal.capture_prerequisites(self.game)
+        plan = self.journal.plan_rollback(self.game, preserve_prerequisites=False)
+        self.assertEqual(plan["refuse"], [])
+        self.assertNotIn("Data Files/XE Sky Variations.esp", {step["path"] for step in plan["steps"]})
+        self.assertIn(("delete", "Data Files/XE Sky Variations.esp"),
+                      {(step["op"], step["path"]) for step in plan["prerequisite_steps"]})
+
 
 class LedgerTests(Fixture):
+    def test_cli_real_rollback_verifies_and_archives(self):
+        self.journal.capture_baseline(self.game)
+        settings = self.manager / "mwmanager_gui_settings.json"
+        settings.write_text(json.dumps({"first_run": 0, "init_complete": 1}), encoding="utf-8")
+        generated = write(self.game / "Data Files/generated.esp", b"generated")
+        self.journal.record("run", "Data Files/generated.esp", "create", sha(generated), {"kind": "absent"})
+        rc = mj.main(["--game-dir", str(self.game), "--journal-dir", str(self.journal.root), "--rollback", "--gog-only"])
+        self.assertEqual(rc, 0)
+        self.assertFalse(generated.exists())
+        self.assertFalse(self.journal.ledger.exists())
+        self.assertTrue(list((self.journal.root / "history").glob("install-*.jsonl")))
+        self.assertTrue(self.journal.verify(self.game, against="baseline", full_hash=True)["ok"])
+        self.assertEqual(json.loads(settings.read_text())["first_run"], 1)
+        self.assertEqual(json.loads(settings.read_text())["init_complete"], 0)
+        setup = json.loads((self.manager / "mwmanager_setup_state.json").read_text())
+        self.assertTrue(setup["steps"]["paths_confirmed"]["completed_at"])
+        self.assertIsNone(setup["steps"]["preflight_complete"]["completed_at"])
+
     def test_chain_tamper_and_torn_line(self):
         for n in range(3):
             self.journal.record("r", f"Data Files/n{n}.esp", "create", "0" * 64, {"kind": "absent"})
@@ -227,6 +311,41 @@ class RoundTripTests(Fixture):
             self.journal.execute_rollback(self.game, plan)
         self.assertFalse(self.journal.verify(self.game)["ok"])
 
+    def test_gui_deployment_operations_join_install_rollback(self):
+        self.journal.capture_baseline(self.game)
+        package = self.manager / "staging" / "mod"
+        backup = write(package / "Off/mod/replaced/Textures/a.dds", b"original texture")
+        target = write(self.game / "Data Files/Textures/a.dds", b"replacement")
+        created = write(self.game / "Data Files/New.esp", b"new")
+        moved_source = self.game / "Data Files/Siege at Firemoth.esp"
+        moved_target = self.game / "Data Files/Off/Official Add-Ons/Siege at Firemoth.esp"
+        moved_target.parent.mkdir(parents=True)
+        shutil.move(moved_source, moved_target)
+        operations = [{"target": str(target), "backup": str(backup)},
+                      {"target": str(created), "backup": None}]
+        moves = [{"source": str(moved_source), "target": str(moved_target)}]
+        self.journal.record_deployment(self.game, operations, moves=moves, tool="plugin_install.py",
+                                       tag="plugin-deployment")
+        plan = self.journal.plan_rollback(self.game)
+        self.assertEqual((plan["refuse"], plan["unexplained"]), ([], []))
+        self.journal.execute_rollback(self.game, plan)
+        self.assertEqual(target.read_bytes(), b"original texture")
+        self.assertFalse(created.exists())
+        self.assertTrue(moved_source.is_file())
+        self.assertFalse(moved_target.exists())
+
+    def test_gui_archive_registration_journals_morrowind_ini(self):
+        from major_master_deploy import register_archives
+        self.journal.capture_baseline(self.game)
+        archive = write(self.manager / "staging/New Assets.bsa", b"bsa")
+        added = register_archives(self.game / "Morrowind.ini", [archive], self.manager)
+        self.assertEqual(added, ["Archive 0=New Assets.bsa"])
+        self.assertEqual(list(self.game.glob("Morrowind.ini.mwmanager-predeploy-*.bak")), [])
+        plan = self.journal.plan_rollback(self.game)
+        self.assertIn(("restore", "Morrowind.ini"), {(step["op"], step["path"]) for step in plan["steps"]})
+        self.journal.execute_rollback(self.game, plan)
+        self.assertEqual((self.game / "Morrowind.ini").read_bytes(), SHIPPED["Morrowind.ini"])
+
 
 class ModAndCliTests(Fixture):
     def test_stage_markers_and_archive_checks(self):
@@ -250,7 +369,7 @@ class ModAndCliTests(Fixture):
                             "--mod-rollback", mod_key, "--dry-run", "--open-download"])
         self.assertEqual((code, opened), (1, [plan["download_page"]]))
 
-    def test_cli_is_dry_run_only(self):
+    def test_cli_refuses_real_rollback_with_unexplained_files(self):
         args = ["--game-dir", str(self.game), "--journal-dir", str(self.journal.root)]
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
@@ -259,7 +378,8 @@ class ModAndCliTests(Fixture):
             self.assertEqual(mj.main(args + ["--capture-baseline"]), 2)
             self.assertEqual(mj.main(args + ["--verify"]), 0)
             write(self.game / "Data Files/New.esp", b"x")
-            self.assertEqual(mj.main(args + ["--rollback"]), 2)
+            self.assertEqual(mj.main(args + ["--rollback"]), 1)
+            self.assertTrue((self.game / "Data Files/New.esp").is_file())
             self.assertEqual(mj.main(args + ["--rollback", "--dry-run"]), 0)
         self.assertTrue((self.game / "Data Files/New.esp").exists())
         self.assertIn("Not explained by the journal", out.getvalue())
@@ -273,7 +393,7 @@ class PrereqTests(unittest.TestCase):
 
     def test_nothing_installed(self):
         found = mp.detect(self.game)
-        self.assertEqual(mp.missing_keys(found), ["mcp", "mcp_beta", "mge_xe", "mwse"])
+        self.assertEqual(mp.missing_keys(found), ["mwse", "mcp", "mcp_beta", "mge_xe"])
         self.assertTrue(all("NOT detected" in line for line in mp.summary_lines(found)))
 
     def test_detects_with_versions(self):
@@ -293,18 +413,16 @@ class PrereqTests(unittest.TestCase):
         self.assertEqual(found["mcp"]["version"], "2.4")
         self.assertTrue(found["mcp"]["skunk_works_beta"])
 
-    def test_pages_are_official_and_never_downloaded(self):
+    def test_pages_are_official_and_open_in_embedded_browser(self):
         for key, page in mp.PAGES.items():
-            official = ("https://github.com/Greatness7/MGE-XE/releases" if key == "mge_g7"
-                        else "https://www.nexusmods.com/morrowind/mods/")
-            self.assertTrue(page["page"].startswith(official), key)
+            self.assertTrue(page["page"].startswith("https://www.nexusmods.com/morrowind/mods/"), key)
         opened = []
-        fake = types.SimpleNamespace(open_page=opened.append)
+        fake = types.SimpleNamespace(open_page=lambda url, download_dir=None: opened.append((url, download_dir)))
         with mock.patch.dict(sys.modules, {"mwnexus_browser": fake}):
             self.assertEqual(mp.open_download_page("mge_xe"), "embedded")
-        self.assertEqual(opened, [mp.PAGES["mge_xe"]["page"]])
+        self.assertEqual(opened, [(mp.PAGES["mge_xe"]["page"], None)])
 
-        def broken(_url):
+        def broken(_url, download_dir=None):
             raise RuntimeError("no webview")
         with mock.patch.dict(sys.modules, {"mwnexus_browser": types.SimpleNamespace(open_page=broken)}), \
                 mock.patch("webbrowser.open") as system:
@@ -335,15 +453,19 @@ class PreflightTests(Fixture):
                                "MWSE.dll was not found"],
                   "missing_keys": ["mcp", "mcp_beta", "mge_xe", "mwse"], "hash_mismatches": [],
                   "recommendations": [], "status": [], "mwse": {}}
-        progress = FakeProgress([True])
+        progress = FakeProgress([True, False])
         with mock.patch.object(preinstall, "inspect_install", return_value=report), \
                 mock.patch.object(mp, "open_download_page", return_value="embedded") as opened:
             self.assertFalse(preinstall.run_preinstall(self.game, self.manager, progress))
-        opened.assert_called_once_with("mcp")
+        download_dir = opened.call_args.args[1]
+        self.assertEqual(download_dir.parent, self.manager / "pre-reqs" / "mwse")
+        self.assertTrue(download_dir.name.startswith("download-"))
         message = progress.asked[0][1]
-        for page in ("mods/19510", "mods/26348", "mods/41102", "mods/45468"):
+        for page in ("mods/19510", "mods/26348", "mods/59957", "mods/45468"):
             self.assertIn(page, message)
-        self.assertLess(message.index("mods/19510"), message.index("mods/41102"))
+        order = [message.index(page) for page in
+                 ("mods/45468", "mods/19510", "mods/26348", "mods/59957")]
+        self.assertEqual(order, sorted(order))
         self.assertFalse(self.journal.has_baseline())
 
     def test_baseline_offered_once_and_required(self):
@@ -375,8 +497,8 @@ class ManagerCliTests(Fixture):
         with mock.patch.object(mj, "DEFAULT_ROOT", self.journal.root), contextlib.redirect_stdout(out):
             self.assertEqual(mwmanager._main([data, "--verify"]), 2)
             self.assertEqual(mwmanager._main([data, "--capture-baseline"]), 0)
-            self.assertEqual(mwmanager._main([data, "--rollback"]), 2)
+            self.assertEqual(mwmanager._main([data, "--rollback"]), 0)
             self.assertEqual(mwmanager._main([data, "--rollback", "--dry-run"]), 0)
             self.assertEqual(mwmanager._main([data, "--verify"]), 0)
         self.assertTrue(self.journal.has_baseline())
-        self.assertIn("Only --rollback --dry-run", out.getvalue())
+        self.assertIn("Rollback complete", out.getvalue())

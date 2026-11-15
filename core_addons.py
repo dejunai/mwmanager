@@ -40,8 +40,9 @@ def _quiet_subprocess_options() -> dict:
 
 
 def _seven_zip(manager_dir: Path) -> str | None:
-    candidates = [manager_dir / "tools" / "7z.exe"]
-    located = shutil.which("7z") or shutil.which("7za")
+    candidates = [manager_dir / "tools" / "7zip" / "7z.exe",
+                  manager_dir / "tools" / "7z.exe"]
+    located = shutil.which("7z")
     if located:
         candidates.append(Path(located))
     candidates.extend(Path(os.environ[env]) / "7-Zip" / "7z.exe"
@@ -1091,6 +1092,7 @@ def apply_plugin_replacement_overrides(trigger_plugin: str, data_dir: str | Path
         return [f"Override rule file unavailable or invalid: {config_path}"]
 
     messages = []
+    journal = run = None
     trigger = Path(trigger_plugin).name.casefold()
     for rule in rules:
         if Path(str(rule.get("trigger_master", ""))).name.casefold() != trigger:
@@ -1108,21 +1110,28 @@ def apply_plugin_replacement_overrides(trigger_plugin: str, data_dir: str | Path
             messages.append(f"Conflict: {filename} exists but does not match the recorded official copy; left in Data Files.")
             continue
 
-        relative_off = Path(str(rule.get("off_path", "Off/Official Add-ons")))
+        relative_off = Path(str(rule.get("off_path", "Off/Official Add-Ons")))
         if relative_off.is_absolute() or ".." in relative_off.parts:
             messages.append(f"Skipped unsafe Off destination in rule for {filename}.")
             continue
         destination = manager / relative_off / filename
         if destination.exists():
             if _sha256(destination) == actual_hash:
-                messages.append(f"Already preserved at {destination}.")
-                if not dry_run:
-                    source.unlink()
+                messages.append(f"Already preserved at {destination}; source left in place for rollback safety.")
                 continue
             messages.append(f"Conflict: {destination} already exists with different contents; left source untouched.")
             continue
         messages.append(f"Move {source} -> {destination}" if dry_run else f"Moved {filename} to {destination}")
         if not dry_run:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(source), str(destination))
+            if journal is None:
+                import mwmanager_journal
+                journal = mwmanager_journal.Journal(manager / "journal")
+                if not journal.has_baseline():
+                    messages[-1] = f"Skipped {filename}: no install baseline exists, so the original cannot be journaled."
+                    journal = None
+                    continue
+                run = journal.start_run("core_addons.py", {"trigger_plugin": trigger_plugin})
+            journal.move_original(data.parent, source, destination, run["run"], tag="official-add-on-plugin")
+    if run is not None:
+        journal.finish_run(run)
     return messages

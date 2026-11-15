@@ -74,9 +74,9 @@ Plan (each step: back up, box tests, PC tests, hash-verified deploy, no --apply/
   generate. Backups of anything else (generated patches, mod files) go to the staged mod's `Off\` or
   `MWManager\backups\Data Files\Off\`. Disabled plugins, shipped ones included, go to
   `MWManager\disabled_plugins\`; plugins disabled into the game's `Off\Disabled Plugins` by older versions
-  can still be re-enabled. The shipped add-ons' readmes are moved to `Data Files\Docs\Official Add-ons\`.
+  can still be re-enabled. The shipped add-ons' readmes are moved to `Data Files\Docs\Official Add-Ons\`.
   When TR_Mainland.esm is installed, the shipped `Siege at Firemoth.esp` it replaces is moved (hash-checked) to
-  `MWManager\Off\Official Add-ons\` by the rule in `mwmanager_plugin_overrides.json`.
+  `MWManager\Off\Official Add-Ons\` by the rule in `mwmanager_plugin_overrides.json`.
 - Exception (2026-11-13): originals of MWSE core Lua that `--init` repairs (`MWSE\core`, `MWSE\lib`) are kept in
   the install at `Data Files\MWSE\backups\<path under MWSE>` (e.g. `MWSE\core\initialize.lua` ->
   `MWSE\backups\core\initialize.lua`); the first original is kept and never overwritten. Copies kept by older

@@ -4,7 +4,7 @@
       "trigger_master": "TR_Mainland.esm",
       "replaced_plugin": "Siege at Firemoth.esp",
       "expected_original_sha256": "4598FEE9D05BF18CCB91458608ABF596515E24E3EDE6EECA5BCAED1BEFBFEDE2",
-      "off_path": "Off/Official Add-ons",
+      "off_path": "Off/Official Add-Ons",
       "reason": "TR_Mainland supplies a replacement for the shipped official Siege at Firemoth add-on."
     }
   ]

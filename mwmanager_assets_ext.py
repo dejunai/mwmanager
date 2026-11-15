@@ -38,6 +38,19 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
     done = {"tex": 0, "abs": 0, "snd": 0, "unused": 0, "broken": 0, "orphan": 0}
     skipped = []
     moves = []
+    install_ledger = ledger_run = None
+
+    def move_out(full, dest, rel):
+        nonlocal install_ledger, ledger_run
+        if not m.shipped_game_file(data_dir, rel):
+            shutil.move(full, dest)
+            return
+        if install_ledger is None:
+            import mwmanager_journal
+            install_ledger = mwmanager_journal.Journal(os.path.join(MANAGER_DIR, "journal"))
+            ledger_run = install_ledger.start_run("mwmanager_install.py", {"operation": "initial official asset tidy"})
+        install_ledger.move_original(game_dir, full, dest, ledger_run["run"], tag="official-asset")
+
     tmp = os.path.join(tempfile.gettempdir(), f"mwmanager_tmp_assets_{os.getpid()}")
     for kind, full, rel, job in fixes:
         if dry:
@@ -89,7 +102,7 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
                 mod, _pl = m.asset_owner_folder(data_dir, rel)
                 dest = m.plugin_off_backup_path(data_dir, rel, FEATURE_OF["orphan"], _pl)
                 if os.path.exists(full):
-                    shutil.move(full, dest)
+                    move_out(full, dest, rel)
                 moves.append((rel, dest, job))
                 done["unused"] += 1
                 log.append(("Data Files", f"'{rel}' ({job})", f"moved to {dest}"))
@@ -108,7 +121,7 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
                 mod, _pl = m.asset_owner_folder(data_dir, rel)
                 dest = m.plugin_off_backup_path(data_dir, rel, FEATURE_OF["unused"], _pl)
                 if os.path.exists(full):
-                    shutil.move(full, dest)
+                    move_out(full, dest, rel)
                 moves.append((rel, dest, job))
                 log.append(("Data Files", f"'{rel}' ({job})", f"moved to {dest}"))
                 done["unused"] += 1
@@ -125,6 +138,8 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
         with open(os.path.join(OUTPUT_DIR, UNUSED_RECORD), "a", encoding="utf-8") as f:
             for rel, dest, why in moves:
                 f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}\t{rel}\t{dest}\t{why}\n")
+    if ledger_run is not None:
+        install_ledger.finish_run(ledger_run)
     shutil.rmtree(tmp, ignore_errors=True)
     msg = (f"{done.get('broken', 0)} broken file(s) replaced by stand-ins (originals in each mod's Off tree), "
            f"{done['tex']} texture(s) converted, {done['abs']} model(s) with absolute texture paths fixed, "

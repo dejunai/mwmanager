@@ -8,6 +8,7 @@ import io
 import json
 import os
 import re
+import struct
 import sys
 import tempfile
 import types
@@ -100,18 +101,91 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         kept = self.m.backup_asset_original(str(self.data), os.path.join("textures", "a.dds"))
         self.assertInGameOff(kept)
         self.assertEqual(Path(kept).read_bytes(), b"orig")
-        self.assertInGameOff(self.m.asset_backup_file("texture-reduction", os.path.join("textures", "b.dds"),
-                                                      data_dir=str(self.data)))
+        official = self.m.asset_backup_file("texture-reduction", os.path.join("textures", "b.dds"),
+                                            data_dir=str(self.data))
+        self.assertEqual(os.path.normcase(official), os.path.normcase(
+            str(self.data / "Off" / "Official Assets" / "textures" / "b.dds")))
 
-    def test_shipped_plugin_and_archive_backups_stay_in_the_game_off_folder(self):
+    def test_shipped_assets_use_official_assets_and_patched_esps_use_manager_backups(self):
         for name in ("Siege at Firemoth.esp", "Morrowind.esm", "Tribunal.bsa"):
-            self.assertInGameOff(self.m.plugin_off_backup_path(str(self.data), name, "plugin-repair"))
+            path = self.m.plugin_off_backup_path(str(self.data), name, "plugin-repair")
+            self.assertTrue(os.path.normcase(path).startswith(
+                os.path.normcase(str(self.data / "Off" / "Official Assets")) + os.sep))
         esp = self.data / "Siege at Firemoth.esp"
         esp.write_bytes(b"TES3")
         bak = self.m.backup_path(str(esp))
-        self.assertInGameOff(bak)
+        self.assertNotInGame(bak)
+        self.assertIn(os.path.join("plugins", "Official Add-Ons"), bak)
         Path(bak).write_bytes(b"old")
         self.assertIn(bak, self.m.backup_candidates(str(esp)))
+
+    def test_initial_tidy_journals_a_shipped_asset_move(self):
+        import mwdialog_assets
+        import mwmanager_journal
+        source = self.data / "textures" / "unused.dds"
+        source.write_bytes(b"original")
+        journal = mwmanager_journal.Journal(self.manager / "journal")
+        journal.capture_baseline(self.data.parent)
+        log = []
+        mwdialog_assets.apply(
+            [("unused", str(source), os.path.join("textures", "unused.dds"), "unused")],
+            str(self.data), str(self.game), self.m, log,
+        )
+        destination = self.data / "Off" / "Official Assets" / "textures" / "unused.dds"
+        self.assertEqual(destination.read_bytes(), b"original")
+        self.assertFalse(source.exists())
+        plan = journal.plan_rollback(self.data.parent)
+        self.assertIn("Data Files/textures/unused.dds", {step["path"] for step in plan["steps"]})
+
+    def test_generated_asset_is_logged_and_deleted_by_rollback(self):
+        import mwmanager_journal
+        journal = mwmanager_journal.Journal(self.manager / "journal")
+        journal.capture_baseline(self.data.parent)
+        rel = os.path.join("Sound", "missing.wav")
+        made = self.m.write_generated(
+            str(self.data), str(self.game), [(rel, "missing test sound", None, "Test.esp")], [],
+        )
+        self.assertEqual(made, [rel])
+        generated = self.data / rel
+        self.assertTrue(generated.is_file())
+        entries, problems = journal.entries()
+        self.assertEqual(problems, [])
+        self.assertEqual((entries[-1]["action"], entries[-1]["tag"], entries[-1]["mod"]),
+                         ("create", "generated-asset", "Test.esp"))
+        plan = journal.plan_rollback(self.game)
+        self.assertIn(("delete", "Data Files/Sound/missing.wav"),
+                      {(step["op"], step["path"]) for step in plan["steps"]})
+        journal.execute_rollback(self.data.parent, plan)
+        self.assertFalse(generated.exists())
+
+    def test_repaired_asset_is_logged_and_restored_by_rollback(self):
+        import mwmanager_journal
+        asset = self.data / "textures" / "repaired.dds"
+        asset.parent.mkdir(parents=True, exist_ok=True)
+        asset.write_bytes(b"original")
+        journal = mwmanager_journal.Journal(self.manager / "journal")
+        journal.capture_baseline(self.game)
+        self.m.replace_asset_in_place(str(asset), b"repaired")
+        entries, problems = journal.entries()
+        self.assertEqual(problems, [])
+        self.assertEqual((entries[-1]["action"], entries[-1]["tag"]), ("replace", "asset-repair"))
+        plan = journal.plan_rollback(self.game)
+        self.assertEqual(plan["refuse"], [])
+        journal.execute_rollback(self.game, plan)
+        self.assertEqual(asset.read_bytes(), b"original")
+
+    def test_generated_plugin_writer_is_logged_and_deleted_by_rollback(self):
+        import mwmanager_journal
+        journal = mwmanager_journal.Journal(self.manager / "journal")
+        journal.capture_baseline(self.game)
+        generated = self.data / "mwmanager Multipatch.esp"
+        self.m.write_plugin_bytes(str(generated), b"TES3" + struct.pack("<III", 0, 0, 0))
+        entries, problems = journal.entries()
+        self.assertEqual(problems, [])
+        self.assertEqual((entries[-1]["action"], entries[-1]["tag"]), ("create", "plugin-write"))
+        plan = journal.plan_rollback(self.game)
+        self.assertIn(("delete", "Data Files/mwmanager Multipatch.esp"),
+                      {(step["op"], step["path"]) for step in plan["steps"]})
 
     def test_backups_of_files_that_are_not_shipped_go_to_mwmanager(self):
         gen = self.manager / "outputs"
@@ -165,13 +239,13 @@ class OfficialAddonDocs(unittest.TestCase):
             moves, errors = t.plan_data_files(str(data))
             self.assertEqual(errors, [])
             self.assertEqual([os.path.relpath(d, tmp) for _s, d, _w in moves],
-                             [os.path.join("docs", "Official Add-ons", "Siege at Firemoth.txt")])
+                             [os.path.join("docs", "Official Add-Ons", "Siege at Firemoth.txt")])
             old = data / "Docs" / "Official Addon-Ons"
             old.mkdir(parents=True)
             (old / "Siege at Firemoth.txt").write_text("readme", encoding="utf-8")
             (data / "Siege at Firemoth.txt").unlink()
             moves, _ = t.plan_official_addon_docs(str(data))
-            self.assertEqual([os.path.basename(os.path.dirname(d)) for _s, d, _w in moves], ["Official Add-ons"])
+            self.assertEqual([os.path.basename(os.path.dirname(d)) for _s, d, _w in moves], ["Official Add-Ons"])
 
 
 class MwseCoreOriginalsStayInTheInstall(unittest.TestCase):
@@ -247,6 +321,9 @@ class MwseCoreOriginalsStayInTheInstall(unittest.TestCase):
         (self.mwse / "mods" / "mwfloatfix" / "old_module.lua").write_text("-- stale\n", encoding="utf-8")
         (self.mwse / "mods" / "mouseBleedFix").mkdir(parents=True)
         (self.mwse / "mods" / "mouseBleedFix" / "main.lua").write_text("-- user's own\n", encoding="utf-8")
+        import mwmanager_journal
+        journal = mwmanager_journal.Journal(self.manager / "journal")
+        journal.capture_baseline(self.data.parent)
         self.install()
         manifest = json.loads((suite / "SOURCE_MANIFEST.json").read_text("utf-8"))
         for item in manifest["Files"]:
@@ -273,6 +350,17 @@ class MwseCoreOriginalsStayInTheInstall(unittest.TestCase):
         before = sorted(str(p.relative_to(self.data)) for p in self.data.rglob("*"))
         self.install()
         self.assertEqual(sorted(str(p.relative_to(self.data)) for p in self.data.rglob("*")), before)
+        entries, problems = journal.entries()
+        self.assertEqual(problems, [])
+        self.assertTrue(entries)
+        self.assertEqual({entry.get("tag") for entry in entries}, {"mwse-lua-suite"})
+        plan = journal.plan_rollback(self.data.parent)
+        self.assertEqual((plan["refuse"], plan["unexplained"]), ([], []))
+        journal.execute_rollback(self.data.parent, plan)
+        self.assertEqual((self.mwse / "mods" / "mwfloatfix" / "main.lua").read_text("utf-8"), "-- old\n")
+        self.assertTrue((self.mwse / "mods" / "mwfloatfix" / "old_module.lua").is_file())
+        self.assertTrue((self.mwse / "mods" / "MWManager" / "main.lua").is_file())
+        self.assertFalse((self.data / "mwmanagermenu-metadata.toml").exists())
 
     def test_dry_run_writes_nothing(self):
         (self.mwse / "mods" / "MWManager").mkdir(parents=True)

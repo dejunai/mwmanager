@@ -1368,7 +1368,7 @@ def _doc_key(name):
     stem = re.sub(r"[\s._-]*(?:read\s*me|readme|manual|documentation|docs?)$", "", stem)
     return re.sub(r"[^a-z0-9]", "", stem)
 DOC_PLUGIN_ALIASES = {"firemoth": "siegeatfiremoth", "ebartifact": "ebqartifact"}
-OFFICIAL_ADDON_DOCS = "Official Add-ons"     # Data Files\Docs\<this>: the shipped add-ons' readmes
+OFFICIAL_ADDON_DOCS = "Official Add-Ons"     # Data Files\Docs\<this>: the shipped add-ons' readmes
 OFFICIAL_ADDON_DOC_KEYS = {
     "adamantiumarmor", "areaeffectarrows", "bcsounds", "ebqartifact",
     "entertainers", "lefemmarmor", "masterindex", "siegeatfiremoth",
@@ -1411,7 +1411,7 @@ def plan_data_files(data_dir):
 
 
 def plan_official_addon_docs(data_dir):
-    """Plan migration of already-organized official docs into Docs\\Official Add-ons
+    """Plan migration of already-organized official docs into Docs\\Official Add-Ons
     (including from the older misspelled "Official Addon-Ons" folder)."""
     entries = os.listdir(data_dir)
     docs = next((name for name in entries if name.casefold() == "docs"
@@ -1474,22 +1474,30 @@ def run_data_files_tidy(data_dir, *, apply_changes=False, marker=None, dry_run=F
         print("No files changed." if dry_run else "Plan only; pass --apply to move documents.")
         return 0
 
+    import mwmanager_journal
+    install_ledger = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
+    if not install_ledger.has_baseline():
+        print("Data Files tidy refused: record the install baseline first so every original move can be rolled back.",
+              file=sys.stderr)
+        return 2
+    ledger_run = install_ledger.start_run("mwmanager_install.py", {"operation": "Data Files document tidy"})
     done, failed = 0, []
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    with open(JOURNAL, "a", encoding="utf-8") as journal:
+    with open(JOURNAL, "a", encoding="utf-8") as legacy_journal:
         header = {"run": time.strftime("%Y-%m-%d %H:%M:%S"), "data_files": data_dir}
         if marker:
             header["once_marker"] = os.path.abspath(marker)
-        journal.write(json.dumps(header) + "\n")
+        legacy_journal.write(json.dumps(header) + "\n")
         for src, dst, why in moves:
             try:
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                os.rename(src, dst)
-                journal.write(json.dumps({"src": src, "dst": dst, "why": why}) + "\n")
-                journal.flush()
+                install_ledger.move_original(Path(data_dir).parent, src, dst, ledger_run["run"],
+                                             tag="data-files-document")
+                legacy_journal.write(json.dumps({"src": src, "dst": dst, "why": why}) + "\n")
+                legacy_journal.flush()
                 done += 1
-            except OSError as exc:
+            except (OSError, ValueError, RuntimeError) as exc:
                 failed.append(f"{src}: {exc}")
+    install_ledger.finish_run(ledger_run)
     if failed:
         print(f"Moved {done} document(s); {len(failed)} could not be moved. The one-time marker was not written.",
               file=sys.stderr)
@@ -1504,6 +1512,25 @@ def run_data_files_tidy(data_dir, *, apply_changes=False, marker=None, dry_run=F
             f.write("\n")
     print(f"Moved {done} document(s) into Data Files\\Docs. Journal: {JOURNAL} (--undo restores them).")
     return 0
+
+
+def run_initial_tidy(data_dir, *, apply_changes=True):
+    """Tidy the live initial install, then apply the scanner's safe plugin and asset repairs."""
+    rc = run_data_files_tidy(data_dir, apply_changes=apply_changes, dry_run=not apply_changes)
+    if rc:
+        return rc
+    command = [data_dir, "--fix", "--asset-check", "--asset-repair", "--no-interactive"]
+    command += ["--yes"] if apply_changes else ["--dry-run"]
+    print("\nInitial-install Tidy: checking official plugins and live Data Files assets.")
+    try:
+        result = _scanner.main(command)
+        if apply_changes and result == 1:
+            print("Initial-install Tidy repaired reported errors; --full will verify the result.")
+            return 0
+        return result
+    finally:
+        # --full runs next in another process; commit the SQLite facts it will reuse first.
+        _scanner.asset_health_module().close_caches()
 
 
 # ---- the Data Files folder upstream looks for next to vortex_tidy.py --------------------------------------------
@@ -1558,6 +1585,8 @@ def mwmanager_parser():
     ap = MT.parser(description="MWManager Tidy: choose staged BAIN/FOMOD options, then plan and apply the tidy of "
                                "MWManager's per-mod staging folders, or organize Data Files documents.")
     ap.add_argument("--data-files", metavar="PATH", help="organize root-level documents in a Data Files folder")
+    ap.add_argument("--init", action="store_true",
+                    help="initial install: tidy and auto-repair the live --game-data-files tree")
     ap.add_argument("--once-marker", metavar="PATH",
                     help="with --data-files: write this marker after a successful tidy; skip if it exists")
     ap.add_argument("--dry-run", action="store_true", help="with --data-files: show the plan, change nothing")
@@ -1604,6 +1633,13 @@ def mwmanager_main(argv=None):
     MT.install()
     ap = mwmanager_parser()
     args = ap.parse_args(argv)
+    if args.init:
+        if args.undo or args.options or args.options_only:
+            ap.error("--init cannot be combined with --undo or --options")
+        data_files = args.game_data_files or os.environ.get("MWMANAGER_DATA_FILES")
+        if not data_files:
+            ap.error("--init requires --game-data-files")
+        return run_initial_tidy(data_files, apply_changes=args.apply)
     if args.data_files:
         if args.undo or args.options or args.options_only:
             ap.error("--undo and --options cannot be combined with --data-files")

@@ -579,11 +579,40 @@ def install_mwse_lua_guards(args):
             print(f"--dry-run: would move {old} to {legacy_root}")
         return 0
 
+    install_ledger = ledger_run = None
+    try:
+        import mwmanager_journal
+        candidate = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
+        if candidate.has_baseline():
+            install_ledger = candidate
+            ledger_run = install_ledger.start_run("mwmanager.py", {"operation": "install MWSE Lua suite"})
+    except (ImportError, NameError):
+        pass
+
+    def move_file(source_file, destination_file):
+        if install_ledger:
+            install_ledger.move_original(data_dir.parent, source_file, destination_file,
+                                         ledger_run["run"], tag="mwse-lua-suite")
+        else:
+            destination_file.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source_file), str(destination_file))
+
+    def copy_file(source_file, destination_file):
+        original = install_ledger.preserve_original(data_dir.parent, destination_file) if install_ledger else None
+        _copy_replacing(source_file, destination_file)
+        if install_ledger:
+            rel = mwmanager_journal.rel_of(data_dir.parent, destination_file)
+            install_ledger.record(ledger_run["run"], rel,
+                                  "replace" if original["kind"] != "absent" else "create",
+                                  mwmanager_journal.sha256_file(destination_file), original,
+                                  tag="mwse-lua-suite")
+
     try:
         for old in retired:
             archived = _unique_archive(legacy_root, old.name)
-            archived.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(old), str(archived))
+            for source_file in sorted(path for path in old.rglob("*") if path.is_file()):
+                move_file(source_file, archived / source_file.relative_to(old))
+            shutil.rmtree(old)
         for name in names:
             mod_source = mods[name]
             files = {p.relative_to(mod_source) for p in mod_source.rglob("*") if p.is_file()}
@@ -594,15 +623,16 @@ def install_mwse_lua_guards(args):
             if stale:
                 archived = _unique_archive(legacy_root, name)
                 for rel in stale:
-                    (archived / rel).parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(destination / rel), str(archived / rel))
+                    move_file(destination / rel, archived / rel)
             for rel in sorted(files):
-                _copy_replacing(mod_source / rel, destination / rel)
+                copy_file(mod_source / rel, destination / rel)
         for toml in metadata:
-            _copy_replacing(toml, data_dir / toml.name)
+            copy_file(toml, data_dir / toml.name)
     except OSError as exc:
         print(f"--init: could not install the MWSE Lua suite: {exc}", file=sys.stderr)
         return 2
+    if install_ledger:
+        install_ledger.finish_run(ledger_run)
     print(f"--init: installed the MWSE Lua suite ({len(names)} mods: {', '.join(names)}) under {target_root}")
     for old in retired:
         print(f"--init: moved MWManager's earlier Lua package {old.name} to {legacy_root}")

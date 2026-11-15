@@ -29,6 +29,32 @@ from pathlib import Path
 
 MANAGER_DIR = (os.path.dirname(os.path.abspath(sys.executable)) if getattr(sys, "frozen", False)
                else os.path.dirname(os.path.abspath(sys.modules["mwmanager_upstream"].__file__)))
+
+_upstream_replace_asset_in_place = replace_asset_in_place
+
+
+def replace_asset_in_place(path, data):
+    """Atomically replace a live asset and append enough journal state to restore its original."""
+    target = Path(path).resolve()
+    data_dir = next((parent for parent in (target.parent, *target.parents)
+                     if parent.name.casefold() == "data files"), None)
+    ledger = run = original = None
+    if data_dir is not None:
+        import mwmanager_journal
+        candidate = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
+        if candidate.has_baseline():
+            ledger = candidate
+            original = ledger.preserve_original(data_dir.parent, target)
+            run = ledger.start_run("mwmanager.py", {"operation": "replace asset", "path": str(target)})
+    result = _upstream_replace_asset_in_place(path, data)
+    if ledger:
+        ledger.record(run["run"], mwmanager_journal.rel_of(data_dir.parent, target),
+                      "replace" if original["kind"] != "absent" else "create",
+                      mwmanager_journal.sha256_file(target), original, tag="asset-repair")
+        ledger.finish_run(run)
+    return result
+
+
 def state_names(manager_dir):
     """Every folder and record path MWManager keeps under `manager_dir` (the MWManager folder). Upstream joins
     these to the game folder; as absolute paths they land here instead."""
@@ -301,6 +327,16 @@ def backup_root_for(mod, data_dir, rel=None):
 
 def plugin_off_backup_path(data_dir, rel, feature, plugin=None, unique=True):
     """Return <mod>/Off/<plugin>/<feature>/<original path>, using the Vortex hard link owner."""
+    if shipped_game_file(data_dir, rel):
+        path = os.path.join(data_dir, "Off", "Official Assets", rel)
+        if unique and os.path.exists(path):
+            stem, ext = os.path.splitext(path)
+            n = 2
+            while os.path.exists(f"{stem}.mwmanager-{n}{ext}"):
+                n += 1
+            path = f"{stem}.mwmanager-{n}{ext}"
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        return path
     mod, owner_plugin = asset_owner_folder(data_dir, rel)
     owner = plugin or owner_plugin or "Unknown Plugin"
     if owner.lower().endswith((".esp", ".esm", ".omwaddon")):
@@ -393,10 +429,28 @@ def silent_audio(ext):
 
 
 def write_generated(data_dir, game_dir, items, log):
-    """Create the silent stand-in files (never over an existing file); record them for --remove-generated."""
+    """Create stand-ins and record them for both --remove-generated and install rollback."""
     rec_path = output_file(GENERATED_RECORD)
     made = []
     owner = {}
+    pending = []
+    for item in items:
+        rel, _why, source = (item + (None,))[:3]
+        full = os.path.join(data_dir, rel)
+        if not os.path.exists(full) and not (source and os.sep + ".orphaned" + os.sep in source.lower()):
+            pending.append((rel, full))
+    install_ledger = ledger_run = None
+    if pending:
+        import mwmanager_journal
+        install_ledger = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
+        if not install_ledger.has_baseline():
+            raise RuntimeError("generated files require an install baseline so rollback can remove them")
+        baseline = {mwmanager_journal.key(rel) for rel in install_ledger.baseline().get("files", {})}
+        for _rel, full in pending:
+            game_rel = mwmanager_journal.rel_of(Path(game_dir), Path(full))
+            if mwmanager_journal.key(game_rel) in baseline:
+                raise RuntimeError(f"refusing to replace missing baseline file with a generated stand-in: {game_rel}")
+        ledger_run = install_ledger.start_run("mwmanager.py", {"operation": "generate missing assets"})
     for item in items:
         rel, why, source = (item + (None,))[:3]
         owner[rel.lower()] = item[3] if len(item) > 3 and item[3] else ""
@@ -424,6 +478,15 @@ def write_generated(data_dir, game_dir, items, log):
             log.append(("Data Files", f"'{rel}' is needed by {why} but doesn't exist", f"created {what}"))
         made.append(rel)
     if made:
+        import mwmanager_journal
+        for rel in made:
+            full = Path(data_dir) / rel
+            install_ledger.record(
+                ledger_run["run"], mwmanager_journal.rel_of(Path(game_dir), full), "create",
+                mwmanager_journal.sha256_file(full), {"kind": "absent"}, tag="generated-asset",
+                mod=owner.get(rel.lower()) or None,
+            )
+        install_ledger.finish_run(ledger_run)
         entries = read_generated_record(rec_path)          # earlier runs' files, with the plugin each was for
         for rel in made:
             try:
@@ -439,7 +502,10 @@ def backup_path(path):
     """Choose <mod>/Off/<plugin>/plugin-repair/<original path>.bak for a rewritten plugin."""
     parent = os.path.dirname(os.path.abspath(path))
     name = os.path.basename(path)
-    base = plugin_off_backup_path(parent, name, "plugin-repair", plugin=name, unique=False) + ".bak"
+    if shipped_game_file(parent, name):
+        base = backup_file("plugins", "Official Add-Ons", name + ".bak")
+    else:
+        base = plugin_off_backup_path(parent, name, "plugin-repair", plugin=name, unique=False) + ".bak"
     os.makedirs(os.path.dirname(base), exist_ok=True)
     cand, n = base, 2
     while os.path.exists(cand):
