@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-15 (America/Los_Angeles); Python split mwdialog_multipatch & reviewed Lua suite refresh",
+  "SyncedAt": "2026-11-15 (America/Los_Angeles); reviewed late Steam Python and Lua refresh",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -245,17 +245,17 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\noAccidentalTheftBookFix.lua",
-      "Bytes": 4330,
-      "SHA256": "066adcbc063f9fe378d96a31330d0b3ac117ce5000826c9dc1ebdcb723724ea0",
+      "Bytes": 7210,
+      "SHA256": "946d45c6b634e8e8bfd4a9f78ad5c736cff30cefb3ee66a87a1d0df88a87ed31",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\noAccidentalTheftBookFix.lua",
-      "SourceModified": "2026-11-15T01:57:16"
+      "SourceModified": "2026-11-15T03:52:00"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\personalEffectsFix.lua",
-      "Bytes": 13665,
-      "SHA256": "0721724db8c65f942d098e94f65167957bc73fe86e351b8a555fc7ca8ff15c0a",
+      "Bytes": 14539,
+      "SHA256": "38391ce66e3416adfa049389b310bc3bf68c5f5f2e88f3f4e6d2aa29d308691f",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\personalEffectsFix.lua",
-      "SourceModified": "2026-11-15T01:33:04"
+      "SourceModified": "2026-11-15T03:22:46"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\psguardfix.lua",
@@ -273,10 +273,10 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwsaveguard\\main.lua",
-      "Bytes": 15177,
-      "SHA256": "6385efb5a4d9f230ba123325a906d3fe55ada1c2ffef6489ded1c483fbb49fac",
+      "Bytes": 15204,
+      "SHA256": "e751ea77a5206f2664bbbb024da05fa99575860a869af4755c966c83b5c1dc97",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsaveguard\\main.lua",
-      "SourceModified": "2026-11-15T01:33:05"
+      "SourceModified": "2026-11-15T05:18:08"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwsaveguard\\validator.lua",
@@ -350,10 +350,10 @@
     },
     {
       "RelativePath": "diag\\impact.py",
-      "Bytes": 5871,
-      "SHA256": "d839e9e5da4b02b314a237bd2a8953d723b04f11bc74de166c75ed0b8d9f82f1",
+      "Bytes": 5977,
+      "SHA256": "3155499c13a38e9d6dc55fa70990f7e7219ec779b9377fbf6050576d09589850",
       "Source": "<Steam Morrowind>\\diag\\impact.py",
-      "SourceModified": "2026-11-11T20:06:57"
+      "SourceModified": "2026-11-15T06:55:58"
     },
     {
       "RelativePath": "diag\\keys.py",
@@ -378,10 +378,10 @@
     },
     {
       "RelativePath": "mwdialog_assets.py",
-      "Bytes": 101866,
-      "SHA256": "d0d445ba4725fc7c8d702ab8f64725cca98a901ec6dd2e204d3dc9008803b8cf",
+      "Bytes": 104258,
+      "SHA256": "4ea0cee1c8fabaa194b2088bde482e5c6fa00cb35e0f960b5647e7390b2024c2",
       "Source": "<Steam Morrowind>\\mwdialog_assets.py",
-      "SourceModified": "2026-11-14T10:05:23"
+      "SourceModified": "2026-11-15T06:55:58"
     },
     {
       "RelativePath": "mwdialog_backup.py",
@@ -434,10 +434,10 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 482650,
-      "SHA256": "dccef323e85d4976ac7c4fa33b5e8df32716a4389474a82b01070fda2e2644b2",
+      "Bytes": 482651,
+      "SHA256": "fa86eb1cce2fbdd518f4222717ccadae4c169921b79d54df9745287e166ca739",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
-      "SourceModified": "2026-11-15T02:25:36"
+      "SourceModified": "2026-11-15T06:55:58"
     },
     {
       "RelativePath": "mwdialog_check.rules.txt",
@@ -525,10 +525,10 @@
     },
     {
       "RelativePath": "mwdialog_luafix.py",
-      "Bytes": 118864,
-      "SHA256": "8e4ab0f545d2d4a083acaf78bc52cf5b8a5a726371d78cda384b75bc7733614e",
+      "Bytes": 121224,
+      "SHA256": "c8c35c0eee78040d7627f34a092af3f74e377e2bcd808dbacd1f5b302087ff82",
       "Source": "<Steam Morrowind>\\mwdialog_luafix.py",
-      "SourceModified": "2026-11-15T02:19:08"
+      "SourceModified": "2026-11-15T06:55:58"
     },
     {
       "RelativePath": "mwdialog_master_sizes.json",
@@ -581,10 +581,10 @@
     },
     {
       "RelativePath": "mwdialog_paths.py",
-      "Bytes": 18499,
-      "SHA256": "17c1ce78e52422bb48dfab5bf9638f1a4154addd7efd56812087b1d12d4898c0",
+      "Bytes": 18990,
+      "SHA256": "7d95e3d6d8a6eaa4b76f640eab5ac8b43ed49f78d629280427eb5e1f98e1fa94",
       "Source": "<Steam Morrowind>\\mwdialog_paths.py",
-      "SourceModified": "2026-11-14T10:05:15"
+      "SourceModified": "2026-11-15T06:55:58"
     },
     {
       "RelativePath": "mwdialog_planfile.py",
@@ -665,10 +665,10 @@
     },
     {
       "RelativePath": "mwdialog_text.py",
-      "Bytes": 14182,
-      "SHA256": "3c5d4034aefabd514e4f6192ef15042ecd8623d1315eb1e07bace5587a59aec8",
+      "Bytes": 14584,
+      "SHA256": "3c801b75d765cd749cc76abeed9750d69f57183413fe1a728754018ecbf9e744",
       "Source": "<Steam Morrowind>\\mwdialog_text.py",
-      "SourceModified": "2026-11-14T10:05:19"
+      "SourceModified": "2026-11-15T06:55:58"
     },
     {
       "RelativePath": "README.md",
@@ -728,10 +728,10 @@
     },
     {
       "RelativePath": "tests\\test_logshim.py",
-      "Bytes": 18674,
-      "SHA256": "d535db87b4175ff5e4061bc72edfeea7415b234ee48c1c33eafd0b0aa8bbfdee",
+      "Bytes": 19029,
+      "SHA256": "804406da48d238f61440f0ab43c2caa06005ff65a5d73da4f560461f5990f5b3",
       "Source": "<Steam Morrowind>\\tests\\test_logshim.py",
-      "SourceModified": "2026-11-14T10:05:26"
+      "SourceModified": "2026-11-15T06:55:58"
     },
     {
       "RelativePath": "tests\\test_longpaths.py",
@@ -742,10 +742,10 @@
     },
     {
       "RelativePath": "tests\\test_luafix.py",
-      "Bytes": 38419,
-      "SHA256": "a46504617dbd911b333fa6ef7390498152e569550958c5f447018e255f6abb74",
+      "Bytes": 39416,
+      "SHA256": "549377de69d061a602808419bde0e204fb89b807efe657e0b95fd46afa64bf03",
       "Source": "<Steam Morrowind>\\tests\\test_luafix.py",
-      "SourceModified": "2026-11-14T10:05:26"
+      "SourceModified": "2026-11-15T06:55:58"
     },
     {
       "RelativePath": "tests\\test_mastercheck.py",
@@ -826,10 +826,10 @@
     },
     {
       "RelativePath": "tests\\test_text.py",
-      "Bytes": 16678,
-      "SHA256": "123103525810f34846e043355c506b8ba964d830d8a144cb222db7055ac8db08",
+      "Bytes": 16928,
+      "SHA256": "a7d248aeab62c8fa754c4aee6f66deae1c2448f741e7cb2e823ef4eb4b2b6e1c",
       "Source": "<Steam Morrowind>\\tests\\test_text.py",
-      "SourceModified": "2026-11-14T06:30:34"
+      "SourceModified": "2026-11-15T06:55:58"
     },
     {
       "RelativePath": "tests\\test_vortex.py",
@@ -868,10 +868,10 @@
     },
     {
       "RelativePath": "vortex_tidy.py",
-      "Bytes": 58746,
-      "SHA256": "68c5a69552cf644166e5aec6f41dbd5bebab2e5060999e34a2790289e7b783cc",
+      "Bytes": 59888,
+      "SHA256": "a168995fe36611990d393000911571dfee6f4260e4f44e05bb271a3ae0c0f6c0",
       "Source": "<Steam Morrowind>\\vortex_tidy.py",
-      "SourceModified": "2026-11-14T10:05:20"
+      "SourceModified": "2026-11-15T06:55:58"
     },
     {
       "RelativePath": "vortex_tidy_blacklist.txt",

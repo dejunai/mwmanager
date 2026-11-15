@@ -4042,6 +4042,7 @@ class ManagerGUI(tk.Tk):
 
                 def stage_and_process(progress):
                     # Preserve configured master priority, grouping masters that share one archive.
+                    staging.mkdir(parents=True, exist_ok=True)
                     by_master = {name.casefold(): item for item in plan.get("archives", [])
                                  for name in item.get("core_masters", [])}
                     groups, seen_archives = [], set()

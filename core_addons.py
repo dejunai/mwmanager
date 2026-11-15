@@ -164,10 +164,10 @@ def _archive_esm_masters(archive: Path, plugin_name: str, manager_dir: Path,
 
 
 def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
-                               plan: dict, parent=None) -> list[str] | None:
+                               plan: dict, parent=None) -> list[str] | str | None:
     """Inspect all configured masters, then let the user select ready ones or abort.
 
-    Returns selected ESM names. Returns None when the user aborts or the review cannot be shown.
+    Returns selected ESM names, ``"rescan"`` after a download, or None on abort/display failure.
     """
     manager_dir, game_dir = Path(manager_dir), Path(game_dir)
     data_dir = game_dir / "Data Files"

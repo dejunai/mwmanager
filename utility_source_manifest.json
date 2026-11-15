@@ -1,6 +1,6 @@
 {
   "paths_note": "<Steam Morrowind> is the Steam Morrowind install root; snapshot and working paths are relative to the MWManager folder.",
-  "synced_at": "2026-11-15 (America/Los_Angeles); Python split mwdialog_multipatch & reviewed Lua suite refresh",
+  "synced_at": "2026-11-15 (America/Los_Angeles); reviewed late Steam Python and Lua refresh",
   "tracked_tools": [
     {
       "name": "dialog scanner / manager core",
@@ -8,9 +8,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_check.py",
       "working": "mwdialog_check.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14); MWManager behaviour in mwmanager.py, mwmanager_upstream.py, mwmanager_state.py, mwmanager_overrides.py, mwmanager_init.py",
-      "source_sha256": "dccef323e85d4976ac7c4fa33b5e8df32716a4389474a82b01070fda2e2644b2",
-      "snapshot_sha256": "dccef323e85d4976ac7c4fa33b5e8df32716a4389474a82b01070fda2e2644b2",
-      "working_sha256": "dccef323e85d4976ac7c4fa33b5e8df32716a4389474a82b01070fda2e2644b2",
+      "source_sha256": "fa86eb1cce2fbdd518f4222717ccadae4c169921b79d54df9745287e166ca739",
+      "snapshot_sha256": "fa86eb1cce2fbdd518f4222717ccadae4c169921b79d54df9745287e166ca739",
+      "working_sha256": "fa86eb1cce2fbdd518f4222717ccadae4c169921b79d54df9745287e166ca739",
       "working_matches_upstream": true,
       "extension": [
         "mwmanager.py",
@@ -26,9 +26,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_assets.py",
       "working": "mwdialog_assets.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14); MWManager behaviour in mwmanager_assets_ext.py",
-      "source_sha256": "d0d445ba4725fc7c8d702ab8f64725cca98a901ec6dd2e204d3dc9008803b8cf",
-      "snapshot_sha256": "d0d445ba4725fc7c8d702ab8f64725cca98a901ec6dd2e204d3dc9008803b8cf",
-      "working_sha256": "d0d445ba4725fc7c8d702ab8f64725cca98a901ec6dd2e204d3dc9008803b8cf",
+      "source_sha256": "4ea0cee1c8fabaa194b2088bde482e5c6fa00cb35e0f960b5647e7390b2024c2",
+      "snapshot_sha256": "4ea0cee1c8fabaa194b2088bde482e5c6fa00cb35e0f960b5647e7390b2024c2",
+      "working_sha256": "4ea0cee1c8fabaa194b2088bde482e5c6fa00cb35e0f960b5647e7390b2024c2",
       "working_matches_upstream": true,
       "extension": [
         "mwmanager_assets_ext.py"
@@ -40,9 +40,9 @@
       "snapshot": "tools\\steam-upstream\\vortex_tidy.py",
       "working": "vortex_tidy.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14); MWManager behaviour in mwmanager_tidy_ext.py, mwmanager_install.py",
-      "source_sha256": "68c5a69552cf644166e5aec6f41dbd5bebab2e5060999e34a2790289e7b783cc",
-      "snapshot_sha256": "68c5a69552cf644166e5aec6f41dbd5bebab2e5060999e34a2790289e7b783cc",
-      "working_sha256": "68c5a69552cf644166e5aec6f41dbd5bebab2e5060999e34a2790289e7b783cc",
+      "source_sha256": "a168995fe36611990d393000911571dfee6f4260e4f44e05bb271a3ae0c0f6c0",
+      "snapshot_sha256": "a168995fe36611990d393000911571dfee6f4260e4f44e05bb271a3ae0c0f6c0",
+      "working_sha256": "a168995fe36611990d393000911571dfee6f4260e4f44e05bb271a3ae0c0f6c0",
       "working_matches_upstream": true,
       "extension": [
         "mwmanager_tidy_ext.py",
@@ -55,9 +55,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_luafix.py",
       "working": "mwdialog_luafix.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "8e4ab0f545d2d4a083acaf78bc52cf5b8a5a726371d78cda384b75bc7733614e",
-      "snapshot_sha256": "8e4ab0f545d2d4a083acaf78bc52cf5b8a5a726371d78cda384b75bc7733614e",
-      "working_sha256": "8e4ab0f545d2d4a083acaf78bc52cf5b8a5a726371d78cda384b75bc7733614e",
+      "source_sha256": "c8c35c0eee78040d7627f34a092af3f74e377e2bcd808dbacd1f5b302087ff82",
+      "snapshot_sha256": "c8c35c0eee78040d7627f34a092af3f74e377e2bcd808dbacd1f5b302087ff82",
+      "working_sha256": "c8c35c0eee78040d7627f34a092af3f74e377e2bcd808dbacd1f5b302087ff82",
       "working_matches_upstream": true
     },
     {
@@ -88,9 +88,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_paths.py",
       "working": "mwdialog_paths.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "17c1ce78e52422bb48dfab5bf9638f1a4154addd7efd56812087b1d12d4898c0",
-      "snapshot_sha256": "17c1ce78e52422bb48dfab5bf9638f1a4154addd7efd56812087b1d12d4898c0",
-      "working_sha256": "17c1ce78e52422bb48dfab5bf9638f1a4154addd7efd56812087b1d12d4898c0",
+      "source_sha256": "7d95e3d6d8a6eaa4b76f640eab5ac8b43ed49f78d629280427eb5e1f98e1fa94",
+      "snapshot_sha256": "7d95e3d6d8a6eaa4b76f640eab5ac8b43ed49f78d629280427eb5e1f98e1fa94",
+      "working_sha256": "7d95e3d6d8a6eaa4b76f640eab5ac8b43ed49f78d629280427eb5e1f98e1fa94",
       "working_matches_upstream": true
     },
     {
@@ -99,9 +99,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_text.py",
       "working": "mwdialog_text.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "3c5d4034aefabd514e4f6192ef15042ecd8623d1315eb1e07bace5587a59aec8",
-      "snapshot_sha256": "3c5d4034aefabd514e4f6192ef15042ecd8623d1315eb1e07bace5587a59aec8",
-      "working_sha256": "3c5d4034aefabd514e4f6192ef15042ecd8623d1315eb1e07bace5587a59aec8",
+      "source_sha256": "3c801b75d765cd749cc76abeed9750d69f57183413fe1a728754018ecbf9e744",
+      "snapshot_sha256": "3c801b75d765cd749cc76abeed9750d69f57183413fe1a728754018ecbf9e744",
+      "working_sha256": "3c801b75d765cd749cc76abeed9750d69f57183413fe1a728754018ecbf9e744",
       "working_matches_upstream": true
     },
     {

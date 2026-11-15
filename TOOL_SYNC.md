@@ -255,3 +255,13 @@ Behaviour changes:
 - Added the reviewed `mwpluginpatches` modules `mabrDist.lua` and `personalEffectsFix.lua`. Every changed or
   added Lua file parses under the bundled LuaJIT. `mwespreplacements` and mutable Steam configuration/state
   remain excluded for the reasons above.
+
+## Late Steam refresh — 2026-11-15 (Pacific)
+
+- A second hash comparison found later edits in ten Python files. The six runtime modules were refreshed in
+  both the project root and `tools\steam-upstream`; `diag\impact.py` and the three upstream tests were refreshed
+  in the snapshot. The changes are an asset-scan allocation improvement, safer stream cleanup, narrower tests,
+  and unused-import cleanup.
+- Refreshed `noAccidentalTheftBookFix.lua`, `personalEffectsFix.lua`, and `mwsaveguard\main.lua` in both the
+  upstream snapshot and the distributable Lua reference suite. The copy, suite-source, and utility manifests
+  carry the new hashes.

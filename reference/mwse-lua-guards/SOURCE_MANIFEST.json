@@ -1,6 +1,6 @@
 {
   "Description": "The user's mw* MWSE Lua suite as it is in the Steam Morrowind install, copied byte for byte. mwespreplacements is excluded (user's personal load-order patches).",
-  "CopiedAt": "2026-11-15 (America/Los_Angeles); reviewed Lua suite refresh",
+  "CopiedAt": "2026-11-15 (America/Los_Angeles); reviewed late Lua suite refresh",
   "Files": [
     {
       "Path": "metadata/mwcompanionsneak-metadata.toml",
@@ -243,16 +243,16 @@
     {
       "Path": "mods/mwpluginpatches/patches/noAccidentalTheftBookFix.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\noAccidentalTheftBookFix.lua",
-      "SHA256": "066adcbc063f9fe378d96a31330d0b3ac117ce5000826c9dc1ebdcb723724ea0",
-      "Length": 4330,
-      "SourceModified": "2026-11-15T01:57:16"
+      "SHA256": "946d45c6b634e8e8bfd4a9f78ad5c736cff30cefb3ee66a87a1d0df88a87ed31",
+      "Length": 7210,
+      "SourceModified": "2026-11-15T03:52:00"
     },
     {
       "Path": "mods/mwpluginpatches/patches/personalEffectsFix.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\personalEffectsFix.lua",
-      "SHA256": "0721724db8c65f942d098e94f65167957bc73fe86e351b8a555fc7ca8ff15c0a",
-      "Length": 13665,
-      "SourceModified": "2026-11-15T01:33:04"
+      "SHA256": "38391ce66e3416adfa049389b310bc3bf68c5f5f2e88f3f4e6d2aa29d308691f",
+      "Length": 14539,
+      "SourceModified": "2026-11-15T03:22:46"
     },
     {
       "Path": "mods/mwpluginpatches/patches/psguardfix.lua",
@@ -271,9 +271,9 @@
     {
       "Path": "mods/mwsaveguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsaveguard\\main.lua",
-      "SHA256": "6385efb5a4d9f230ba123325a906d3fe55ada1c2ffef6489ded1c483fbb49fac",
-      "Length": 15177,
-      "SourceModified": "2026-11-15T01:33:05"
+      "SHA256": "e751ea77a5206f2664bbbb024da05fa99575860a869af4755c966c83b5c1dc97",
+      "Length": 15204,
+      "SourceModified": "2026-11-15T05:18:08"
     },
     {
       "Path": "mods/mwsaveguard/validator.lua",
