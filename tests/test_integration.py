@@ -119,6 +119,16 @@ class TidySteps(unittest.TestCase):
     def files(self):
         return sorted(p.relative_to(self.staging).as_posix() for p in self.staging.rglob("*") if p.is_file())
 
+    def test_post_option_tidy_restores_reopen_all_scope(self):
+        args = mock.Mock(post_option_mods=["ModA-1-1-0"], only=[], staging=str(self.staging))
+        seen = []
+        with mock.patch.object(self.t, "run_plan", side_effect=lambda current: seen.append(list(current.only)) or []), \
+                mock.patch.object(self.t, "review", return_value=([], [])), \
+                mock.patch.object(self.t, "prune_empty_directories", return_value=0):
+            self.t.run_post_option_tidy(args)
+        self.assertEqual(seen, [["ModA-1-1-0"]])
+        self.assertEqual(args.only, [])
+
     def test_init_targets_live_data_files_and_auto_applies(self):
         with mock.patch.object(self.t, "run_initial_tidy", return_value=0) as run:
             rc = self.t.mwmanager_main(["--init", "--game-data-files", str(self.data), "--apply", "--yes"])

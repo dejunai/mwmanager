@@ -1119,15 +1119,18 @@ def run_post_option_tidy(args):
         return
     previous_only = list(args.only or [])
     args.only = sorted(changed | set(previous_only), key=str.casefold)
-    print("MWMANAGER-PROGRESS: Reorganizing selected option payloads", flush=True)
-    moves = run_plan(args)
-    moves, gone = review(args.staging, moves, assume_keep=True)
-    if moves or gone:
-        print("MWMANAGER-PROGRESS: Applying tidy changes after option selection", flush=True)
-        apply(gone + moves, args.staging)
-    removed = prune_empty_directories(args.staging)
-    if removed:
-        print(f"Removed {removed} empty staged director{'y' if removed == 1 else 'ies'}.")
+    try:
+        print("MWMANAGER-PROGRESS: Reorganizing selected option payloads", flush=True)
+        moves = run_plan(args)
+        moves, gone = review(args.staging, moves, assume_keep=True)
+        if moves or gone:
+            print("MWMANAGER-PROGRESS: Applying tidy changes after option selection", flush=True)
+            apply(gone + moves, args.staging)
+        removed = prune_empty_directories(args.staging)
+        if removed:
+            print(f"Removed {removed} empty staged director{'y' if removed == 1 else 'ies'}.")
+    finally:
+        args.only = previous_only
 
 
 def undo_lua_repairs():
