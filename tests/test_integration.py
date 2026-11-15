@@ -208,6 +208,22 @@ class TidySteps(unittest.TestCase):
         self.assertTrue(any(record.get("plugin") == "ModB-2-0" for record in records))
         self.assertFalse(any(record.get("plugin") == "ModA-1-1-0" for record in records))
 
+    def test_identical_duplicate_is_recorded_as_applied(self):
+        root = self.staging / "ModA-1-1-0"
+        source = root / "duplicate.dds"
+        survivor = root / "Textures" / "duplicate.dds"
+        mk(source, b"same")
+        mk(survivor, b"same")
+        Path(self.t.JOURNAL).parent.mkdir(parents=True, exist_ok=True)
+        progress = []
+        failed = self.t.apply(
+            [(str(source), None, "identical duplicate from " + str(survivor))],
+            str(self.staging), progress)
+        self.assertEqual(failed, [])
+        self.assertEqual(progress, [0])
+        self.assertFalse(source.exists())
+        self.assertTrue(survivor.is_file())
+
     def test_apply_refuses_a_changed_or_missing_plan(self):
         rc, out = self.run_tidy("--apply", "--yes")
         self.assertEqual(rc, 2, out)

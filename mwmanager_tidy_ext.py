@@ -1262,6 +1262,8 @@ def apply(moves, staging, progress=None, head_extra=None):
                                             "plugin": _path_plugin(src, staging)}) + "\n")
                         j.flush()
                         done += 1
+                        if progress is not None:
+                            progress.append(i)
                         continue
                     for base, dirs, fns in os.walk(src, topdown=False):   # only empty folders go
                         if not os.listdir(base):
