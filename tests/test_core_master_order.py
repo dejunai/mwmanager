@@ -5,6 +5,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -30,8 +31,25 @@ class PriorityList(unittest.TestCase):
         shipped = json.loads((ROOT / "mwmanager_core_addons.json").read_text(encoding="utf-8"))
         self.assertEqual(next(iter(shipped)), PFP.lower())
         self.assertEqual(set(shipped), set(core_addons.BUILTIN_MASTERS) | {"cyr_main.esm", "sky_main.esm"})
+        order = list(shipped)
+        self.assertLess(order.index("tamriel_data.esm"), order.index("tr_mainland.esm"))
+        self.assertLess(order.index("tamriel_data.esm"), order.index("sound_data.esm"))
+        self.assertLess(order.index("oaab_data.esm"), order.index("sound_data.esm"))
         with tempfile.TemporaryDirectory() as tmp:            # no JSON yet: the built-in list
             self.assertEqual(core_addons.configured_master_names(tmp)[0], PFP.lower())
+
+    def test_downloaded_archive_is_checked_against_nexus(self):
+        plan = {"archives": [{"archive": "Patch-for-Purists-45096-5-0-6-1760000000.7z",
+                              "core_masters": [PFP]}]}
+        responses = [{"game": {"id": "100"}},
+                     {"m0": [{"name": "Patch for Purists", "version": "5.0.7",
+                               "date": 1760000100, "primary": True, "category": "MAIN"}]}]
+        with mock.patch.object(core_addons, "_nexus_query", side_effect=responses):
+            core_addons.verify_nexus_versions(plan)
+        status = plan["archives"][0]["nexus"][PFP.casefold()]
+        self.assertEqual(status["status"], "outdated")
+        self.assertEqual(status["latest"], "5.0.7")
+        self.assertEqual(status["page"], "https://www.nexusmods.com/morrowind/mods/45096?tab=files")
 
 
 class SortPlacesIt(unittest.TestCase):

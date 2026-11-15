@@ -245,3 +245,13 @@ Behaviour changes:
   close). `tests\test_game_writes.py`: 15 suite mods, the menu mod is installed, and the "no quickfix files"
   check no longer walks the ignored `_backup\` and `backups\` folders (it failed on them before this sync).
 - Not checked: the menu and the Lua changes have not been run inside the game.
+
+## Suite refresh — 2026-11-15 (Pacific)
+
+- Rechecked every tracked Steam-root Python utility against `COPY_MANIFEST.json`: no Python file changed.
+- Refreshed the changed mwcompanionsneak, mweffectinspector, mwpluginpatches, mwsaveguard and
+  mwwarnsuppression Lua files and the three changed metadata files in both `tools/steam-upstream/` and
+  `reference/mwse-lua-guards/`; both manifests carry the new hashes.
+- Added the reviewed `mwpluginpatches` modules `mabrDist.lua` and `personalEffectsFix.lua`. Every changed or
+  added Lua file parses under the bundled LuaJIT. `mwespreplacements` and mutable Steam configuration/state
+  remain excluded for the reasons above.

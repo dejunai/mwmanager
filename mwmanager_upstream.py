@@ -91,6 +91,11 @@ def compose():
         return _composed
     if HERE not in sys.path:
         sys.path.insert(0, HERE)
+    for modname in list(sys.modules):
+        mod = sys.modules.get(modname)
+        if mod is not None and getattr(mod, "__file__", "") and (modname.startswith("mwdialog_") or modname in ("vortex_tidy",)):
+            if os.path.dirname(os.path.abspath(mod.__file__)) != HERE:
+                del sys.modules[modname]
     import mwdialog_check as scanner
     if os.path.dirname(os.path.abspath(scanner.__file__)) != HERE:
         raise ImportError(f"mwdialog_check came from {scanner.__file__}, not the MWManager folder")
@@ -111,6 +116,10 @@ def compose_tidy():
     if _tidy is not None:
         return _tidy
     scanner = compose()
+    mod = sys.modules.get("vortex_tidy")
+    if mod is not None and getattr(mod, "__file__", ""):
+        if os.path.dirname(os.path.abspath(mod.__file__)) != HERE:
+            del sys.modules["vortex_tidy"]
     import vortex_tidy as tidy
     if os.path.dirname(os.path.abspath(tidy.__file__)) != HERE:
         raise ImportError(f"vortex_tidy came from {tidy.__file__}, not the MWManager folder")

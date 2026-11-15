@@ -6,20 +6,6 @@
     "tamriel data",
     "tamriel_data"
   ],
-  "tr_mainland.esm": [
-    "tamriel rebuilt",
-    "tamrielrebuild"
-  ],
-  "cyr_main.esm": [
-    "project cyrodiil",
-    "cyr_main",
-    "province cyrodiil"
-  ],
-  "sky_main.esm": [
-    "skyrim home of the nords",
-    "sky_main",
-    "shotn"
-  ],
   "oaab_data.esm": [
     "oaab_data",
     "oaab data"
@@ -35,5 +21,19 @@
   "sound_data.esm": [
     "sound_data",
     "sound data"
+  ],
+  "tr_mainland.esm": [
+    "tamriel rebuilt",
+    "tamrielrebuild"
+  ],
+  "cyr_main.esm": [
+    "project cyrodiil",
+    "cyr_main",
+    "province cyrodiil"
+  ],
+  "sky_main.esm": [
+    "skyrim home of the nords",
+    "sky_main",
+    "shotn"
   ]
 }

@@ -28,7 +28,8 @@ local function registeringMod()
     for level = 2, 12 do
         local info = debug.getinfo(level, "S")
         if not info then return nil end
-        local mod = (info.source or ""):lower():gsub("/", "\\"):match("\\mwse\\mods\\([^\\]+)\\")
+        local src = (info.source or ""):lower():gsub("/", "\\")
+        local mod = src:match("\\mwse\\mods\\([^\\]+)\\") or src:match("^@?mwse\\mods\\([^\\]+)\\")
         if mod then return mod end
     end
 end
@@ -50,11 +51,15 @@ local root                      -- the menu's container for this entry
 
 local function closeShown(container)
     local package = shown and captured[shown]
-    if package and package.onClose then pcall(package.onClose, container) end   -- that mod saves its settings
+    if package and package.onClose then
+        local ok, err = pcall(package.onClose, container)   -- that mod saves its settings
+        if not ok then mwse.log("[mwmanagermenu] %s's settings save failed: %s", tostring(shown), tostring(err)) end
+    end
 end
 
 local build
 local function show(mod)
+    if mod == shown then return end
     closeShown(root)
     shown = mod
     build()
@@ -105,6 +110,7 @@ local combined = {
     end,
     onClose = function(container)
         closeShown(container)
+        root = nil
     end,
     onSearch = function(text)
         for _, package in pairs(captured) do

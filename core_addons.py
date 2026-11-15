@@ -7,6 +7,7 @@ import re
 import shutil
 import struct
 import subprocess
+import urllib.request
 import zipfile
 import hashlib
 import unicodedata
@@ -17,12 +18,26 @@ BUILTIN_MASTERS = {
     # Patch for Purists (the unofficial patch) loads right after Bloodmoon.esm, before every other master
     "patch for purists.esm": ("patch for purists",),
     "tamriel_data.esm": ("tamriel data", "tamriel_data"),
-    "tr_mainland.esm": ("tamriel rebuilt", "tamrielrebuild"),
     "oaab_data.esm": ("oaab_data", "oaab data"),
     "aatl_data.esm": ("aatl_data", "aatl data"),
-    "sound_data.esm": ("sound_data", "sound data"),
     "dr_data.esm": ("dr_data", "dr data"),
+    "sound_data.esm": ("sound_data", "sound data"),
+    "tr_mainland.esm": ("tamriel rebuilt", "tamrielrebuild"),
+    "cyr_main.esm": ("project cyrodiil", "cyr_main", "province cyrodiil"),
+    "sky_main.esm": ("skyrim home of the nords", "sky_main", "shotn"),
 }
+NEXUS_MOD_IDS = {
+    "patch for purists.esm": 45096,
+    "tamriel_data.esm": 44537,
+    "oaab_data.esm": 49042,
+    "aatl_data.esm": 50647,
+    "dr_data.esm": 51776,
+    "sound_data.esm": 58854,
+    "tr_mainland.esm": 42145,
+    "cyr_main.esm": 44922,
+    "sky_main.esm": 44921,
+}
+NEXUS_GRAPHQL = "https://api.nexusmods.com/v2/graphql"
 ARCHIVE_EXTENSIONS = {".zip", ".7z", ".rar"}
 PLUGIN_EXTENSIONS = {".esm", ".esp"}
 PLUGIN_OVERRIDE_CONFIG = "mwmanager_plugin_overrides.json"
@@ -201,7 +216,8 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                     offset = end
                 already_installed = data_dir in existing.parents
                 rows.append({"name": master, "deps": deps, "error": None, "installed": already_installed,
-                             "selected": not already_installed, "path": str(existing)})
+                             "selected": not already_installed, "path": str(existing),
+                             "nexus": {}, "page": nexus_page(master)})
             except (OSError, ValueError, struct.error) as exc:
                 rows.append({"name": master, "deps": [], "error": f"staged plugin cannot be checked: {exc}",
                              "installed": False, "selected": False, "path": str(existing)})
@@ -210,29 +226,35 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         item = archive_by_master.get(master.casefold())
         if not item:
             rows.append({"name": master, "deps": [], "error": "no downloaded archive contains this ESM",
-                         "installed": False, "selected": False, "path": None})
+                         "installed": False, "selected": False, "path": None,
+                         "nexus": {}, "page": nexus_page(master)})
             continue
         if item.get("install_blocked") or item.get("inspection_error"):
             rows.append({"name": master, "deps": [], "error": "archive is blocked or could not be inspected",
-                         "installed": False, "selected": False, "path": item.get("archive")})
+                         "installed": False, "selected": False, "path": item.get("archive"),
+                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
             continue
         archive = Path(item.get("archive", ""))
         if not archive.is_file():
             rows.append({"name": master, "deps": [], "error": "download archive is missing",
-                         "installed": False, "selected": False, "path": str(archive)})
+                         "installed": False, "selected": False, "path": str(archive),
+                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
             continue
         if item.get("sha256") and _sha256(archive) != item["sha256"]:
             rows.append({"name": master, "deps": [], "error": "download changed since the archive scan; rescan required",
-                         "installed": False, "selected": False, "path": str(archive)})
+                         "installed": False, "selected": False, "path": str(archive),
+                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
             continue
         member_names, error = _members(archive, seven_zip)
         if error:
             rows.append({"name": master, "deps": [], "error": f"archive listing failed: {error}",
-                         "installed": False, "selected": False, "path": str(archive)})
+                         "installed": False, "selected": False, "path": str(archive),
+                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
             continue
         deps, error = _archive_esm_masters(archive, master, manager_dir, member_names)
         rows.append({"name": master, "deps": deps, "error": error, "installed": False,
-                     "selected": error is None, "path": str(archive)})
+                     "selected": error is None, "path": str(archive),
+                     "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
 
     index_by_name = {row["name"].casefold(): i for i, row in enumerate(rows)}
     installed_names = {name for name, path in installed.items() if data_dir in path.parents}
@@ -314,14 +336,14 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         import tkinter as tk
         from tkinter import ttk
         import mwmanager_dialogs as messagebox
-        from mwmanager_theme import COLORS, FONTS, apply_theme
+        from mwmanager_theme import COLORS, FONTS, apply_theme, center
         root = tk.Toplevel(parent) if parent is not None else tk.Tk()
         if parent is None:
             apply_theme(root)                       # run on its own: no main window has themed it
         root.title("Review major masters")
         if parent is not None:
             root.transient(parent)
-        root.geometry("850x520")
+        center(root, parent, 850, 520)
         root.minsize(700, 380)
         outer = ttk.Frame(root, padding=12)
         outer.pack(fill="both", expand=True)
@@ -346,6 +368,7 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         tree.tag_configure("disabled", foreground=COLORS["muted"])
         tree.tag_configure("installed", foreground=COLORS["green"])
         tree.tag_configure("required", foreground=COLORS["blue"])
+        tree.tag_configure("outdated", foreground=COLORS["amber"])
         tree.grid(row=0, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
@@ -359,16 +382,22 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
             required_indices = required_by_selection()
             for i, row in enumerate(rows):
                 if row["installed"]:
-                    status, tag, use = "Already installed", "installed", "—"
+                    status, tag, use = "Installed; inspected", "installed", "—"
                 elif not row["ready"]:
                     status, tag, use = "Missing master", "missing", "—"
                 elif i in required_indices:
                     status, tag, use = "Required", "required", "☑"
                 elif row["selected"]:
-                    status, tag, use = "Ready", "ready", "☑"
+                    nexus_status = row.get("nexus", {}).get("status")
+                    status = "Ready — Update" if nexus_status == "outdated" else \
+                             "Ready — Current" if nexus_status == "current" else "Ready — Version unknown"
+                    tag, use = ("outdated" if nexus_status == "outdated" else "ready"), "☑"
                 else:
                     status, tag, use = "Ready (disabled)", "disabled", "☐"
                 reasons = "; ".join(row["reasons"]) if row["reasons"] else ", ".join(row["deps"])
+                nexus_detail = row.get("nexus", {}).get("detail")
+                if nexus_detail:
+                    reasons = "; ".join(filter(None, (reasons, nexus_detail)))
                 tree.item(item_ids[i], text=row["name"], values=(use, status, reasons), tags=(tag,))
 
         def toggle(event=None):
@@ -430,6 +459,46 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
             result["selected"] = selected
             root.destroy()
 
+        def nexus_action():
+            item_id = tree.focus()
+            if item_id not in item_ids:
+                return
+            row = rows[item_ids.index(item_id)]
+            if not row.get("page"):
+                return
+            try:
+                import mwnexus_browser
+                mwnexus_browser.open_page(row["page"], download_dir=plan.get("downloads_dir"))
+                messagebox.showinfo(
+                    "Download in the MWManager browser",
+                    f"Download {row['name']} into:\n\n{plan.get('downloads_dir')}\n\n"
+                    "Complete any Nexus security check, finish the download, close the browser, then click OK. "
+                    "MWManager will rescan the archive folder.", parent=root)
+                mwnexus_browser.close_browser()
+            except (OSError, RuntimeError, ValueError) as exc:
+                messagebox.showerror("Could not open Nexus", str(exc), parent=root)
+                return
+            result["selected"] = "rescan"
+            root.destroy()
+
+        action_button = ttk.Button(buttons, command=nexus_action)
+
+        def update_action(_event=None):
+            item_id = tree.focus()
+            row = rows[item_ids.index(item_id)] if item_id in item_ids else None
+            status = row.get("nexus", {}).get("status") if row else None
+            if not row or row["installed"] or not row.get("page") or status == "current":
+                action_button.configure(text="Download")
+                action_button.state(["disabled"])
+                return
+            label = "[Update]" if status == "outdated" else \
+                    "Download" if row.get("path") is None else "Check Nexus"
+            action_button.configure(text=label)
+            action_button.state(["!disabled"])
+
+        tree.bind("<<TreeviewSelect>>", update_action, add="+")
+        action_button.pack(side="left")
+        update_action()
         ttk.Button(buttons, text="Confirm selected", command=accept).pack(side="right", padx=(6, 0))
         ttk.Button(buttons, text="Abort", command=root.destroy).pack(side="right")
         root.update_idletasks()
@@ -583,6 +652,83 @@ def _archive_rank(path: Path) -> tuple:
     except OSError:
         mtime = 0
     return (version is not None, version_key, upload_key, mtime, path.name.casefold())
+
+
+def nexus_page(master: str) -> str | None:
+    mod_id = NEXUS_MOD_IDS.get(master.casefold())
+    return f"https://www.nexusmods.com/morrowind/mods/{mod_id}?tab=files" if mod_id else None
+
+
+def _nexus_query(document: str, variables: dict, timeout: float = 8) -> dict:
+    request = urllib.request.Request(
+        NEXUS_GRAPHQL,
+        data=json.dumps({"query": document, "variables": variables}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Application-Name": "MWManager",
+                 "Application-Version": "0.1", "User-Agent": "MWManager/0.1"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    if payload.get("errors"):
+        raise ValueError(payload["errors"][0].get("message", "Nexus query failed"))
+    return payload.get("data") or {}
+
+
+def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8) -> dict:
+    """Annotate found major-master archives with latest Nexus primary-file status."""
+    progress_callback = progress_callback or (lambda _message: None)
+    found = {master.casefold() for item in plan.get("archives", [])
+             for master in item.get("core_masters", []) if master.casefold() in NEXUS_MOD_IDS}
+    if not found:
+        return plan
+    try:
+        progress_callback(f"Checking {len(found)} found major-master archive(s) against Nexus…")
+        game = _nexus_query('query { game(domainName: "morrowind") { id } }', {}, timeout)
+        game_id = str(game["game"]["id"])
+        aliases = " ".join(
+            f'm{i}: modFiles(modId: "{NEXUS_MOD_IDS[name]}", gameId: $gameId) '
+            '{ name version date primary category }'
+            for i, name in enumerate(sorted(found)))
+        data = _nexus_query(f"query($gameId: ID!) {{ {aliases} }}", {"gameId": game_id}, timeout)
+        latest_by_master = {}
+        for i, master in enumerate(sorted(found)):
+            files = data.get(f"m{i}") or []
+            candidates = [item for item in files if item.get("primary")]
+            if not candidates:
+                candidates = [item for item in files if str(item.get("category", "")).upper() == "MAIN"]
+            if files:
+                latest_by_master[master] = max(candidates or files, key=lambda item: int(item.get("date") or 0))
+    except Exception as exc:
+        detail = f"Nexus check unavailable ({exc.__class__.__name__}: {exc})"
+        for item in plan.get("archives", []):
+            item["nexus"] = {name.casefold(): {"status": "unknown", "detail": detail,
+                                                "page": nexus_page(name)}
+                              for name in item.get("core_masters", []) if nexus_page(name)}
+        return plan
+
+    for item in plan.get("archives", []):
+        archive = Path(item["archive"])
+        local_version = _archive_version(archive)
+        epoch = re.search(r"(?:^|[-_ ])(\d{10,})$", archive.stem)
+        statuses = {}
+        for master in item.get("core_masters", []):
+            latest = latest_by_master.get(master.casefold())
+            if not latest:
+                continue
+            latest_text = str(latest.get("version") or latest.get("name") or "unknown")
+            latest_version = tuple(int(value) for value in re.findall(r"\d+", str(latest.get("version") or "")))
+            latest_date = int(latest.get("date") or 0)
+            if local_version and latest_version:
+                status = "current" if local_version >= latest_version else "outdated"
+            elif epoch and latest_date:
+                status = "current" if int(epoch.group(1)) >= latest_date else "outdated"
+            else:
+                status = "unknown"
+            detail = (f"Nexus latest: {latest_text}"
+                      + (f"; archive version: {'.'.join(map(str, local_version))}" if local_version
+                         else "; archive filename has no comparable version"))
+            statuses[master.casefold()] = {"status": status, "latest": latest_text,
+                                           "detail": detail, "page": nexus_page(master)}
+        item["nexus"] = statuses
+    return plan
 
 
 def _config_masters(manager_dir: Path) -> dict[str, tuple[str, ...]]:

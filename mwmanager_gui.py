@@ -1070,6 +1070,12 @@ class ManagerGUI(tk.Tk):
         except (OSError, ValueError, RuntimeError) as exc:
             self.status.set(f"Legacy asset-backup migration needs attention: {exc}")
         changed = False
+        # Builds with the old placeholder marked initialization complete without ever opening major masters.
+        if (self._setup_done("initialization_complete")
+                and not self._setup_done("major_masters_started")):
+            setup_state.reset(self._setup_path(), self.settings["game_dir"], "initialization_complete")
+            self.settings["init_complete"] = 0
+            changed = True
         if self._setup_done("initial_full_complete") and self.settings.get("first_run", 0) == 1:
             self.settings["first_run"] = 0
             changed = True
@@ -1520,18 +1526,14 @@ class ManagerGUI(tk.Tk):
         return dialog
 
     def _offer_major_master_processing(self):
-        """Temporary first-run handoff; do not start the major-master workflow yet."""
-        import mwmanager_dialogs as messagebox
+        """Resume setup at the major-master catalog until staging is accepted or skipped."""
         if self._setup_done("initialization_complete"):
             self._complete_init()                      # already done: only the settings flag was behind
             return
-        messagebox.showinfo(
-            "Major masters",
-            "Pre-flight and the initial --full cycle are complete.\n\n"
-            "The major masters interface would start now. It is not started in this build.",
-            parent=self)
-        self._complete_init()
-        self.status.set("Initial setup complete; major-master processing was not started.")
+        self._setup_complete("major_masters_started")
+        self._initializing_manager = True
+        self.status.set("Initial setup is ready for major-master selection and staging.")
+        self.open_major_masters()
 
     def _launch_vortex(self) -> bool:
         exe = Path(self.settings.get("vortex_exe") or "")
@@ -2922,6 +2924,7 @@ class ManagerGUI(tk.Tk):
         center_window(dialog, self, 780, 680)
         dialog.minsize(680, 600)
         masters = list(self.major_masters)
+        reorder_warning_shown = False
         try:
             saved_master_data = json.loads(MAJOR_MASTER_CONFIG.read_text(encoding="utf-8"))
             keywords = {name: saved_master_data.get(name, []) for name in masters}
@@ -3085,6 +3088,7 @@ class ManagerGUI(tk.Tk):
             return "break"
 
         def move_master(step):
+            nonlocal reorder_warning_shown
             selection = tree.selection()
             if not selection:
                 return
@@ -3093,7 +3097,32 @@ class ManagerGUI(tk.Tk):
             new_idx = idx + step
             if not 0 <= new_idx < len(masters):
                 return
+            if not reorder_warning_shown:
+                if not messagebox.askyesno(
+                        "Change the recommended master order?",
+                        "MWManager's supplied order is the recommended load order. Changing it can cause "
+                        "undesirable overrides or dependency problems.\n\nContinue with this change?",
+                        icon="warning", default="no", parent=dialog):
+                    return
+                reorder_warning_shown = True
             masters[idx], masters[new_idx] = masters[new_idx], masters[idx]
+            from major_master_deploy import staged_masters
+            paths = {name.casefold(): data_dir / name for name in masters if (data_dir / name).is_file()}
+            paths.update(staged_masters(APP_DIR / "staging" / "major_masters", masters))
+            positions = {name.casefold(): i for i, name in enumerate(masters)}
+            for consumer, path in paths.items():
+                for required in self._esm_master_names(path):
+                    if required in positions and positions[required] > positions[consumer]:
+                        required_name = next((item for item in masters if item.casefold() == required), required)
+                        consumer_name = next((item for item in masters if item.casefold() == consumer), consumer)
+                        masters[idx], masters[new_idx] = masters[new_idx], masters[idx]
+                        messagebox.showwarning(
+                            "Master dependency order required",
+                            f"{consumer_name} depends on {required_name}. "
+                            "A master must remain before every plugin that consumes it.", parent=dialog)
+                        refresh_masters()
+                        tree.selection_set(name)
+                        return
             refresh_masters()
             tree.selection_set(name)
             tree.see(name)
@@ -3941,7 +3970,7 @@ class ManagerGUI(tk.Tk):
             return
         try:
             from core_addons import (review_core_master_install, scan_downloads,
-                                     stage_core_master_archives)
+                                     stage_core_master_archives, verify_nexus_versions)
 
             def scanned(plan, error):
                 if error:
@@ -3954,73 +3983,11 @@ class ManagerGUI(tk.Tk):
                     messagebox.showerror("Could not scan downloads",
                                          plan.get("error") or "The downloads folder could not be scanned.", parent=self)
                     return
-                detected_masters = {str(name).casefold() for item in plan.get("archives", [])
-                                    for name in item.get("core_masters", [])}
-                data_dir = Path(self.settings["game_dir"]) / "Data Files"
-                installed_or_staged = {name.casefold() for name in self.major_masters
-                                       if (data_dir / name).is_file()} | self._staged_major_master_names()
-                missing_downloads = [name for name in self.major_masters
-                                     if name.casefold() not in installed_or_staged
-                                     and name.casefold() not in detected_masters]
-                if missing_downloads:
-                    import mwmanager_dialogs as messagebox
-                    listing = "\n".join(missing_downloads[:10])
-                    extra = len(missing_downloads) - min(10, len(missing_downloads))
-                    if extra:
-                        listing += f"\n… and {extra} more"
-                    if self.settings.get("archive_source") == "vortex":
-                        answer = messagebox.askyesnocancel(
-                            "Some major-master downloads are missing",
-                            "These configured masters were not found in the selected downloads folder:\n\n"
-                            + listing + "\n\nYes: open Vortex so you can download them, then scan again.\n"
-                            "No: continue with the masters that were found.\n"
-                            "Cancel: stop and leave initialization pending.", parent=self)
-                        if answer is True:
-                            self._initializing_manager = False
-                            if not self._launch_vortex():
-                                messagebox.showinfo("Download the missing masters",
-                                                    "Download these archives into the configured downloads folder, "
-                                                    "then choose Find missing masters:\n\n" + listing, parent=self)
-                            self.status.set("Download the missing masters, then scan the downloads folder again.")
-                            return
-                        if answer is None:
-                            self._initializing_manager = False
-                            return
-                    elif not messagebox.askyesno(
-                            "Some major-master downloads are missing",
-                            "These configured masters were not found in the selected downloads folder:\n\n"
-                            + listing + "\n\nContinue with the masters that were found? Download the rest "
-                            "into this folder and choose Find missing masters later.", parent=self):
-                        self._initializing_manager = False
-                        return
-                available = [item for item in plan.get("archives", [])
-                             if item.get("core_masters") and not item.get("inspection_error")
-                             and not item.get("install_blocked")]
-                if not available:
-                    if initializing:
-                        self._initializing_manager = False
-                    missing_now = [name for name in self.major_masters
-                                   if not (Path(self.settings["game_dir"]) / "Data Files" / name).is_file()
-                                   and name.casefold() not in self._staged_major_master_names()]
-                    if missing_now:
-                        import mwmanager_dialogs as messagebox
-                        listing = "\n".join(missing_now[:12])
-                        extra = len(missing_now) - min(12, len(missing_now))
-                        if extra:
-                            listing += f"\n… and {extra} more"
-                        messagebox.showinfo(
-                            "Major-master downloads missing",
-                            "No uninstalled major-master archives were detected in the selected downloads folder. "
-                            "Download the missing archives into that folder, then choose Find missing masters.\n\n"
-                            + listing, parent=self)
-                        self.status.set("Major-master downloads are missing; download them and scan again.")
-                    else:
-                        if initializing:
-                            self._complete_init()
-                        else:
-                            self.status.set("No available major-master archives were found.")
-                    return
                 selected = review_core_master_install(APP_DIR, game_dir, plan, parent=self)
+                if selected == "rescan":
+                    self.status.set("Rescanning major-master downloads after the Nexus download…")
+                    self.after(100, lambda: self.stage_major_masters(force_scan=True))
+                    return
                 if selected is None:
                     self._initializing_manager = False
                     if initializing:
@@ -4065,7 +4032,12 @@ class ManagerGUI(tk.Tk):
                         "Selected archives were unpacked, tidied, and passed through the option installer:\n\n"
                         + "\n".join(str(path) for path in destinations)
                         + "\n\nNothing was deployed to the live Data Files folder.", parent=self)
-                    if initializing:
+                    if messagebox.askyesno(
+                            "Deploy staged major masters?",
+                            "All selected major masters are staged and processed. Deploy them to the game now?",
+                            parent=self):
+                        self.after(100, self.deploy_major_masters)
+                    elif initializing:
                         self.open_major_masters()
 
                 def stage_and_process(progress):
@@ -4152,8 +4124,9 @@ class ManagerGUI(tk.Tk):
             self._run_progress_job(
                 "Scanning major-master downloads",
                 "Checking archive contents and hashes. Large archives can take a while…",
-                lambda progress: scan_downloads(downloads, APP_DIR, APP_DIR / "outputs",
-                                                progress_callback=progress), scanned)
+                lambda progress: verify_nexus_versions(
+                    scan_downloads(downloads, APP_DIR, APP_DIR / "outputs", progress_callback=progress),
+                    progress_callback=progress), scanned)
         except Exception as exc:
             self._initializing_manager = False
             self.status.set("Major-master staging stopped with an error.")

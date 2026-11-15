@@ -299,17 +299,16 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertEqual(commands[0][-3:], ["--sort", "--yes", "--no-follow-up"])
         self.assertIn("--init", commands[1])
 
-    def test_post_full_major_master_handoff_is_a_stub(self):
-        import mwmanager_dialogs as dialogs
+    def test_post_full_major_master_handoff_opens_staging(self):
         self.app.settings["init_complete"] = 0
+        self.g.setup_state.reset(self.app._setup_path(), self.app.settings["game_dir"], "initialization_complete")
         opened = []
         self.app.open_major_masters = lambda: opened.append(True)
-        with mock.patch.object(dialogs, "showinfo") as shown:
-            self.app._offer_major_master_processing()
-        shown.assert_called_once()
-        self.assertIn("would start now", shown.call_args.args[1])
-        self.assertEqual(self.app.settings["init_complete"], 1)
-        self.assertEqual(opened, [])
+        self.app._offer_major_master_processing()
+        self.assertTrue(self.app._setup_done("major_masters_started"))
+        self.assertEqual(self.app.settings["init_complete"], 0)
+        self.assertEqual(opened, [True])
+        self.assertTrue(self.app._initializing_manager)
 
     def test_major_masters_dialog_builds_its_footer(self):
         self.app.open_major_masters()
