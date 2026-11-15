@@ -467,6 +467,30 @@ class Journal:
         self.finish_run(run)
         return len(files)
 
+    def migrate_official_asset_backups(self, game_dir) -> int:
+        """Consolidate the obsolete second shipped-asset owner under Off/Original Install."""
+        game_dir = Path(game_dir).resolve()
+        old = game_dir / "Data Files" / "Off" / "Official Assets"
+        if not old.is_dir():
+            return 0
+        files = [path for path in old.rglob("*") if path.is_file()]
+        owner = old.parent / "Original Install" / "Official Assets"
+        destinations = [(path, owner / path.relative_to(old)) for path in files]
+        collision = next((target for _source, target in destinations if target.exists()), None)
+        if collision:
+            raise FileExistsError(f"cannot consolidate asset backup over {collision}")
+        run = self.start_run("mwmanager_journal.py", {"operation": "consolidate Official Assets owner"})
+        for source, target in destinations:
+            digest = sha256_file(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source, target)
+            self.record(run["run"], rel_of(game_dir, target), "create", digest, {"kind": "absent"},
+                        tag="asset-repair-backup")
+        for folder, _dirs, _names in os.walk(old, topdown=False):
+            Path(folder).rmdir()
+        self.finish_run(run)
+        return len(files)
+
     # ------------------------------------------------------------------------------------- runs / inputs
     def store_input(self, value) -> str:
         data = (canon(value) if not isinstance(value, (bytes, str)) else value)

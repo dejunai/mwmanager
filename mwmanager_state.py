@@ -262,8 +262,9 @@ ORIGINAL_INSTALL = "Original Install"
 
 def backup_asset_original(data_dir, rel, plugin=None, feature="repair"):
     """Keep one pre-repair original under Off/<plugin>/<feature>/<original relative path>."""
-    mod, owner_plugin = asset_owner_folder(data_dir, rel)
-    owner = plugin or owner_plugin or ORIGINAL_INSTALL
+    shipped = shipped_game_file(data_dir, rel)
+    mod, owner_plugin = (None, None) if shipped else asset_owner_folder(data_dir, rel)
+    owner = ORIGINAL_INSTALL if shipped else (plugin or owner_plugin or ORIGINAL_INSTALL)
     if owner.lower().endswith((".esp", ".esm", ".omwaddon")):
         owner = os.path.splitext(os.path.basename(owner))[0]
     root = backup_root_for(mod, data_dir, rel)
@@ -344,18 +345,9 @@ def backup_root_for(mod, data_dir, rel=None):
 
 def plugin_off_backup_path(data_dir, rel, feature, plugin=None, unique=True):
     """Return <mod>/Off/<plugin>/<feature>/<original path>, using the Vortex hard link owner."""
-    if shipped_game_file(data_dir, rel):
-        path = os.path.join(data_dir, "Off", "Official Assets", rel)
-        if unique and os.path.exists(path):
-            stem, ext = os.path.splitext(path)
-            n = 2
-            while os.path.exists(f"{stem}.mwmanager-{n}{ext}"):
-                n += 1
-            path = f"{stem}.mwmanager-{n}{ext}"
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        return path
-    mod, owner_plugin = asset_owner_folder(data_dir, rel)
-    owner = plugin or owner_plugin or ORIGINAL_INSTALL
+    shipped = shipped_game_file(data_dir, rel)
+    mod, owner_plugin = (None, None) if shipped else asset_owner_folder(data_dir, rel)
+    owner = ORIGINAL_INSTALL if shipped else (plugin or owner_plugin or ORIGINAL_INSTALL)
     if owner.lower().endswith((".esp", ".esm", ".omwaddon")):
         owner = os.path.splitext(owner)[0]
     root = backup_root_for(mod, data_dir, rel)

@@ -348,6 +348,18 @@ class RoundTripTests(Fixture):
         self.journal.execute_rollback(self.game, plan)
         self.assertFalse(new.exists())
 
+    def test_legacy_official_assets_are_consolidated_and_journaled(self):
+        self.journal.capture_baseline(self.game)
+        old = write(self.game / "Data Files/Off/Official Assets/Textures/old.dds", b"old")
+        self.assertEqual(self.journal.migrate_official_asset_backups(self.game), 1)
+        new = self.game / "Data Files/Off/Original Install/Official Assets/Textures/old.dds"
+        self.assertTrue(new.is_file())
+        self.assertFalse(old.exists())
+        plan = self.journal.plan_rollback(self.game)
+        self.assertEqual(plan["unexplained"], [])
+        self.journal.execute_rollback(self.game, plan)
+        self.assertFalse(new.exists())
+
     def test_gui_archive_registration_relies_on_baseline_ini(self):
         from major_master_deploy import register_archives
         self.journal.capture_baseline(self.game)

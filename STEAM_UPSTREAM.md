@@ -97,7 +97,7 @@ These remain project extensions:
   repair or reinstall.
 - GUI deployment manifests being bridged into the install rollback ledger, including Lua replacements, generated
   plugin writes, BSA registration changes, and regular/major-master deployment operations.
-- GUI first-run `--init` asset repair, including journaled `Off/Official Assets` moves and manager-owned official ESP backups.
+- GUI first-run `--init` asset repair, including journaled `Off/Original Install` moves and manager-owned official ESP backups.
 - GUI first-run activation of every shipped ESP and its standalone pre-`--full` sort.
 - Generated stand-ins being recorded in both the generated-files list and MWManager's rollback ledger.
 - Plugin and major-master archive installation workflows.

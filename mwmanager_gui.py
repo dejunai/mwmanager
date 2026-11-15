@@ -1045,8 +1045,9 @@ class ManagerGUI(tk.Tk):
         """The step file is the record of setup; the two flags in the settings file follow it."""
         try:
             import mwmanager_journal
-            migrated = mwmanager_journal.Journal(APP_DIR / "journal").migrate_unknown_asset_backups(
-                self.settings["game_dir"])
+            journal = mwmanager_journal.Journal(APP_DIR / "journal")
+            migrated = journal.migrate_unknown_asset_backups(self.settings["game_dir"])
+            migrated += journal.migrate_official_asset_backups(self.settings["game_dir"])
             if migrated:
                 self.status.set(f"Migrated {migrated} legacy asset backup files to Off/Original Install.")
         except (OSError, ValueError, RuntimeError) as exc:

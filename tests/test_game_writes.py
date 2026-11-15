@@ -104,13 +104,13 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         official = self.m.asset_backup_file("texture-reduction", os.path.join("textures", "b.dds"),
                                             data_dir=str(self.data))
         self.assertEqual(os.path.normcase(official), os.path.normcase(
-            str(self.data / "Off" / "Official Assets" / "textures" / "b.dds")))
+            str(self.data / "Off" / "Original Install" / "texture-reduction" / "textures" / "b.dds")))
 
-    def test_shipped_assets_use_official_assets_and_patched_esps_use_manager_backups(self):
+    def test_shipped_assets_use_original_install_and_patched_esps_use_manager_backups(self):
         for name in ("Siege at Firemoth.esp", "Morrowind.esm", "Tribunal.bsa"):
-            path = self.m.plugin_off_backup_path(str(self.data), name, "plugin-repair")
+            path = self.m.plugin_off_backup_path(str(self.data), name, "plugin-repair", plugin=name)
             self.assertTrue(os.path.normcase(path).startswith(
-                os.path.normcase(str(self.data / "Off" / "Official Assets")) + os.sep))
+                os.path.normcase(str(self.data / "Off" / "Original Install" / "plugin-repair")) + os.sep))
         esp = self.data / "Siege at Firemoth.esp"
         esp.write_bytes(b"TES3")
         bak = self.m.backup_path(str(esp))
@@ -131,7 +131,7 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
             [("unused", str(source), os.path.join("textures", "unused.dds"), "unused")],
             str(self.data), str(self.game), self.m, log,
         )
-        destination = self.data / "Off" / "Official Assets" / "textures" / "unused.dds"
+        destination = self.data / "Off" / "Original Install" / "Unused assets" / "textures" / "unused.dds"
         self.assertEqual(destination.read_bytes(), b"original")
         self.assertFalse(source.exists())
         plan = journal.plan_rollback(self.data.parent)
