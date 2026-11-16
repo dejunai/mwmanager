@@ -147,11 +147,11 @@ def _tracked_browser_pid() -> int:
         return 0
     identity = _process_identity(pid)
     if identity is None:
-        return pid if os.name != "nt" else 0
+        return 0  # Unknown ownership is never permission to terminate a process.
     image, created = identity
-    if os.name == "nt" and not Path(image).name.casefold().startswith("python"):
+    if not Path(image).name.casefold().startswith("python"):
         return 0
-    if created > written + 2.0:
+    if created > written + 0.05:
         return 0
     return pid
 

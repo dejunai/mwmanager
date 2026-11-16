@@ -226,6 +226,7 @@ def fomod_declared_paths(mod_dir):
 
 def plan_mod(mod_dir):
     """[(source, destination, reason)] for one mod, or a str saying why it's left alone."""
+    mod_dir = os.path.realpath(mod_dir)  # Resolve Windows 8.3 aliases before deriving FOMOD-relative paths.
     entries = os.listdir(mod_dir)
     if any(os.path.splitext(e)[1].lower() in GAME_ROOT_EXT for e in entries
            if os.path.isfile(os.path.join(mod_dir, e))):
@@ -1166,12 +1167,16 @@ def run_plan(args):
 def run_mock_options(args):
     """Run the numeric BAIN/FOMOD selector for the requested staged mod folders."""
     print("MWMANAGER-PROGRESS: Reviewing required and optional BAIN/FOMOD components", flush=True)
+    from mock_fomod import OptionsCancelled
     try:
         from mock_fomod import process_staging
         data_files = args.game_data_files or os.environ.get("MWMANAGER_DATA_FILES")
         args.post_option_mods = process_staging(
             args.staging, data_files, OUTPUT_DIR, only=args.only,
             reopen_existing=bool(getattr(args, "options_only", False))) or []
+    except OptionsCancelled as exc:
+        print(f"MWMANAGER-CANCELLED: {exc}", flush=True)
+        return 3
     except Exception as exc:
         print(f"  Mock BAIN/FOMOD option step failed: {exc}", file=sys.stderr)
         traceback.print_exc(file=sys.stderr)
@@ -1193,8 +1198,12 @@ def clear_readonly_flags(staging, only=None):
         for base, dirs, files in os.walk(folder):
             for path in [base] + [os.path.join(base, f) for f in files]:
                 try:
-                    if not os.stat(path).st_mode & stat.S_IWRITE:
-                        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+                    mode = os.stat(path).st_mode
+                    desired = mode | stat.S_IWRITE | stat.S_IREAD
+                    if os.path.isdir(path) and os.name != "nt":
+                        desired |= stat.S_IXUSR
+                    if desired != mode:
+                        os.chmod(path, desired)
                         cleared += 1
                 except OSError:
                     pass                          # the step that needs the path reports it
@@ -1224,6 +1233,7 @@ def run_pre_option_tidy(args):
     """Tidy BAIN packages before their options are offered: 00 Core unpacks into the root, the numbered optional
     folders move to Extras/<plugin> and the documentation to Docs/<plugin>, which is where the option window
     looks for the choices and their descriptions."""
+    args.staging = os.path.realpath(args.staging)
     raw = unprocessed_bain_packages(args.staging, args.only)
     if raw:
         print("MWMANAGER-PROGRESS: Unpacking BAIN packages before their options", flush=True)
@@ -1551,7 +1561,7 @@ def _write_packing_reports(staging, packing):
 def _path_plugin(path, staging):
     """The top-level staging package containing path, or None for records outside staging."""
     try:
-        rel = os.path.relpath(os.path.abspath(path), os.path.abspath(staging))
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(staging))
     except (OSError, TypeError, ValueError):
         return None
     if rel == os.pardir or rel.startswith(os.pardir + os.sep) or os.path.isabs(rel):
@@ -2013,7 +2023,7 @@ def _plan_state(args):
 
 def mwmanager_main(argv=None):
     """Steps: --options (choose BAIN/FOMOD options) -> plan (no --apply; nothing changed) -> --apply. Exit codes:
-    0 done, 1 something failed, 2 refused (no plan, or the plan changed since it was reviewed: review it again)."""
+    0 done, 1 failed, 2 refused (plan mismatch), 3 option selection cancelled."""
     global GAME_DATA_FILES
     MT.install()
     ap = mwmanager_parser()
@@ -2058,8 +2068,9 @@ def mwmanager_main(argv=None):
     if options:
         print("MWMANAGER-PROGRESS: Reviewing staged BAIN/FOMOD choices", flush=True)
         run_pre_option_tidy(args)
-        if run_mock_options(args):
-            return 1
+        option_result = run_mock_options(args)
+        if option_result:
+            return option_result
         run_post_option_tidy(args)
     if not args.apply:
         print("MWMANAGER-PROGRESS: Organizing plugin folders and checking tidy rules", flush=True)

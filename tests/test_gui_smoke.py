@@ -344,6 +344,7 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertTrue(self.app._setup_done("major_masters_staged"))
 
     def _legacy_package(self):
+        (Path(self.app.settings["game_dir"]) / "Data Files" / "Tamriel_Data.esm").unlink(missing_ok=True)
         package = self.g.APP_DIR / "staging" / "major_masters" / "Tamriel Data"
         package.mkdir(parents=True)
         (package / "Tamriel_Data.esm").write_bytes(b"TES3")

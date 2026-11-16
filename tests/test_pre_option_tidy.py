@@ -43,7 +43,7 @@ class PreOptionTidyTests(unittest.TestCase):
         for path in (file, folder):
             os.chmod(path, stat.S_IREAD)
         self.assertEqual(ext.clear_readonly_flags(str(self.staging), ["Flat"]), 0)     # other packages untouched
-        self.assertEqual(ext.clear_readonly_flags(str(self.staging), [self.mod.name]), 2 if os.name == "nt" else 1)
+        self.assertEqual(ext.clear_readonly_flags(str(self.staging), [self.mod.name]), 2)
         self.assertTrue(all(os.stat(path).st_mode & stat.S_IWRITE for path in (file, folder)))
         shutil.rmtree(self.mod)
 
@@ -204,7 +204,7 @@ class SoundsFolderTests(unittest.TestCase):
     def test_a_misnamed_sounds_folder_is_renamed_and_reported(self):
         tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
-        staging = Path(tmp.name) / "staging"
+        staging = Path(tmp.name).resolve() / "staging"
         mod = staging / "Dr_Data-51776"
         for rel in ("Data Files/Dr_Data.esm", "Data Files/Sounds/dr/a.wav"):
             (mod / rel).parent.mkdir(parents=True, exist_ok=True)

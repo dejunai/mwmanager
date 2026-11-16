@@ -33,8 +33,12 @@ class SharedModulesAreUpstreamCopies(unittest.TestCase):
             self.skipTest("no current steam-upstream manifest")
         want = {Path(e["RelativePath"].replace("\\", "/")).name: e["SHA256"].lower() for e in files}
         for name in SHARED:
-            got = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
-            self.assertEqual(got, want.get(name), name)
+            raw = (ROOT / name).read_bytes()
+            portable = raw.replace(b"\r\n", b"\n")
+            hashes = {hashlib.sha256(raw).hexdigest(),
+                      hashlib.sha256(portable.replace(b"\n", b"\r\n")).hexdigest()}
+            self.assertIn(want.get(name), hashes, name)
+            self.assertEqual(raw, (ROOT / "tools" / "steam-upstream" / name).read_bytes(), name)
 
     def test_every_upstream_module_is_shipped(self):
         for name in ("mwdialog_check.py", "mwdialog_assets.py", "vortex_tidy.py", "mwdialog_luafix.py",

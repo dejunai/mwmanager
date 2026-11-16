@@ -1,0 +1,7 @@
+# Shared upstream sources have a portable checkout; COPY_MANIFEST also retains
+# the original Windows-byte fingerprint (see TOOL_SYNC.md).
+mwdialog_*.py text eol=lf
+vortex_tidy.py text eol=lf
+tools/steam-upstream/*.py text eol=lf
+# This is a byte-fingerprinted snapshot, not a checkout-normalized source tree.
+reference/mwse-lua-guards/** -text

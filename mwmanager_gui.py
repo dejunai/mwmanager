@@ -128,6 +128,8 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
         return code, recent, mods, plan
 
     code, recent, mods, plan = step(["--options-only" if reopen else "--options"], "options and plan")
+    if code == 3:
+        raise TidyPlanPaused(f"{label}: option selection was cancelled. Staged files were preserved.")
     if code:
         raise RuntimeError(f"{label}: the option step failed (exit code {code}).\n\n" + "\n".join(recent)[-4000:])
     refusals, refusal_series = 0, 1
@@ -143,8 +145,11 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
         code, recent, _mods, _plan = step(["--apply", "--yes"], "apply")
         if code == 0:
             break
-        # Refused (the plan changed) or only partly applied (Tidy saw new work after its moves): either way a fresh
-        # pass sorts it out, so it starts again quietly; the user hears about it only after three in a row.
+        if code != TIDY_REFUSED:
+            raise RuntimeError(f"{label}: Tidy failed (exit code {code}); automatic retry was stopped.\n\n"
+                               + "\n".join(recent)[-4000:])
+        # Only the documented plan-mismatch refusal is retryable. Exit 1 and
+        # unknown failures retain their diagnostics and never become success.
         refusals += 1
         if refusals == 3:
             stop = ("Stop the install", "stop")
@@ -152,7 +157,7 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
             action = progress.ask_choice(
                 "Tidy keeps finding new work",
                 f"{label}: Tidy found a different plan on three passes in a row, so it has not finished. "
-                "Nothing it was unsure of was applied.\n\n" +
+                "Earlier passes may already have changed staged files; their records were preserved.\n\n" +
                 ("Try again runs three more passes. Stop the install keeps the staged files as they are."
                  if first else
                  "Apply Anyway applies the plan Tidy calculates now, even though it keeps changing. Stop the "
@@ -250,16 +255,13 @@ def _remove_ready_plugin_stage(package: Path) -> None:
     _write_ready_plugin_stages(ready)
 
 
-_CHILDREN = set()                 # the processes of running steps: ended when the window is closed
+import managed_processes
+_CHILDREN = managed_processes.CHILDREN
 
 
 def _popen(*args, **kwargs):
     """subprocess.Popen for a step MWManager waits on: remembered, so closing the window ends it too."""
-    process = subprocess.Popen(*args, **kwargs)
-    for old in [p for p in _CHILDREN if _ended(p)]:       # forget the ones that have finished
-        _CHILDREN.discard(old)
-    _CHILDREN.add(process)
-    return process
+    return managed_processes.popen(*args, **kwargs)
 
 
 def _ended(process) -> bool:
@@ -270,14 +272,7 @@ def _ended(process) -> bool:
 def _end_children() -> None:
     """End every step still running (and what it started). A step left alive would keep changing Data Files
     while the next MWManager resumes the same step."""
-    for process in list(_CHILDREN):
-        if not _ended(process):
-            try:
-                setup_state.end_process(process.pid)
-                process.wait(timeout=10)
-            except (OSError, subprocess.SubprocessError):
-                pass
-        _CHILDREN.discard(process)
+    managed_processes.end_all()
 
 
 def _single_instance(wait_seconds: float = 6.0):
@@ -1050,7 +1045,8 @@ class ManagerGUI(tk.Tk):
             self._setup_complete("paths_confirmed")  # migrate an interrupted run created before checkpoints
         if not first_run or paths_confirmed:
             offer_elevation(Path(self.settings["game_dir"]))
-        if not first_run:
+        from major_master_deploy import recovery_pending
+        if not first_run and not recovery_pending(APP_DIR):
             self._initialize_plugin_baseline()
         self._ensure_core()
         self._build_menu()
@@ -1065,7 +1061,10 @@ class ManagerGUI(tk.Tk):
                 self.after(150, self._open_detected_paths)
         else:
             self.refresh()
-        if (not first_run and self._setup_done("initial_full_complete")
+        from major_master_deploy import recovery_pending
+        if not first_run and recovery_pending(APP_DIR):
+            self.after(150, self._resume_interrupted_major_masters)
+        elif (not first_run and self._setup_done("initial_full_complete")
                 and not self._setup_done("catalog_complete")):
             # setup stopped (or was made) before the catalog step: build it now, then carry on
             resume = self._begin_init if self.settings.get("init_complete", 0) != 1 else (lambda: None)
@@ -1698,6 +1697,10 @@ class ManagerGUI(tk.Tk):
         status_bar.pack(fill="x", side="bottom")
         ttk.Separator(status_bar, orient="horizontal").pack(fill="x", side="top")
         ttk.Label(status_bar, textvariable=self.status, style="Status.TLabel", anchor="w").pack(fill="x")
+        self.distant_land_notice = ttk.Button(
+            status_bar, text="Distant land needs regeneration in MGE XE. Mark regenerated…",
+            command=self._acknowledge_distant_land)
+        self._refresh_distant_land_notice()
 
         actions = ttk.Frame(self, padding=(pad["xl"], pad["md"], pad["xl"], pad["md"]))
         actions.pack(fill="x", side="bottom")
@@ -1779,7 +1782,34 @@ class ManagerGUI(tk.Tk):
                    command=self.show_disabled_plugins).pack(side="left", padx=(pad["xs"], 0))
         ttk.Button(buttons, text="Save load order", command=self.save).pack(side="right")
 
+    def _refresh_distant_land_notice(self):
+        if not hasattr(self, "distant_land_notice"):
+            return
+        try:
+            state = json.loads((APP_DIR / "outputs" / "distant_land_status.json").read_text(encoding="utf-8"))
+            pending = (state.get("regeneration_required") and
+                       state.get("game_dir") == str(Path(self.settings["game_dir"]).resolve()))
+        except (OSError, ValueError, AttributeError):
+            pending = False
+        if pending:
+            self.distant_land_notice.pack(fill="x")
+        else:
+            self.distant_land_notice.pack_forget()
+
+    def _acknowledge_distant_land(self):
+        if messagebox.askyesno("Distant land regeneration",
+                               "Have you loaded the MWManager override and regenerated distant land in MGE XE?",
+                               parent=self):
+            from workflow_safety import atomic_json, mutation_lock
+            with mutation_lock(APP_DIR, self.settings["game_dir"]):
+                path = APP_DIR / "outputs" / "distant_land_status.json"
+                state = json.loads(path.read_text(encoding="utf-8"))
+                state["regeneration_required"] = False
+                atomic_json(path, state)
+            self._refresh_distant_land_notice()
+
     def refresh(self):
+        self._refresh_distant_land_notice()
         data_dir = Path(self.settings["game_dir"]) / "Data Files"
         self.game_label.config(text=f"Game: {self.settings['game_dir']}   |   Archive Downloads: {self.settings.get('archive_downloads_dir') or 'Not set'}")
         disk = {n.casefold(): n for n in plugins_in_data(data_dir)}
@@ -3174,6 +3204,18 @@ class ManagerGUI(tk.Tk):
                 required = self._required_major_master_names()
                 ready = any(name.casefold() in staged and not (data_dir / name).is_file()
                             and name.casefold() not in required for name in selection)
+                if ready:
+                    from major_master_deploy import assert_package_disposable, staged_masters
+                    mapping = staged_masters(APP_DIR / "staging" / "major_masters", masters)
+                    try:
+                        for name in selection:
+                            source = mapping.get(name.casefold())
+                            if source:
+                                package = next(p for p in source.parents
+                                               if p.parent == APP_DIR / "staging" / "major_masters")
+                                assert_package_disposable(package, package.parent, data_dir, APP_DIR, masters)
+                    except (ValueError, RuntimeError, StopIteration):
+                        ready = False
                 self.unstage_master_button.state(["!disabled"] if ready else ["disabled"])
 
         def unstage_selected():
@@ -3214,9 +3256,8 @@ class ManagerGUI(tk.Tk):
                     "The live Data Files folder will not be changed.", parent=dialog):
                 return
             def remove_package(progress):
-                for package in packages:
-                    progress(f"Removing staged package: {package.name}")
-                    shutil.rmtree(package, onerror=_rmtree_clear_readonly)   # archives can carry read-only folders
+                from major_master_deploy import unstage_packages
+                unstage_packages(packages, staging_root, data_dir, APP_DIR, masters, progress)
                 return display
 
             def package_removed(result, error):
@@ -3350,7 +3391,8 @@ class ManagerGUI(tk.Tk):
         down.configure(command=lambda: move_master(1))
         add_button.configure(command=add_master)
         self.stage_master_button = ttk.Button(
-            footer_top, text="Reopen staged options…", command=lambda: saved_action(self.stage_major_masters))
+            footer_top, text="Resume / reopen selected…",
+            command=lambda: saved_action(lambda: self.stage_major_masters(option_masters=list(tree.selection()))))
         self.stage_master_button.pack(side="left")
         self.stage_more_master_button = ttk.Button(
             footer_top, text="Find / stage downloads…",
@@ -3399,16 +3441,25 @@ class ManagerGUI(tk.Tk):
         on every click. Reuse the last answer until a package folder, the staging folder or Data Files changes
         (their modification times move when a master is extracted, tidied to the package root, deployed or removed)."""
         staging = APP_DIR / "staging" / "major_masters"
-        stamps = [tuple(self.major_masters)]
+        stamps = [tuple(self.major_masters), str(staging.resolve()), str(Path(self.settings["game_dir"]).resolve())]
         for folder in (staging, Path(self.settings["game_dir"]) / "Data Files"):
             try:
                 stamps.append(folder.stat().st_mtime_ns)
             except OSError:
                 stamps.append(None)
-        try:
-            stamps += [(entry.name, entry.stat().st_mtime_ns) for entry in os.scandir(staging) if entry.is_dir()]
-        except OSError:
-            pass
+        from major_master_deploy import SKIP_FOLDERS
+        for root in (staging, Path(self.settings["game_dir"]) / "Data Files"):
+            for base, dirs, files in os.walk(root):
+                dirs[:] = sorted(d for d in dirs if d.casefold() not in SKIP_FOLDERS and not d.startswith("."))
+                for name in sorted(files):
+                    if Path(name).suffix.casefold() not in {".esm", ".esp"}:
+                        continue
+                    path = Path(base) / name
+                    try:
+                        stat = path.stat()
+                        stamps.append((str(path), stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+                    except OSError:
+                        return set(compute())  # Unreadable files never produce a trusted cache hit.
         cache = self.__dict__.setdefault("_master_scan_cache", {})
         if cache.get(kind, (None,))[0] != stamps:
             cache[kind] = (stamps, compute())
@@ -3425,7 +3476,8 @@ class ManagerGUI(tk.Tk):
         wanted = {name.casefold() for name in self.major_masters}
         found = set()
         for root, dirs, files in os.walk(staging):
-            dirs[:] = [name for name in dirs if name.casefold() not in {"off", "bugreports", "extras"}]
+            dirs[:] = [name for name in dirs if name.casefold() not in {"off", "bugreports", "extras"}
+                       and not name.startswith(".")]
             found.update(filename.casefold() for filename in files if filename.casefold() in wanted)
         return found
 
@@ -3446,13 +3498,27 @@ class ManagerGUI(tk.Tk):
         _atomic_write(path, (json.dumps(state, indent=2) + "\n").encode("utf-8"))
 
     def _unfinished_master_stages(self, names):
+        from major_master_deploy import staged_masters
+        from core_addons import package_steps, PACKAGE_STEPS
+        staging = APP_DIR / "staging" / "major_masters"
+        staged = staged_masters(staging, list(names))
         try:
             state = json.loads(self._master_stage_record().read_text(encoding="utf-8"))
             if not isinstance(state, dict):
                 state = {}
         except (OSError, ValueError):
             state = {}
-        return [name for name in names if state.get(name.casefold()) is not True]
+        unfinished = []
+        for name in names:
+            source = staged.get(name.casefold())
+            package = next((p for p in source.parents if p.parent == staging), None) if source else None
+            steps = package_steps(package) if package else None
+            if steps is not None:
+                if any(not steps[step]["completed_at"] for step in PACKAGE_STEPS):
+                    unfinished.append(name)
+            elif state.get(name.casefold()) is not True:
+                unfinished.append(name)
+        return unfinished
 
     @staticmethod
     def _esm_master_names(path):
@@ -3495,22 +3561,13 @@ class ManagerGUI(tk.Tk):
             if not root.is_dir():
                 continue
             for base, dirs, files in os.walk(root):
-                dirs[:] = [name for name in dirs if name.casefold() not in {"off", "bugreports", "extras"}]
+                dirs[:] = [name for name in dirs if name.casefold() not in {"off", "bugreports", "extras"}
+                           and not name.startswith(".")]
                 for filename in files:
                     if Path(filename).suffix.casefold() != ".esm" or filename.casefold() not in configured:
                         continue
                     required.update(self._esm_master_names(Path(base) / filename) & configured)
-        # A master cannot be disabled when another configured master names it as a dependency.
-        dependents = set()
-        for root in roots:
-            if not root.is_dir():
-                continue
-            for base, dirs, files in os.walk(root):
-                dirs[:] = [name for name in dirs if name.casefold() not in {"off", "bugreports", "extras"}]
-                for filename in files:
-                    if Path(filename).suffix.casefold() == ".esm" and filename.casefold() in configured:
-                        dependents.update(self._esm_master_names(Path(base) / filename) & configured)
-        return dependents
+        return required
 
     def deploy_major_masters(self, *, _preflight_done=False, _accept_assets=None):
         """Confirm deployment policy, then hardlink staged major masters into Data Files."""
@@ -3955,7 +4012,14 @@ class ManagerGUI(tk.Tk):
         def run():
             try:
                 control.check()
-                events.put(("done", worker(report), None))
+                from workflow_safety import mutation_lock
+                with mutation_lock(APP_DIR, self.settings["game_dir"]):
+                    from major_master_deploy import recovery_pending, recover_deployment
+                    if recovery_pending(APP_DIR):
+                        report("Recovering interrupted installation changes before starting this job.")
+                        recover_deployment(APP_DIR, self.settings["game_dir"])
+                    result = worker(report)
+                events.put(("done", result, None))
             except Exception as exc:
                 events.put(("done", None, exc))
 
@@ -4135,6 +4199,7 @@ class ManagerGUI(tk.Tk):
             self._active_job = None
             self._job_control = None
             self._enable_job_buttons()
+            self._refresh_distant_land_notice()
             if isinstance(finished[1], JobCancelled):
                 self._pause_setup(finished[1])
                 if in_setup:
@@ -4199,6 +4264,9 @@ class ManagerGUI(tk.Tk):
 
     def _pause_setup(self, reason):
         step, _entry = setup_state.interrupted(self._setup_path(), self.settings["game_dir"])
+        from major_master_deploy import recovery_pending
+        if recovery_pending(APP_DIR):
+            step = "major_masters_deployed"
         if step:
             self._setup_fail(step, reason)
         self._initializing_manager = False
@@ -4229,6 +4297,7 @@ class ManagerGUI(tk.Tk):
     def _after_major_master_staging(self, initializing, prompt):
         """Staging is finished: record it and offer deployment. Initialization is complete once the masters are
         deployed, or once deployment is declined here - not before."""
+        self._set_staging_run(None)
         self._setup_complete("major_masters_staged")
         if self._staged_major_master_names() and messagebox.askyesno("Deploy staged major masters?", prompt, parent=self):
             self.after(100, self.deploy_major_masters)
@@ -4241,6 +4310,9 @@ class ManagerGUI(tk.Tk):
     def _resume_interrupted_major_masters(self, *, open_dialog=True) -> bool:
         """At start: if staging or deploying the major masters was interrupted, say so and pick it up."""
         step, _entry = setup_state.interrupted(self._setup_path(), self.settings["game_dir"])
+        from major_master_deploy import recovery_pending
+        if recovery_pending(APP_DIR):
+            step = "major_masters_deployed"
         if step not in ("major_masters_staged", "major_masters_deployed"):
             return False
         if not self._setup_resume_check():
@@ -4256,6 +4328,23 @@ class ManagerGUI(tk.Tk):
                     bool(getattr(self, "_initializing_manager", False)),
                     "Major-master staging had finished when MWManager was closed.\n\n"
                     "Deploy the staged masters to the game now?"))
+        elif step == "major_masters_deployed":
+            from major_master_deploy import recover_deployment, recovery_pending
+            if recovery_pending(APP_DIR):
+                def recovered(_result, error):
+                    if error:
+                        self._setup_fail("major_masters_deployed", error)
+                        messagebox.showerror("Deployment recovery needs review", str(error), parent=self)
+                    else:
+                        self._initialize_plugin_baseline()
+                        self.status.set("Interrupted deployment recovered. Review the selected masters before deploying.")
+                        if hasattr(self, "_major_master_refresh"):
+                            self._major_master_refresh()
+                self.after(300, lambda: self._run_progress_job(
+                    "Recover interrupted deployment", "Reconciling the interrupted deployment before continuing.",
+                    lambda progress: recover_deployment(APP_DIR, self.settings["game_dir"]), recovered))
+            else:
+                self.after(300, self.deploy_major_masters)
         if open_dialog:
             self.open_major_masters()
         return True
@@ -4276,7 +4365,7 @@ class ManagerGUI(tk.Tk):
         have = self._staged_major_master_names() | deployed_master_names()
         return [name for name in self.major_masters if name.casefold() in wanted and name.casefold() not in have]
 
-    def stage_major_masters(self, *, force_scan=False):
+    def stage_major_masters(self, *, force_scan=False, option_masters=None):
         """Review downloaded major masters and unpack selected archives into MWManager staging."""
         initializing = bool(getattr(self, "_initializing_manager", False))
         staging = APP_DIR / "staging" / "major_masters"
@@ -4304,6 +4393,11 @@ class ManagerGUI(tk.Tk):
             """Tidy with the option installer, then the BSA check. Each step is recorded in the package's marker
             as it starts and completes; a step already completed is not run again."""
             steps = package_steps(mod_dir) or {}
+            from major_master_deploy import assert_package_disposable, restore_packed_assets
+            assert_package_disposable(mod_dir, staging, game_data_files, APP_DIR, self.major_masters,
+                                      check_dependencies=False)
+            if not (steps.get("tidied") or {}).get("completed_at"):
+                restore_packed_assets(mod_dir)
             from core_addons import _read_staged_archive_marker
             marker = _read_staged_archive_marker(mod_dir)
             primary_master = Path(group_masters[0]) if group_masters else next(mod_dir.glob("*.esm"), None)
@@ -4315,11 +4409,11 @@ class ManagerGUI(tk.Tk):
                     return
                 begin_package_step(mod_dir, step)
                 try:
-                    work()
+                    outcome = work()
                 except Exception as exc:
                     fail_package_step(mod_dir, step, exc)
                     raise
-                complete_package_step(mod_dir, step)
+                complete_package_step(mod_dir, step, outcome=outcome or "completed")
 
             def tidy():
                 progress(f"Running tidy and option installer for {label}. "
@@ -4342,7 +4436,7 @@ class ManagerGUI(tk.Tk):
 
             def bsa_check():
                 if not group_masters:
-                    return
+                    return "not_eligible"
                 progress(f"Checking BSA eligibility for {label} after final Tidy pass…")
                 from major_master_deploy import count_bsa_eligible
                 eligible_assets = count_bsa_eligible(staging, group_masters)
@@ -4355,6 +4449,9 @@ class ManagerGUI(tk.Tk):
                         from plugin_install import pack_package_assets
                         packed = pack_package_assets(mod_dir, PLUGIN_NAME, APP_DIR, progress)
                         progress(f"Built {len(packed)} BSA archive(s) for {PLUGIN_NAME}.")
+                        return "packed"
+                    return "skipped_by_user"
+                return "below_threshold"
 
             run("tidied", tidy)
             run("bsa_checked", bsa_check)
@@ -4362,13 +4459,12 @@ class ManagerGUI(tk.Tk):
 
         def unstaged_masters():
             have = self._staged_major_master_names() | deployed_master_names()
-            return [name for name in self.major_masters if name.casefold() not in have]
+            pending = self._pending_stage_masters()
+            return [name for name in pending if name.casefold() not in have]
 
-        # every staged package finished but masters are still missing: go straight to the selection window
-        if (staging.is_dir() and any(staging.iterdir()) and not force_scan
-                and not unfinished_packages(staging) and unstaged_masters()):
-            force_scan = True
-        if staging.is_dir() and any(staging.iterdir()) and not force_scan:
+        has_packages = staging.is_dir() and any(p.is_dir() and not p.name.startswith(".")
+                                                for p in staging.iterdir())
+        if has_packages and not force_scan:
             py = console_python()
             if py is None:
                 messagebox.showerror("Cannot reopen staged options",
@@ -4391,7 +4487,8 @@ class ManagerGUI(tk.Tk):
                                 progress(f"{package.name}: left as it is.")
                                 continue
                             progress(f"{package.name}: the archive was never fully extracted; it will be staged again.")
-                            reset_partial_package(package)
+                            reset_partial_package(package, manager_dir=APP_DIR,
+                                                  game_dir=game_data_files.parent, configured=self.major_masters)
                             restage += 1
                             continue
                         progress(f"Resuming package {number} of {len(unfinished)}: {package.name} - "
@@ -4415,6 +4512,13 @@ class ManagerGUI(tk.Tk):
                         return
                     if hasattr(self, "_major_master_refresh"):
                         self._major_master_refresh()
+                    staged_names = self._staged_major_master_names()
+                    unfinished_names = {name.casefold() for name in self._unfinished_master_stages(staged_names)}
+                    self._set_master_stage_ready(staged_names - unfinished_names, True)
+                    if unfinished_packages(staging) and not restage:
+                        self._setup_fail("major_masters_staged", "Some staged packages were left unprocessed.")
+                        self.status.set("Staging paused: some packages were left unprocessed.")
+                        return
                     if restage or unstaged_masters():
                         # masters are still missing from staging: open the selection window for them
                         self.status.set("Interrupted packages are finished. Choose the masters still to stage.")
@@ -4437,11 +4541,19 @@ class ManagerGUI(tk.Tk):
             def reopen_options(progress):
                 checkpoint(progress)
                 names = self._staged_major_master_names()
+                if option_masters:
+                    names &= {name.casefold() for name in option_masters}
                 self._set_master_stage_ready(names, False)
-                run_tidy_steps(py, staging, game_data_files, progress, "Saved mock FOMOD choices",
-                               reopen=True, quiet=quiet_options())
+                from major_master_deploy import _package_roots, assert_package_disposable, restore_packed_assets
+                for package, masters in _package_roots(staging, list(names)):
+                    assert_package_disposable(package, staging, game_data_files, APP_DIR, self.major_masters,
+                                              check_dependencies=False)
+                    begin_package_step(package, "tidied")
+                    begin_package_step(package, "bsa_checked")
+                    restore_packed_assets(package)
+                    process_package(progress, py, quiet_options(), package, masters, reopen=True)
                 self._set_master_stage_ready(names, True)
-                return True
+                return names
 
             def options_reopened(_result, error):
                 if error:
@@ -4455,7 +4567,8 @@ class ManagerGUI(tk.Tk):
                     self.status.set("Staged mock FOMOD stopped with an error.")
                     messagebox.showerror("Could not reopen staged options", str(error), parent=self)
                     return
-                staged = self._staged_major_master_names()
+                staged = (set(_result) if isinstance(_result, (set, list, tuple))
+                          else self._staged_major_master_names())
                 self.selected_major_masters.update(staged)
                 self.gui_state["selected_major_masters"] = [name for name in self.major_masters
                                                             if name.casefold() in self.selected_major_masters]

@@ -578,21 +578,21 @@ class GuiTidySteps(unittest.TestCase):
         self.assertNotIn(("Apply Anyway", "apply_anyway"), first_choices)
         self.assertEqual(second_choices, [("Apply Anyway", "apply_anyway"), ("Stop the install", "stop")])
 
-    def test_partial_apply_starts_again_quietly(self):
+    def test_partial_apply_failure_stops_without_hiding_the_error(self):
         pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]
         calls, patch = self.fake([(0, pending), (1, ["111 repair(s) appeared after the moves"]),
                                   (0, pending), (0, ["done"])])
         progress, _ = self.progress()
         progress.ask_choice = mock.Mock(side_effect=AssertionError("one partial pass must not ask"))
-        with patch:
+        with patch, self.assertRaisesRegex(RuntimeError, "exit code 1"):
             self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
-        self.assertEqual(len(calls), 4)
+        self.assertEqual(len(calls), 2)
 
     def test_apply_anyway_that_still_fails_halts_deployment(self):
         pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]
         outputs = [(0, pending)]
         for number in range(1, 7):
-            outputs.append((1, [f"partial {number}"]))
+            outputs.append((2, [f"plan changed {number}"]))
             if number != 6:
                 outputs.append((0, pending))
         outputs.append((1, ["one action failed"]))

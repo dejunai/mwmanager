@@ -51,6 +51,7 @@ GENERATED_NON_MOD_FILES = {
 }
 
 SEVEN_ZIP_DOWNLOAD_PAGE = "https://www.7-zip.org/download.html"
+IS_WINDOWS = os.name == "nt"
 
 
 def _seven_zip_installer_url(opener=urllib.request.urlopen) -> str:
@@ -77,7 +78,7 @@ def ensure_archive_tool(manager_dir: Path, progress, *, opener=urllib.request.ur
     if found:
         progress(f"Preflight: archive tool found at {found} (ZIP, 7z and RAR).")
         return True
-    if os.name != "nt":
+    if not IS_WINDOWS:
         progress("Preflight: full 7-Zip is required for ZIP, 7z and RAR archives; install 7z and retry.")
         return False
     destination = manager_dir / "tools" / "7zip"

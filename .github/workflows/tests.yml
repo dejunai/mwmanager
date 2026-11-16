@@ -1,0 +1,25 @@
+name: Python workflow regression tests
+on:
+  push:
+  pull_request:
+jobs:
+  tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12", "3.14"]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install pytest pywebview
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y xvfb p7zip-full python3-tk
+      - if: runner.os == 'Linux'
+        run: xvfb-run -a python -m pytest -q tests
+      - if: runner.os == 'Windows'
+        run: python -m pytest -q tests

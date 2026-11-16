@@ -24,10 +24,15 @@ def hidden_exteriors(data_dir):
     """object id -> how many exterior copies mwcollide hides."""
     try:
         with open(os.path.join(data_dir, "MWSE", "config", COLLIDE_DATA), encoding="utf-8") as f:
-            cells = json.load(f).get("cells", {})
+            config = json.load(f)
+            cells = config.get("cells", {}) if isinstance(config, dict) else {}
     except (OSError, ValueError):
         return Counter()
-    return Counter(o["id"].lower() for key, objs in cells.items() if key.startswith("#") for o in objs)
+    if not isinstance(cells, dict):
+        return Counter()
+    return Counter(o["id"].lower() for key, objs in cells.items()
+                   if isinstance(key, str) and key.startswith("#") and isinstance(objs, list)
+                   for o in objs if isinstance(o, dict) and isinstance(o.get("id"), str))
 
 
 def exterior_placements(plugins):
@@ -100,7 +105,61 @@ def render(ids, meshes, g7):
     return "\n".join(lines) + "\n"
 
 
-def write(game_dir, data_dir, plugins, log=print):
+def write(game_dir, data_dir, plugins, log=print, *, manager_dir=None):
+    if manager_dir is not None:
+        from pathlib import Path
+        from workflow_safety import mutation_lock, DurableTransaction, atomic_bytes, atomic_json
+        from mwmanager_journal import Journal, rel_of, sha256_file
+        game, manager = Path(game_dir).resolve(), Path(manager_dir).resolve()
+        ledger = Journal(manager / "journal")
+        if not ledger.has_baseline():
+            log("WARNING: distant-land overrides were not changed: record an install baseline first.")
+            return None
+        with mutation_lock(manager, game):
+            root = manager / "transactions" / "ghost-statics"
+            DurableTransaction.recover(root, [manager, game])
+            folder = game / "mge3"
+            if not folder.is_dir():
+                return None
+            ids, meshes, shared = plan(plugins, data_dir)
+            g7 = is_g7(game)
+            target = folder / (NAME + (".toml" if g7 else ".ovr"))
+            other = folder / (NAME + (".ovr" if g7 else ".toml"))
+            payload = render(ids, meshes, g7).replace("\n", "\r\n").encode() if (ids if g7 else meshes) else None
+            changes = [(p, data) for p, data in ((target, payload), (other, None))
+                       if (p.read_bytes() if p.exists() else None) != data]
+            if not changes:
+                return str(target) if payload else None
+            tx = DurableTransaction(root, [manager, game]).begin()
+            try:
+                status = manager / "outputs" / "distant_land_status.json"
+                for path in (ledger.ledger, ledger.runs, status):
+                    tx.snapshot(path)
+                run = ledger.start_run("mge_ghosts.py", {"operation": "distant-land overrides"})
+                for index, (path, data) in enumerate(changes):
+                    original = ledger.preserve_original(game, path)
+                    if data is None:
+                        tx.move(path, root / f"deleted-{index}")
+                    else:
+                        source = root / f"new-{index}"
+                        atomic_bytes(source, data)
+                        tx.link(source, path, root / f"backup-{index}")
+                    ledger.record(run["run"], rel_of(game, path),
+                                  "remove" if data is None else "replace" if original["kind"] != "absent" else "create",
+                                  sha256_file(path) if data is not None else None, original, tag="ghost-statics")
+                ledger.finish_run(run)
+                atomic_json(status, {"game_dir": str(game), "regeneration_required": True,
+                                     "override": str(target) if payload else None})
+                tx.commit()
+            except BaseException:
+                tx.rollback()
+                raise
+            log("Distant land changed: load the MWManager override in MGE XE and regenerate distant land.")
+            return str(target) if payload else None
+    return _write_unmanaged(game_dir, data_dir, plugins, log)
+
+
+def _write_unmanaged(game_dir, data_dir, plugins, log=print):
     """Write mge3\\<NAME>.toml (G7) or .ovr (other forks); remove it when nothing needs excluding. Returns its
     path, or None (no MGE XE, or nothing to exclude)."""
     mge3 = os.path.join(game_dir, "mge3")

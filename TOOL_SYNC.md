@@ -1,5 +1,13 @@
 # Steam utility sync before runs
 
+## Checkout line-ending policy
+
+Shared Python helpers are checked out with LF through `.gitattributes`, and each
+root helper must remain byte-identical to its vendored copy. `COPY_MANIFEST.json`
+retains the original Steam/Windows byte fingerprints; validation accepts either
+the exact checkout bytes or those bytes normalized to CRLF. It does not ignore
+other content changes or rewrite the upstream fingerprints to hide divergence.
+
 Before running MWManager or one of its Python utilities, compare the tracked tools and tidy configuration in `utility_source_manifest.json` with their Steam copies:
 
 - `mwdialog_check.py` → `mwmanager.py`
