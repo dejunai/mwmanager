@@ -1306,7 +1306,8 @@ def run_cell_conflicts(args, plugins, collect=False):
                   f"(an [Order] rule); if both matter, a patch that combines them is needed")
     if len(ranked) > len(shown):
         print(f"\n  ... and {len(ranked) - len(shown)} smaller conflict(s) (--conflict-all lists them all)")
-    interactive = (sys.stdin.isatty() and sys.stdout.isatty() and not args.dry_run
+    interactive = ((os.environ.get("MWMANAGER_CONFLICT_GUI") == "1" or
+                    (sys.stdin.isatty() and sys.stdout.isatty())) and not args.dry_run
                    and not getattr(args, "no_interactive", False))
     if interactive or (getattr(args, "use_answers", False) and not args.dry_run):
         # every pair is asked (or replayed), not only the ones printed above: --conflict-top limits the summary
@@ -1485,7 +1486,31 @@ def conflict_session(args, ranked, name_of, masters, total_new, plugins=(), labe
             print(f"  > {ans}  (last time's answer)")
         else:
             try:
-                ans = input("  > ").strip().lower()
+                if os.environ.get("MWMANAGER_CONFLICT_GUI") == "1":
+                    from mwmanager_workflow import conflict_answer
+                    details = (f"{A} vs {B}\n\nThey {', '.join(parts)}.\n"
+                               f"{B} loads later and currently wins.\n\n")
+                    affected = list(dict.fromkeys(
+                        str(labels.get(item[0], item[0][1]))
+                        for field in ("place", "refs", "settings") for item in c[field]))
+                    if affected:
+                        details += ("Affected cells:\n" + "\n".join(affected[:20]) +
+                                    (f"\n... and {len(affected) - 20} more" if len(affected) > 20 else "") + "\n\n")
+                    if c.get("doubled"):
+                        details += f"{c['dups']} identical objects are placed twice. Usually keep only one version.\n\n"
+                    if rb:
+                        details += ("Both rebuilt these interiors:\n" +
+                                    "\n".join(str(labels.get(k, k[1])) for k in rb) + "\n\n")
+                    details += ("Ordering changes who wins. Interior choices rebuild the affected cells. "
+                                "Disabling a plugin removes it from the active load order; required plugins "
+                                "cannot be disabled.\n\nChoose Skip to leave this pair unchanged, "
+                                "or Finish review to keep decisions already made.")
+                    ans = conflict_answer(
+                        f"Cell conflict {i} of {len(ranked)}: {kind}", details,
+                        [(value[3], key) for key, value in opts.items()] +
+                        [("Skip this pair", "s"), ("Finish review", "q")], default or "s")
+                else:
+                    ans = input("  > ").strip().lower()
             except EOFError:
                 break
             if ans == "q":

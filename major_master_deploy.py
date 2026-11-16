@@ -372,13 +372,15 @@ def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=N
                             for item in pending_deployments)}
 
 def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[str], *, build_bsa: bool = False,
-           include_assets: bool = True, progress=None) -> dict:
+           include_assets: bool = True, progress=None, selected: list[str] | None = None) -> dict:
     """Hardlink staged package files, register archives, and index ESM/BSA data."""
     staging, data_dir = staging.resolve(), data_dir.resolve()
     if os.path.splitdrive(str(staging))[0].casefold() != os.path.splitdrive(str(data_dir))[0].casefold():
         raise ValueError("Major-master staging and Data Files must be on the same drive for hardlinks.")
     staged = staged_masters(staging, configured)
-    ready = [name for name in configured if name.casefold() in staged and not (data_dir / name).is_file()]
+    selected_keys = {name.casefold() for name in selected} if selected is not None else None
+    ready = [name for name in configured if name.casefold() in staged and not (data_dir / name).is_file()
+             and (selected_keys is None or name.casefold() in selected_keys)]
     if not ready:
         raise ValueError("No staged, uninstalled major masters are ready to deploy.")
     package_info = _package_roots(staging, ready)

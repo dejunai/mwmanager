@@ -18,6 +18,7 @@ from tkinter import filedialog, ttk
 
 import mwmanager_dialogs as messagebox  # themed prompts
 import mwmanager_setup_state as setup_state
+from mwmanager_workflow import JobCancelled, JobControl, JobView, checkpoint, preflight_signature
 
 from mwmanager_theme import COLORS, FONTS, SPACE, apply_theme, center, tree_tags
 
@@ -52,8 +53,6 @@ GUI_STATE_FILE = APP_DIR / "mwmanager_gui_state.json"
 DEPLOYMENT_JOURNAL = APP_DIR / "major_master_deployments.json"
 PLUGIN_STAGE_MANIFEST = APP_DIR / "staging" / "plugins" / ".mwmanager-plugin-stages.json"
 DISABLED_RECORD = APP_DIR / "mwmanager_disabled.txt"
-PROGRESS_LOG_LINES = 4000          # lines kept in a progress dialog's log pane
-_ZERO_COUNT = re.compile(r"\b0 (?:errors?|failed|failures?|crash(?:es)?)\b")
 
 
 def _display_line(raw: str, limit: int = 600) -> str:
@@ -85,6 +84,7 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
     base = [str(py), "-u", str(TIDY_SCRIPT), "--staging", str(staging), "--game-data-files", str(data_files)]
     if only:
         base += ["--only", only]
+    env = dict(os.environ if env is None else env, MWMANAGER_GUI="1")
     if quiet is None and os.name == "nt":
         startup = subprocess.STARTUPINFO()
         startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -92,6 +92,7 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
         quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
 
     def step(extra, what):
+        checkpoint(progress)
         if log:
             log(f"START {label}: {what}")
         process = _popen(base + extra, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
@@ -112,8 +113,10 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
                 plan = (state, Path(path) if path else None)
             elif clean.startswith("MWMANAGER-PROGRESS:"):
                 progress(f"{label}: " + clean.split(":", 1)[1].strip())
-            elif on_line:
-                on_line(clean)
+            else:
+                progress(_display_line(line))
+                if on_line:
+                    on_line(clean)
         code = process.wait()
         if log:
             log(f"{'DONE' if code == 0 else 'FAIL'} {label}: {what}: exit code {code}")
@@ -122,10 +125,13 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
     code, recent, mods, plan = step(["--options-only" if reopen else "--options"], "options and plan")
     if code:
         raise RuntimeError(f"{label}: the option step failed (exit code {code}).\n\n" + "\n".join(recent)[-4000:])
+    checkpoint(progress)
     state, plan_path = plan
-    if state != "pending":
+    if state == "empty":
         progress(f"{label}: nothing to tidy.")
         return mods
+    if state != "pending" or plan_path is None:
+        raise RuntimeError(f"{label}: Tidy did not report a valid plan state. Deployment is halted.")
     progress(f"{label}: applying the validated Tidy plan automatically.")
     code, recent, _mods, _plan = step(["--apply", "--yes"], "apply")
     if code == TIDY_REFUSED:
@@ -135,6 +141,7 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
     if code:
         raise RuntimeError(f"{label}: Tidy could not apply every action (exit code {code}). The remaining actions "
                            f"stay in {plan_path}; deployment is halted.\n\n" + "\n".join(recent)[-4000:])
+    checkpoint(progress)
     return mods
 
 
@@ -966,6 +973,7 @@ class ManagerGUI(tk.Tk):
         apply_theme(self)
         self.title("MWManager")
         self._active_job = None
+        self.status = tk.StringVar(value="Core ESMs stay enabled and fixed at the top.")
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         center(self, None, 900, 620)                     # the main window: middle of the desktop
         self.minsize(760, 500)
@@ -1032,6 +1040,7 @@ class ManagerGUI(tk.Tk):
         return setup_state.complete(self._setup_path(), self.settings["game_dir"], step)
 
     def _setup_start(self):
+        self.settings["paths_confirmed"] = True
         setup_state.start(self._setup_path(), self.settings["game_dir"])
         self._setup_complete("paths_confirmed")
 
@@ -1111,7 +1120,8 @@ class ManagerGUI(tk.Tk):
         file_menu.add_command(label="Options…", command=self.open_options)
         file_menu.add_command(label="Detected installs…", command=lambda: self._open_detected_paths(first_run=False))
         file_menu.add_separator()
-        file_menu.add_command(label="Exit", command=self.destroy)
+        file_menu.add_command(label="Resume setup", command=self._resume_setup)
+        file_menu.add_command(label="Exit", command=self._on_close)
         menu.add_cascade(label="File", menu=file_menu)
         self.file_menu = file_menu
         self.config(menu=menu)
@@ -1155,9 +1165,13 @@ class ManagerGUI(tk.Tk):
 
         def worker(progress):
             from preinstall import run_preinstall
-            return run_preinstall(Path(self.settings["game_dir"]), APP_DIR, progress, first_run=True,
+            result = run_preinstall(Path(self.settings["game_dir"]), APP_DIR, progress, first_run=True,
                                   archive_source=self.settings.get("archive_source"),
                                   archive_dir=self.settings.get("archive_downloads_dir"))
+            if result is True:
+                self._preflight_signature = preflight_signature(self.settings["game_dir"])
+            checkpoint(progress)
+            return result
 
         def continue_after_preflight():
             self.order = read_order()
@@ -1265,6 +1279,7 @@ class ManagerGUI(tk.Tk):
             game = self.settings["game_dir"]
             with log_path.open(mode, encoding="utf-8", errors="replace") as log:
                 for step, label, command in commands:
+                    checkpoint(report)
                     recent = []
                     report(label)
                     log.write(f"\n=== {label.rstrip('…')} ===\n")
@@ -1287,6 +1302,7 @@ class ManagerGUI(tk.Tk):
                         setup_state.fail(self._setup_path(), game, step, problem)
                         raise RuntimeError(problem)
                     self._setup_complete(step)
+                    checkpoint(report)
             return True
 
         def completed(_result, error):
@@ -1328,6 +1344,7 @@ class ManagerGUI(tk.Tk):
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a", encoding="utf-8", errors="replace") as log:
                 for label, command in commands:
+                    checkpoint(report)
                     recent = []
                     report(label)
                     log.write(f"\n=== {label.rstrip('…')} ===\n")
@@ -1349,6 +1366,7 @@ class ManagerGUI(tk.Tk):
                         setup_state.fail(state_path, game_dir, "catalog_complete", problem)
                         raise RuntimeError(problem)
             setup_state.complete(state_path, game_dir, "catalog_complete")
+            checkpoint(report)
             return True
 
         def completed(_result, error):
@@ -1366,6 +1384,13 @@ class ManagerGUI(tk.Tk):
         self.settings["init_complete"] = 1
         write_settings(self.settings)
         self.status.set("MWManager initialization complete.")
+        if hasattr(self, "generate_button"):
+            self._update_action_buttons()
+        view = getattr(self, "_setup_view", None)
+        if view is not None and view.window.winfo_exists():
+            view.refresh_phases()
+            view.stage.set("Setup complete. Staged masters can be deployed now or later.")
+            view.resume.pack_forget()
 
     def _begin_init(self):
         """Resume the post-preflight major-master choice until it is committed."""
@@ -1514,6 +1539,7 @@ class ManagerGUI(tk.Tk):
             self._complete_init()                      # already done: only the settings flag was behind
             return
         self._setup_complete("major_masters_started")
+        self._setup_begin("initialization_complete")
         self._initializing_manager = True
         self.status.set("Initial setup is ready for major-master selection and staging.")
         self.open_major_masters()
@@ -1550,23 +1576,31 @@ class ManagerGUI(tk.Tk):
         self.destroy()
 
     def _cancel_until_restart(self):
-        self.status.set("Install has been canceled. Please close MWManager.")
-        messagebox.showinfo("Install canceled", "Install has been canceled, please close MWManager.", parent=self)
+        self.status.set("Setup paused. Resume setup from File, or restart MWManager.")
+        if messagebox.askyesno(
+                "Setup paused", "Completed setup steps have been kept. Restart MWManager now to resume?",
+                default="no", parent=self):
+            self._restart_manager()
+            return
 
-        def disable_tree(parent):
-            for child in parent.winfo_children():
-                if isinstance(child, ttk.Button):
-                    child.state(["disabled"])
-                elif isinstance(child, ttk.Treeview):
-                    child.state(["disabled"])
-                elif isinstance(child, tk.Listbox):
-                    child.configure(state="disabled")
-                disable_tree(child)
+        # Keep Options, Resume setup and Exit available. A cancelled prompt is not
+        # a reason to permanently disable the application for the whole session.
 
-        disable_tree(self)
-        for index in range(self.file_menu.index("end") + 1):
-            if self.file_menu.type(index) == "command" and self.file_menu.entrycget(index, "label") != "Exit":
-                self.file_menu.entryconfigure(index, state="disabled")
+    def _resume_setup(self):
+        if getattr(self, "_active_job", None):
+            return
+        if self.settings.get("first_run", 0) == 1:
+            if not self.settings.get("paths_confirmed") and not self._setup_done("paths_confirmed"):
+                self._open_detected_paths()
+            else:
+                self._begin_first_run()
+        elif self.settings.get("init_complete", 0) != 1:
+            if not self._setup_done("catalog_complete"):
+                self._run_initial_catalog(self._begin_init)
+            else:
+                self._begin_init()
+        else:
+            self.open_major_masters()
 
     def _build_ui(self):
         pad = SPACE
@@ -1585,7 +1619,6 @@ class ManagerGUI(tk.Tk):
         ttk.Separator(self, orient="horizontal").pack(fill="x", side="top")
 
         # Status bar and primary actions are packed first so they keep their space when the window shrinks.
-        self.status = tk.StringVar(value="Core ESMs stay enabled and fixed at the top.")
         status_bar = ttk.Frame(self, style="Statusbar.TFrame")
         status_bar.pack(fill="x", side="bottom")
         ttk.Separator(status_bar, orient="horizontal").pack(fill="x", side="top")
@@ -1753,6 +1786,8 @@ class ManagerGUI(tk.Tk):
         return ordered_signature(disk, self.order, self.active_names, self.settings["game_dir"])
 
     def _update_action_buttons(self):
+        if getattr(self, "_active_job", None):
+            return
         new_plugins = self.new_plugins()
         unselected_new = [name for name in new_plugins if name.casefold() not in self.active_names]
         self.enable_new_button.state(["!disabled"] if unselected_new else ["disabled"])
@@ -1766,6 +1801,12 @@ class ManagerGUI(tk.Tk):
             "Shift-click forces --full."
             if has_changes else "No changes detected. Ctrl-click forces --all; Shift-click forces --full.")
         self.play_button.state(["!disabled"] if not has_changes and self.gui_state.get("generated_signature") else ["disabled"])
+        pending_setup = (self.settings.get("first_run", 0) == 1 or self.settings.get("init_complete", 0) != 1)
+        for name in ("install_plugins_button", "remove_plugins_button"):
+            getattr(self, name).state(["disabled"] if pending_setup else ["!disabled"])
+        if pending_setup:
+            for name in ("enable_new_button", "generate_button", "play_button"):
+                getattr(self, name).state(["disabled"])
     def enable_all_new_plugins(self):
         new_plugins = self.new_plugins()
         if not new_plugins:
@@ -2442,10 +2483,14 @@ class ManagerGUI(tk.Tk):
         return executable
 
     def _force_generate_patches(self, _event=None):
+        if self._active_job or self.settings.get("init_complete", 0) != 1:
+            return "break"
         self.generate_patches(mode="all", force=True)
         return "break"
 
     def _force_full_generate_patches(self, _event=None):
+        if self._active_job or self.settings.get("init_complete", 0) != 1:
+            return "break"
         self.generate_patches(mode="full", force=True)
         return "break"
 
@@ -2454,6 +2499,8 @@ class ManagerGUI(tk.Tk):
                          on_failure=None):
         """skip_first_pass / on_first_pass / on_review / on_spawn / on_failure: setup's checkpoints (called from
         the worker, so they must not touch Tk). on_review: a conflict review is starting, the pass runs again."""
+        if self._active_job:
+            return
         if not force and not self.generate_button.instate(["!disabled"]):
             return
         if not force:
@@ -2490,6 +2537,7 @@ class ManagerGUI(tk.Tk):
             recent = []
 
             def run_full_pass(label):
+                checkpoint(report)
                 report(label)
                 process = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
@@ -2506,6 +2554,7 @@ class ManagerGUI(tk.Tk):
                 if result:
                     raise RuntimeError("MWManager's full plugin checks did not complete.\n\n" +
                                        ("\n".join(recent)[-5000:] or f"mwmanager.py exited with code {result}"))
+                checkpoint(report)
 
             if skip_first_pass:
                 report(f"MWMANAGER-STAGE: 1 of 4 — The --{mode} pass finished before the interruption; not repeated")
@@ -2518,6 +2567,7 @@ class ManagerGUI(tk.Tk):
             # Find unanswered cell conflicts without blocking the GUI process. The existing
             # resolver is opened only when there are decisions to make.
             report("MWMANAGER-STAGE: 2 of 4 — Scanning for unresolved cell conflicts")
+            checkpoint(report)
             unresolved_path = APP_DIR / "outputs" / "mwmanager_new_conflicts.txt"
             scan_command = [str(self._console_python()), "-u", str(script), str(data_dir),
                             "--cell-conflicts", "--no-interactive"]
@@ -2536,6 +2586,7 @@ class ManagerGUI(tk.Tk):
                 raise RuntimeError("The cell-conflict scan did not complete.\n\n" +
                                    ("\n".join(scan_output)[-4000:] or
                                     f"mwmanager.py exited with code {scan_result}"))
+            checkpoint(report)
             try:
                 unresolved = [line.strip() for line in unresolved_path.read_text(encoding="utf-8").splitlines()
                               if line.strip()]
@@ -2548,15 +2599,22 @@ class ManagerGUI(tk.Tk):
                 report(f"Reviewing {len(unresolved):,} unresolved cell conflict pair(s)…")
                 conflict_command = [str(self._console_python()), "-u", str(script), str(data_dir),
                                     "--cell-conflicts", "--only-new", "--defer-follow-up"]
-                if os.name == "nt":
-                    conflict_process = _popen(
-                        conflict_command, cwd=str(APP_DIR), creationflags=subprocess.CREATE_NEW_CONSOLE)
-                else:
-                    conflict_process = _popen(conflict_command, cwd=str(APP_DIR))
+                report("Opening the native cell-conflict picker. Finish review to keep decisions made so far.")
+                conflict_env = dict(env, MWMANAGER_CONFLICT_GUI="1")
+                conflict_process = _popen(
+                    conflict_command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                    encoding="utf-8", errors="replace", env=conflict_env, **quiet)
+                conflict_output = []
+                for line in conflict_process.stdout:
+                    conflict_output.append(line.rstrip())
+                    del conflict_output[:-40]
+                    report(_display_line(line))
                 conflict_result = conflict_process.wait()
                 if conflict_result:
                     raise RuntimeError("The cell-conflict review did not complete.\n\n" +
-                                       f"mwmanager.py exited with code {conflict_result}")
+                                       "\n".join(conflict_output))
+                checkpoint(report)
                 report("MWMANAGER-STAGE: 4 of 4 — Applying choices and rebuilding patches")
                 run_full_pass(f"Applying saved choices and rebuilding patches with --{mode}…")
             else:
@@ -2656,6 +2714,8 @@ class ManagerGUI(tk.Tk):
         return selection[0] if selection else None
 
     def _update_buttons(self):
+        if getattr(self, "_active_job", None):
+            return
         name = self.selected_name()
         if not name:
             self.up_btn.state(["disabled"])
@@ -2686,6 +2746,8 @@ class ManagerGUI(tk.Tk):
         return Path(name).suffix.casefold() == Path(other).suffix.casefold()
 
     def _click_active_checkbox(self, event):
+        if getattr(self, "_active_job", None):
+            return "break"
         if self.tree.identify("region", event.x, event.y) != "cell":
             return
         if self.tree.identify_column(event.x) != "#1":
@@ -2711,6 +2773,8 @@ class ManagerGUI(tk.Tk):
         return "break"
 
     def move_selected(self, step):
+        if getattr(self, "_active_job", None):
+            return
         name = self.selected_name()
         if not name or not self._can_move(name, step):
             return
@@ -2918,7 +2982,13 @@ class ManagerGUI(tk.Tk):
             messagebox.showerror("Could not open sort rules", str(exc), parent=self)
 
     def open_major_masters(self):
+        existing = getattr(self, "_major_master_dialog", None)
+        if existing is not None and existing.winfo_exists():
+            existing.deiconify()
+            existing.lift()
+            return
         dialog = tk.Toplevel(self)
+        self._major_master_dialog = dialog
         dialog.title("Major Masters")
         dialog.transient(self)
         center_window(dialog, self, 780, 680)
@@ -2956,25 +3026,32 @@ class ManagerGUI(tk.Tk):
         tree.tag_configure("required", foreground=COLORS["red"])
 
         def refresh_masters():
+            if not dialog.winfo_exists():
+                return
             from major_master_deploy import staged_masters
             staged_map = staged_masters(APP_DIR / "staging" / "major_masters", masters)
             tree.delete(*tree.get_children())
+            required_names = self._required_major_master_names()
+            unfinished = {name.casefold() for name in self._unfinished_master_stages(masters)}
             for i, name in enumerate(masters, 1):
                 exists = (data_dir / name).is_file()
                 key = name.casefold()
                 enabled = key in self.selected_major_masters
                 ready = key in staged_map and not exists
-                required = name.casefold() in self._required_major_master_names()
+                required = name.casefold() in required_names
                 if required and (exists or ready):
                     self.selected_major_masters.add(key)
                     if exists:
                         self.active_names.add(name.casefold())
                 check = "☑" if (exists or ready) and (enabled or required) else "☐"
                 state = "Installed" if exists else "Ready for install" if ready else "Not staged"
+                if ready and key in unfinished:
+                    state = "Needs processing"
                 tag = "required" if required else "installed" if exists else "ready" if ready else "absent"
                 tree.insert("", "end", iid=name, text=f"{i:02d}  {name}", values=(check, state), tags=(tag,))
             self.deploy_master_button.state(["!disabled"] if any(
                 name.casefold() in self.selected_major_masters and name.casefold() in staged_map
+                and name.casefold() not in unfinished
                 and not (data_dir / name).is_file() for name in masters) else ["disabled"])
             from major_master_deploy import tracked_deployment_masters
             tracked = tracked_deployment_masters(APP_DIR)
@@ -3067,6 +3144,8 @@ class ManagerGUI(tk.Tk):
                                    remove_package, package_removed)
 
         def click_master(event):
+            if getattr(self, "_active_job", None):
+                return "break"
             if tree.identify("region", event.x, event.y) != "cell" or tree.identify_column(event.x) != "#1":
                 return
             name = tree.identify_row(event.y)
@@ -3146,14 +3225,14 @@ class ManagerGUI(tk.Tk):
             tree.selection_set(name)
             tree.see(name)
 
-        def save_masters():
+        def save_masters(close=True):
             try:
                 raw = json.loads(MAJOR_MASTER_CONFIG.read_text(encoding="utf-8"))
                 config = {name: keywords.get(name, raw.get(name, [])) for name in masters}
                 MAJOR_MASTER_CONFIG.write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
             except (OSError, ValueError) as exc:
                 messagebox.showerror("Could not save master list", str(exc), parent=dialog)
-                return
+                return False
             self.major_masters = list(masters)
             self.gui_state["selected_major_masters"] = [n for n in masters
                                                         if n.casefold() in self.selected_major_masters]
@@ -3166,26 +3245,61 @@ class ManagerGUI(tk.Tk):
                                and name.casefold() in self.selected_major_masters]
             self.order = list(CORE) + installed_active + other
             self.save()
-            dialog.destroy()
+            if close and not getattr(self, "_initializing_manager", False):
+                dialog.destroy()
+            return True
+
+        def saved_action(action):
+            if save_masters(close=False):
+                action()
 
         tree.bind("<<TreeviewSelect>>", update_master_buttons)
         tree.bind("<Button-1>", click_master)
         up.configure(command=lambda: move_master(-1))
         down.configure(command=lambda: move_master(1))
         add_button.configure(command=add_master)
-        self.stage_master_button = ttk.Button(footer_top, text="Stage major masters…", command=self.stage_major_masters)
+        self.stage_master_button = ttk.Button(
+            footer_top, text="Reopen staged options…", command=lambda: saved_action(self.stage_major_masters))
         self.stage_master_button.pack(side="left")
         self.stage_more_master_button = ttk.Button(
-            footer_top, text="Find missing masters…", command=lambda: self.stage_major_masters(force_scan=True))
+            footer_top, text="Find / stage downloads…",
+            command=lambda: saved_action(lambda: self.stage_major_masters(force_scan=True)))
         self.stage_more_master_button.pack(side="left", padx=(6, 0))
-        self.deploy_master_button = ttk.Button(footer_top, text="Deploy Major Masters", command=self.deploy_major_masters)
+        self.deploy_master_button = ttk.Button(
+            footer_top, text="Deploy Major Masters", command=lambda: saved_action(self.deploy_major_masters))
         self.deploy_master_button.pack(side="left", padx=(6, 0))
         self.remove_master_button = ttk.Button(footer_bottom, text="Remove deployed masters", command=self.remove_deployed_major_masters)
         self.remove_master_button.pack(side="left", padx=(6, 0))
         self.unstage_master_button = ttk.Button(footer_bottom, text="Unstage selected", command=unstage_selected)
         self.unstage_master_button.pack(side="left", padx=(6, 0))
         ttk.Button(footer_bottom, text="Save master order", command=save_masters, width=22, style="MasterSave.TButton").pack(side="right")
-        ttk.Button(footer_bottom, text="Close", command=dialog.destroy, width=10).pack(side="right", padx=(0, 8))
+        def close_masters():
+            if getattr(self, "_active_job", None):
+                return
+            if getattr(self, "_initializing_manager", False):
+                self._initializing_manager = False
+                self._complete_init()
+                self.status.set("Setup complete. Optional major masters were skipped; add them later from Major masters.")
+                self._setup_flow_active = False
+            dialog.destroy()
+        ttk.Button(footer_bottom, text="Skip for now" if getattr(self, "_initializing_manager", False) else "Close",
+                   command=close_masters, width=14).pack(side="right", padx=(0, 8))
+        def pause_masters():
+            if getattr(self, "_active_job", None):
+                return
+            if getattr(self, "_initializing_manager", False):
+                self._initializing_manager = False
+                self.status.set("Setup paused at optional major masters. Use File > Resume setup to continue.")
+            dialog.destroy()
+        dialog.protocol("WM_DELETE_WINDOW", pause_masters)
+        def forget_dialog(event):
+            if event.widget == dialog and getattr(self, "_major_master_dialog", None) == dialog:
+                for name in ("stage_master_button", "stage_more_master_button", "deploy_master_button",
+                             "remove_master_button", "unstage_master_button", "_major_master_refresh",
+                             "_major_master_dialog"):
+                    if hasattr(self, name):
+                        delattr(self, name)
+        dialog.bind("<Destroy>", forget_dialog, add="+")
         self._major_master_refresh = refresh_masters
         refresh_masters()
 
@@ -3200,6 +3314,31 @@ class ManagerGUI(tk.Tk):
             dirs[:] = [name for name in dirs if name.casefold() not in {"off", "bugreports", "extras"}]
             found.update(filename.casefold() for filename in files if filename.casefold() in wanted)
         return found
+
+    def _master_stage_record(self):
+        return APP_DIR / "outputs" / "mwmanager_major_stage_state.json"
+
+    def _set_master_stage_ready(self, names, ready):
+        path = self._master_stage_record()
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(state, dict):
+                state = {}
+        except (OSError, ValueError):
+            state = {}
+        for name in names:
+            state[name.casefold()] = bool(ready)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        _atomic_write(path, (json.dumps(state, indent=2) + "\n").encode("utf-8"))
+
+    def _unfinished_master_stages(self, names):
+        try:
+            state = json.loads(self._master_stage_record().read_text(encoding="utf-8"))
+            if not isinstance(state, dict):
+                state = {}
+        except (OSError, ValueError):
+            state = {}
+        return [name for name in names if state.get(name.casefold()) is not True]
 
     @staticmethod
     def _esm_master_names(path):
@@ -3256,12 +3395,49 @@ class ManagerGUI(tk.Tk):
                         dependents.update(self._esm_master_names(Path(base) / filename) & configured)
         return dependents
 
-    def deploy_major_masters(self, *, _preflight_done=False):
+    def deploy_major_masters(self, *, _preflight_done=False, _accept_assets=None):
         """Confirm deployment policy, then hardlink staged major masters into Data Files."""
         import mwmanager_dialogs as messagebox
         from major_master_deploy import staged_masters
 
+        if getattr(self, "_active_job", None):
+            return
+        data_dir = Path(self.settings["game_dir"]) / "Data Files"
+        staging = APP_DIR / "staging" / "major_masters"
+        available = staged_masters(staging, self.major_masters)
+        ready = [name for name in self.major_masters
+                 if name.casefold() in available and not (data_dir / name).is_file()
+                 and name.casefold() in self.selected_major_masters]
+        if not ready:
+            messagebox.showinfo("No masters selected", "Select at least one processed, staged master in the On column.", parent=self)
+            return
+        unfinished = self._unfinished_master_stages(ready)
+        if unfinished:
+            messagebox.showwarning(
+                "Finish staging first", "These masters have not finished Tidy and option processing:\n\n" +
+                "\n".join(unfinished) + "\n\nChoose Reopen staged options to finish processing before deployment.",
+                parent=self)
+            return
+        # Ask before hashing or network work. Keep this policy local to this
+        # invocation so a cancelled preflight cannot leak it into a later click.
+        accept_assets = _accept_assets
+        if accept_assets is None:
+            accept_assets = messagebox.askyesnocancel(
+                "Deploy selected major masters?",
+                "Selected masters, in priority order:\n\n" + "\n".join(ready) +
+                "\n\nYes: deploy plugins, archives and loose assets.\n"
+                "No: deploy plugins and archives only.\nCancel: leave the game unchanged.\n\n"
+                "Replaced loose assets are preserved under the staged package's Off folder.",
+                parent=self)
+            if accept_assets is None:
+                return
+
         if not _preflight_done:
+            cached_preflight = getattr(self, "_preflight_signature", None)
+            if cached_preflight is not None and cached_preflight == preflight_signature(self.settings["game_dir"]):
+                self.status.set("Reusing this session's successful preflight; prerequisite files are unchanged.")
+                self.deploy_major_masters(_preflight_done=True, _accept_assets=accept_assets)
+                return
             if hasattr(self, "deploy_master_button"):
                 self.deploy_master_button.state(["disabled"])
 
@@ -3289,34 +3465,18 @@ class ManagerGUI(tk.Tk):
                                         "No files were deployed. Resolve any missing prerequisites or review the "
                                         "declined warnings, then retry deployment.", parent=self)
                     return
-                self.deploy_major_masters(_preflight_done=True)
+                self._preflight_signature = preflight_signature(self.settings["game_dir"])
+                self.deploy_major_masters(_preflight_done=True, _accept_assets=accept_assets)
 
             self._run_progress_job("Pre-deploy checks", "Checking game files and required utilities…",
                                    preflight_worker, preflight_completed)
             return
 
-        data_dir = Path(self.settings["game_dir"]) / "Data Files"
-        staging = APP_DIR / "staging" / "major_masters"
-        available = staged_masters(staging, self.major_masters)
-        ready = [name for name in self.major_masters
-                 if name.casefold() in available and not (data_dir / name).is_file()
-                 and name.casefold() in self.selected_major_masters]
-        if not ready:
-            messagebox.showinfo("No masters selected", "Select at least one staged, uninstalled master in the On column.", parent=self)
-            return
-        accept_assets = messagebox.askyesnocancel(
-            "Accept major-master assets?",
-            f"Deploy {len(ready)} staged master(s) in configured priority order?\n\n"
-            "Major-master assets take priority over existing assets at the same paths. "
-            "Existing files will be preserved under the staged master’s Off folder.\n\n"
-            "Yes: accept and deploy all assets.\nNo: deploy plugin and archive files only.\nCancel: do nothing.",
-            parent=self)
-        if accept_assets is None:
-            return
         if hasattr(self, "deploy_master_button"):
             self.deploy_master_button.state(["disabled"])
 
         def worker(progress):
+            checkpoint(progress)
             from plugin_install import check_deploy_path_lengths
             checked_packages = set()
             for plugin in ready:
@@ -3327,7 +3487,8 @@ class ManagerGUI(tk.Tk):
                     check_deploy_path_lengths(package, data_dir, plugin)
                     checked_packages.add(key)
             from major_master_deploy import deploy
-            return deploy(staging, data_dir, APP_DIR, self.major_masters,
+            # Keep catalog priorities, but deploy only the explicit selection.
+            return deploy(staging, data_dir, APP_DIR, self.major_masters, selected=ready,
                           include_assets=bool(accept_assets), progress=progress)
 
         def completed(result, error):
@@ -3353,6 +3514,7 @@ class ManagerGUI(tk.Tk):
                 self._major_master_refresh()
             self.refresh()
             self.status.set(f"Deployed {len(result['ready'])} major master(s); linked {len(result['linked']):,} files.")
+            self._setup_flow_active = False
             detail = [f"Masters: {', '.join(result['ready'])}",
                       f"Hardlinked files: {len(result['linked']):,}",
                       f"Existing files preserved under Off: {len(result['backed_up']):,}",
@@ -3571,14 +3733,18 @@ class ManagerGUI(tk.Tk):
                                 parent=self)
             return
         self._active_job = title
-        dialog = tk.Toplevel(self)
-        dialog.title(title)
-        dialog.transient(self)
-        dialog.resizable(False, False)
-        dialog.protocol("WM_DELETE_WINDOW", lambda: None)
-        frame = ttk.Frame(dialog, padding=(SPACE["xl"], SPACE["lg"]))
-        frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text=title, style="H2.TLabel").pack(anchor="w")
+        in_setup = (self.settings.get("first_run", 0) == 1 or
+                    self.settings.get("init_complete", 0) != 1 or
+                    bool(getattr(self, "_setup_flow_active", False)))
+        if in_setup:
+            self._setup_flow_active = True
+        view = getattr(self, "_setup_view", None) if in_setup else None
+        if view is None or not view.window.winfo_exists():
+            view = JobView(self, setup=in_setup)
+            if in_setup:
+                self._setup_view = view
+        self._job_view = view
+        dialog = view.window
         if title == "Deploy Major Masters":
             description = ("MWManager will hardlink the selected staged files into Data Files, register any BSA archives, "
                            "and update its plugin database. Existing conflicting files are preserved in the staged Off folder.")
@@ -3598,71 +3764,21 @@ class ManagerGUI(tk.Tk):
         elif title == "Scan plugin archives":
             description = "MWManager is inspecting archive contents to identify plugins, MWSE files, installers, asset counts, and download dates."
         else:
-            description = ("Large archives can take several minutes. MWManager will tidy each staged master, open its option "
-                           "installer when choices are available, then offer BSA packing for qualifying assets before deployment.")
-        ttk.Label(frame, text=description, style="Muted.TLabel", wraplength=780,
-                  justify="left").pack(anchor="w", pady=(4, SPACE["lg"]))
-        status_frame = ttk.Frame(frame)
-        status_frame.pack(fill="both", expand=True)
-        stage_text = tk.StringVar(value="Starting…")
-        stage_row = ttk.Frame(status_frame)
-        stage_row.pack(fill="x", pady=(0, SPACE["sm"]))
-        ttk.Label(stage_row, text="STAGE", style="Chip.Gold.TLabel").pack(side="left")
-        ttk.Label(stage_row, textvariable=stage_text, wraplength=700,
-                  style="H3.TLabel").pack(side="left", padx=(SPACE["sm"], 0))
-        log_frame = ttk.Frame(status_frame)
-        log_frame.pack(fill="both", expand=True)
-        # Monospace and wide enough for the tools' 115-column wrapped output and its indents.
-        status = tk.Text(log_frame, height=14, width=118, wrap="word", state="disabled",
-                         background=COLORS["field"], foreground=COLORS["text"], font=FONTS["mono"],
-                         insertbackground=COLORS["gold"], relief="flat", padx=10, pady=8, spacing1=1,
-                         highlightthickness=1, highlightbackground=COLORS["border_soft"])
-        status_scroll = ttk.Scrollbar(log_frame, orient="vertical", command=status.yview)
-        status.configure(yscrollcommand=status_scroll.set)
-        status.pack(side="left", fill="both", expand=True)
-        status_scroll.pack(side="right", fill="y")
-        status.tag_configure("progress", foreground=COLORS["text"], lmargin2=16)
-        status.tag_configure("complete", foreground=COLORS["green"], lmargin2=16)
-        status.tag_configure("attention", foreground=COLORS["gold"], lmargin2=16)
-        status.tag_configure("error", foreground=COLORS["red"], lmargin2=16)
-
-        def append_status(message):
-            text = str(message)
-            if text.startswith("MWMANAGER-STAGE:"):
-                stage_text.set(text.split(":", 1)[1].strip())
-                return
-            lowered = _ZERO_COUNT.sub("", text.casefold())
-            tag = ("error" if any(word in lowered for word in ("error", "failed", "crash"))
-                   else "complete" if any(word in lowered for word in ("complete", "finished", "ready"))
-                   else "attention" if any(word in lowered for word in ("warning", "waiting", "opening"))
-                   else "progress")
-            status.configure(state="normal")
-            status.insert("end", text.rstrip() + "\n", tag)
-            # Keep long runs responsive: the pane holds the most recent lines only.
-            excess = int(status.index("end-1c").split(".")[0]) - PROGRESS_LOG_LINES
-            if excess > 0:
-                status.delete("1.0", f"{excess + 1}.0")
-            status.see("end")
-            status.configure(state="disabled")
-
+            description = {
+                "First-run preflight": "Check the game and prerequisites. Only installation and configuration choices need your input.",
+                "Initial setup": "Sort and tidy the shipped files. Safe fixes apply automatically; output is shown below.",
+                "Catalog": "Build the plugin and archive catalog. Completed setup checkpoints will be kept.",
+                "Pre-deploy checks": "Recheck prerequisites before changing the live game.",
+                "Scanning major-master downloads": "Inspect downloaded archives and check versions before choosing what to stage.",
+            }.get(title, "Process the staged files. Tidy applies automatically; installer choices remain interactive.")
+        control = JobControl()
+        self._job_control = control
+        view.begin(title, description, control)
+        view.refresh_phases()
+        append_status = view.append
+        progress = view.progress
         append_status(initial_text)
-        progress = ttk.Progressbar(frame, mode="indeterminate", length=500)
-        progress.pack(fill="x", pady=(SPACE["md"], 0))
-        progress.start(12)
-        dialog.update_idletasks()
-        width, height = max(640, dialog.winfo_reqwidth()), dialog.winfo_reqheight()
-        x = self.winfo_rootx() + max(0, (self.winfo_width() - width) // 2)
-        y = self.winfo_rooty() + max(0, (self.winfo_height() - height) // 2)
-        dialog.geometry(f"{width}x{height}+{x}+{y}")
-        dialog.lift()
-        dialog.focus_force()
-        dialog.update_idletasks()
-        if hasattr(self, "stage_master_button"):
-            self.stage_master_button.state(["disabled"])
-        if hasattr(self, "install_plugins_button"):
-            self.install_plugins_button.state(["disabled"])
-        if hasattr(self, "remove_plugins_button"):
-            self.remove_plugins_button.state(["disabled"])
+        self._set_job_controls(True)
 
         events = queue.Queue()
 
@@ -3670,6 +3786,7 @@ class ManagerGUI(tk.Tk):
             events.put(("progress", message))
 
         def ask_yes_no(question_title, question_text):
+            control.check()
             response = {}
             answered = threading.Event()
             events.put(("question", question_title, question_text, response, answered))
@@ -3677,6 +3794,7 @@ class ManagerGUI(tk.Tk):
             return bool(response.get("answer"))
 
         def ask_choice(question_title, question_text, choices, cancel_value=None):
+            control.check()
             response = {"choice": cancel_value}
             answered = threading.Event()
             events.put(("choice", question_title, question_text, choices, response, answered))
@@ -3709,9 +3827,11 @@ class ManagerGUI(tk.Tk):
         report.launch_vortex = launch_vortex
         report.wait_for_vortex_purge = wait_for_vortex_purge
         report.run_program_with_reference = run_program_with_reference
+        report.check_cancelled = control.check
 
         def run():
             try:
+                control.check()
                 events.put(("done", worker(report), None))
             except Exception as exc:
                 events.put(("done", None, exc))
@@ -3720,7 +3840,8 @@ class ManagerGUI(tk.Tk):
 
         def poll():
             finished = None
-            while True:
+            # Yield to Tk even when a subprocess emits thousands of lines.
+            for _ in range(150):
                 try:
                     event = events.get_nowait()
                 except queue.Empty:
@@ -3754,14 +3875,20 @@ class ManagerGUI(tk.Tk):
                     row.pack(fill="x")
                     cancel_choice = response.get("choice")      # ask_choice pre-fills its cancel value
 
-                    def choose(value):
+                    def choose(value, response=response, choice_dialog=choice_dialog):
                         response["choice"] = value
                         choice_dialog.destroy()
-                    for label, value in choices:
-                        ttk.Button(row, text=label, command=lambda value=value: choose(value)).pack(
-                            side="right", padx=(6, 0))
-                    choice_dialog.protocol("WM_DELETE_WINDOW", lambda: choose(cancel_choice))
-                    center_window(choice_dialog, dialog, 860, 520)
+                    stacked = len(choices) > 3 or any(len(label) > 32 for label, _value in choices)
+                    for index, (label, value) in enumerate(choices):
+                        button = ttk.Button(row, text=label, command=lambda value=value, choose=choose: choose(value))
+                        if stacked:
+                            button.grid(row=index, column=0, sticky="ew", pady=3)
+                            row.columnconfigure(0, weight=1)
+                        else:
+                            button.pack(side="left", padx=(0, 6))
+                    choice_dialog.protocol("WM_DELETE_WINDOW", lambda choose=choose, cancel=cancel_choice: choose(cancel))
+                    center_window(choice_dialog, dialog, min(860, dialog.winfo_screenwidth() - 48),
+                                  min(620 if stacked else 520, dialog.winfo_screenheight() - 80))
                     choice_dialog.grab_set()
                     dialog.wait_window(choice_dialog)
                     answered.set()
@@ -3785,16 +3912,16 @@ class ManagerGUI(tk.Tk):
                     actions = ttk.Frame(purge_dialog, padding=(10, 0, 10, 10))
                     actions.pack(fill="x")
 
-                    def finish_purge(choice):
+                    def finish_purge(choice, response=response, purge_dialog=purge_dialog, answered=answered):
                         response["choice"] = choice
                         purge_dialog.destroy()
                         answered.set()
 
                     ttk.Button(actions, text="Purge complete — restart MWManager",
-                               command=lambda: finish_purge("restart")).pack(side="right")
-                    ttk.Button(actions, text="Cancel", command=lambda: finish_purge("cancel")).pack(
+                               command=lambda finish=finish_purge: finish("restart")).pack(side="right")
+                    ttk.Button(actions, text="Cancel", command=lambda finish=finish_purge: finish("cancel")).pack(
                         side="right", padx=(0, 8))
-                    purge_dialog.protocol("WM_DELETE_WINDOW", lambda: finish_purge("cancel"))
+                    purge_dialog.protocol("WM_DELETE_WINDOW", lambda finish=finish_purge: finish("cancel"))
                     center_window(purge_dialog, self, max(460, purge_dialog.winfo_reqwidth()),
                                   purge_dialog.winfo_reqheight())
                 elif event[0] == "run_program":
@@ -3808,15 +3935,21 @@ class ManagerGUI(tk.Tk):
                     body.pack(fill="both", expand=True)
                     ttk.Label(body, text="Keep this reference open while configuring the program.",
                               style="H3.TLabel", wraplength=560).pack(fill="x", pady=(0, 8))
-                    details = tk.Text(body, wrap="word", width=76, height=28, font=FONTS["mono"],
+                    reference_body = ttk.Frame(body)
+                    reference_body.pack(fill="both", expand=True)
+                    details = tk.Text(reference_body, wrap="word", width=76, height=24, font=FONTS["mono"],
                                       relief="flat", borderwidth=0, padx=10, pady=8)
                     details.insert("1.0", reference_text)
                     details.configure(state="disabled")
-                    details.pack(fill="both", expand=True)
+                    reference_scroll = ttk.Scrollbar(reference_body, command=details.yview)
+                    details.configure(yscrollcommand=reference_scroll.set)
+                    details.pack(side="left", fill="both", expand=True)
+                    reference_scroll.pack(side="right", fill="y")
                     instruction = "MWManager continues automatically when the program closes."
                     ttk.Label(body, text=instruction, wraplength=560).pack(fill="x", pady=(8, 0))
                     reference.protocol("WM_DELETE_WINDOW", reference.iconify)
-                    reference.geometry(f"620x700+{max(0, reference.winfo_screenwidth() - 660)}+40")
+                    center(reference, self, min(680, reference.winfo_screenwidth() - 48),
+                           min(720, reference.winfo_screenheight() - 80))
                     reference.lift()
                     try:
                         if os.name == "nt":
@@ -3873,25 +4006,80 @@ class ManagerGUI(tk.Tk):
                 dialog.grab_release()
             except tk.TclError:
                 pass
-            dialog.destroy()
+            view.finish(finished[1])
+            if not in_setup:
+                dialog.destroy()
             self._active_job = None
+            self._job_control = None
             self._enable_job_buttons()
+            if isinstance(finished[1], JobCancelled):
+                self._pause_setup(finished[1])
+                if in_setup:
+                    view.stage.set(str(finished[1]))
+                return
             try:
                 on_complete(*finished)
             except Exception as exc:
                 self.status.set(f"{title} stopped with an error.")
                 messagebox.showerror(f"{title} failed", str(exc), parent=self)
+            if in_setup:
+                view.refresh_phases()
+                self.after(350, lambda: self._settle_setup_view(view))
 
         dialog.after(100, poll)
 
+    def _settle_setup_view(self, view):
+        if self._active_job or not view.window.winfo_exists():
+            return
+        view.refresh_phases()
+        view.stage.set(self.status.get())
+        if self.settings.get("init_complete", 0) != 1:
+            view.resume.pack(side="right", padx=6)
+        else:
+            view.resume.pack_forget()
+
     def _enable_job_buttons(self):
-        for name in ("stage_master_button", "install_plugins_button", "remove_plugins_button"):
-            button = getattr(self, name, None)
-            if button is not None:
+        self._set_job_controls(False)
+        self._update_action_buttons()
+
+    def _set_job_controls(self, busy):
+        """Restore actual previous states, not an unconditional enable-all."""
+        if busy:
+            saved = []
+            view = getattr(self, "_job_view", None)
+
+            def walk(parent):
+                for child in parent.winfo_children():
+                    if view is not None and child == view.window:
+                        continue
+                    if isinstance(child, (ttk.Button, ttk.Treeview, ttk.Entry, ttk.Combobox)):
+                        saved.append((child, child.state()))
+                        child.state(["disabled"])
+                    walk(child)
+            walk(self)
+            self._busy_widget_states = saved
+            self._busy_menu_states = []
+            for index in range((self.file_menu.index("end") or 0) + 1):
+                if self.file_menu.type(index) == "command":
+                    self._busy_menu_states.append((index, self.file_menu.entrycget(index, "state")))
+                    self.file_menu.entryconfigure(index, state="disabled")
+        else:
+            for widget, previous in getattr(self, "_busy_widget_states", []):
                 try:
-                    button.state(["!disabled"])
+                    widget.state(["!disabled"])
+                    widget.state(previous)
                 except tk.TclError:
                     pass
+            for index, state in getattr(self, "_busy_menu_states", []):
+                self.file_menu.entryconfigure(index, state=state)
+            self._busy_widget_states = []
+
+    def _pause_setup(self, reason):
+        step, _entry = setup_state.interrupted(self._setup_path(), self.settings["game_dir"])
+        if step:
+            self._setup_fail(step, reason)
+        self._initializing_manager = False
+        self.status.set(str(reason))
 
     def _on_close(self):
         running = getattr(self, "_active_job", None)
@@ -3920,6 +4108,9 @@ class ManagerGUI(tk.Tk):
                 return
 
             def reopen_options(progress):
+                checkpoint(progress)
+                names = self._staged_major_master_names()
+                self._set_master_stage_ready(names, False)
                 quiet = {}
                 if os.name == "nt":
                     startup = subprocess.STARTUPINFO()
@@ -3928,6 +4119,7 @@ class ManagerGUI(tk.Tk):
                     quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
                 run_tidy_steps(py, staging, game_data_files, progress, "Saved mock FOMOD choices",
                                reopen=True, quiet=quiet)
+                self._set_master_stage_ready(names, True)
                 return True
 
             def options_reopened(_result, error):
@@ -3947,15 +4139,14 @@ class ManagerGUI(tk.Tk):
                 if initializing:
                     self._initializing_manager = False
                     self._complete_init()
-                messagebox.showinfo("Staged options updated",
-                                    "The mock FOMOD ran against the existing major-master stage. "
-                                    "No archives were extracted and the staging folder was preserved.", parent=self)
                 if staged and messagebox.askyesno(
-                        "Deploy staged major masters?",
-                        "The existing major-master stage is processed and ready. Deploy it to the game now?",
+                        "Staged options updated",
+                        "The existing stage is processed and ready. No archives were extracted.\n\n"
+                        "Deploy the selected staged masters now? Choose No to keep them staged for later.",
                         parent=self):
                     self.after(100, self.deploy_major_masters)
                 elif initializing:
+                    self._setup_flow_active = False
                     self.after(100, self.open_major_masters)
 
             self.status.set("Reopening mock FOMOD for the existing major-master stage…")
@@ -3965,15 +4156,16 @@ class ManagerGUI(tk.Tk):
                 "The archive extraction step will be skipped.",
                 reopen_options, options_reopened)
             return
-        downloads = Path(self.settings.get("archive_downloads_dir") or "")
+        downloads_setting = str(self.settings.get("archive_downloads_dir") or "").strip()
+        downloads = Path(downloads_setting).expanduser()
         game_dir = Path(self.settings["game_dir"])
-        if not downloads.is_dir():
+        if not downloads_setting or not downloads.is_dir():
             messagebox.showwarning("Archive Downloads not set",
                                    "Choose the Archive Downloads folder in Options first.", parent=self)
             self.open_options()
             return
         try:
-            from core_addons import (review_core_master_install, scan_downloads,
+            from core_addons import (prepare_core_master_review, review_core_master_install, scan_downloads,
                                      stage_core_master_archives, verify_nexus_versions)
 
             def scanned(plan, error):
@@ -3987,7 +4179,8 @@ class ManagerGUI(tk.Tk):
                     messagebox.showerror("Could not scan downloads",
                                          plan.get("error") or "The downloads folder could not be scanned.", parent=self)
                     return
-                selected = review_core_master_install(APP_DIR, game_dir, plan, parent=self)
+                selected = review_core_master_install(APP_DIR, game_dir, plan, parent=self,
+                                                       prepared=plan.pop("_prepared_review", None))
                 if selected == "rescan":
                     self.status.set("Rescanning major-master downloads after the Nexus download…")
                     self.after(100, lambda: self.stage_major_masters(force_scan=True))
@@ -4031,17 +4224,14 @@ class ManagerGUI(tk.Tk):
                     if initializing:
                         self._initializing_manager = False
                         self._complete_init()
-                    messagebox.showinfo(
-                        "Major masters staged and processed",
-                        "Selected archives were unpacked, tidied, and passed through the option installer:\n\n"
-                        + "\n".join(str(path) for path in destinations)
-                        + "\n\nNothing was deployed to the live Data Files folder.", parent=self)
                     if messagebox.askyesno(
-                            "Deploy staged major masters?",
-                            "All selected major masters are staged and processed. Deploy them to the game now?",
+                            "Major masters ready",
+                            f"Processed {len(destinations)} archive(s). Live game files have not changed.\n\n"
+                            "Deploy the selected masters now? Choose No to keep them staged for later.",
                             parent=self):
                         self.after(100, self.deploy_major_masters)
                     elif initializing:
+                        self._setup_flow_active = False
                         self.open_major_masters()
 
                 def stage_and_process(progress):
@@ -4082,7 +4272,8 @@ class ManagerGUI(tk.Tk):
                         quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
 
                     for index, (item, group_masters) in enumerate(groups, 1):
-                        archive_label = Path(item["archive"]).name
+                        checkpoint(progress)
+                        self._set_master_stage_ready(group_masters, False)
                         # Every Stage action extracts fresh archives and reruns the full pipeline.
                         progress(f"Staging master {index} of {len(groups)}: {', '.join(group_masters)}")
                         paths = stage_core_master_archives(plan, group_masters, APP_DIR, game_dir,
@@ -4112,6 +4303,8 @@ class ManagerGUI(tk.Tk):
                                     packed = pack_package_assets(mod_dir, plugin_label, APP_DIR)
                                     progress(f"Built {len(packed)} BSA archive(s) for {plugin_label}.")
                             progress(f"Finished tidy and installer for {', '.join(group_masters)}.")
+                        self._set_master_stage_ready(group_masters, True)
+                        checkpoint(progress)
                     return staged_paths
 
                 self.status.set("Unpacking major masters into staging…")
@@ -4122,12 +4315,21 @@ class ManagerGUI(tk.Tk):
                     stage_and_process, staged)
 
             self.status.set("Scanning Archive Downloads for major masters…")
+            def scan_worker(progress):
+                def checked(message):
+                    checkpoint(progress)
+                    progress(message)
+                plan = verify_nexus_versions(
+                    scan_downloads(downloads, APP_DIR, APP_DIR / "outputs", progress_callback=checked),
+                    progress_callback=checked)
+                checkpoint(progress)
+                if not plan.get("error") and not plan.get("missing_directory"):
+                    plan["_prepared_review"] = prepare_core_master_review(APP_DIR, game_dir, plan, progress=checked)
+                return plan
             self._run_progress_job(
                 "Scanning major-master downloads",
                 "Checking archive contents and hashes. Large archives can take a while…",
-                lambda progress: verify_nexus_versions(
-                    scan_downloads(downloads, APP_DIR, APP_DIR / "outputs", progress_callback=progress),
-                    progress_callback=progress), scanned)
+                scan_worker, scanned)
         except Exception as exc:
             self._initializing_manager = False
             self.status.set("Major-master staging stopped with an error.")
