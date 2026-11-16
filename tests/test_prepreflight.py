@@ -105,7 +105,7 @@ class Progress:
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         patcher = mock.patch.object(mp, "CORE_FILE_HASHES", KNOWN)
         patcher.start()

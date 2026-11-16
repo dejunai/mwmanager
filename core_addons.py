@@ -610,6 +610,8 @@ def _member_preflight(names: list[str]) -> tuple[list[str], list[str]]:
             reason = "absolute or drive-qualified path"
         elif any(part in (".", "..") for part in components):
             reason = "relative traversal component"
+        elif any(part.casefold().startswith((".mwmanager", ".extract-", ".replaced-")) for part in components):
+            reason = "reserved MWManager workflow metadata"
         elif any(not part or any(ord(c) < 32 or c in '<>:"|?*' for c in part)
                  or part.endswith((" ", ".")) for part in components):
             reason = "invalid Windows filename component"

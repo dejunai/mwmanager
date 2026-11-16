@@ -23,7 +23,7 @@ class SafetyTests(unittest.TestCase):
     def setUp(self):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
-        self.root = Path(temp.name)
+        self.root = Path(temp.name).resolve()
 
     def put(self, relative, data=b"original"):
         path = self.root / relative
@@ -149,6 +149,51 @@ class SafetyTests(unittest.TestCase):
         ledger.write_bytes(b"old ledger\npartial new entry\n")
         tx.rollback()
         self.assertEqual(ledger.read_bytes(), b"old ledger\n")
+
+    @unittest.skipIf(os.name == "nt", "fcntl validates Windows-compatible descriptor access on POSIX")
+    def test_snapshots_flush_write_capable_descriptors(self):
+        import fcntl
+        import stat
+        real_fsync = os.fsync
+
+        def windows_compatible_fsync(fd):
+            if (stat.S_ISREG(os.fstat(fd).st_mode)
+                    and fcntl.fcntl(fd, fcntl.F_GETFL) & os.O_ACCMODE == os.O_RDONLY):
+                raise OSError(9, "Windows cannot commit a read-only descriptor")
+            return real_fsync(fd)
+
+        tx = DurableTransaction(self.root / "tx", [self.root]).begin()
+        with mock.patch("workflow_safety.os.fsync", side_effect=windows_compatible_fsync):
+            tx.snapshot(self.put("metadata.json"))
+        tx.rollback()
+
+    def test_archives_cannot_import_manager_recovery_records(self):
+        from core_addons import _member_preflight
+        unsafe, collisions = _member_preflight(
+            [".mwmanager-stage.json", ".mwmanager-pack/state.json", "Data Files/A.esm"])
+        self.assertEqual(len(unsafe), 2)
+        self.assertFalse(collisions)
+
+    @unittest.skipUnless(os.name == "nt", "Windows Job Object lifetime")
+    def test_windows_parent_death_ends_owned_tools(self):
+        parent = (
+            "import os,sys,subprocess; from pathlib import Path; import managed_processes; "
+            "p=managed_processes.popen([sys.executable,'-c','import time; time.sleep(60)'],"
+            "stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL); "
+            "(Path(sys.argv[1])/'owned.pid').write_text(str(p.pid)); os._exit(86)"
+        )
+        result = subprocess.run([sys.executable, "-c", parent, str(self.root)], capture_output=True)
+        self.assertEqual(result.returncode, 86, result.stderr)
+        from mwnexus_browser import _pid_running, _terminate_pid
+        pid = int((self.root / "owned.pid").read_text())
+        try:
+            deadline = time.monotonic() + 5
+            while _pid_running(pid) and time.monotonic() < deadline:
+                time.sleep(0.02)
+            self.assertFalse(_pid_running(pid), "Owned tool survived its Windows parent's death")
+        finally:
+            if _pid_running(pid):
+                _terminate_pid(pid)
 
     def test_disk_full_is_reported_before_mutation(self):
         with mock.patch("workflow_safety.shutil.disk_usage", return_value=mock.Mock(free=0)):

@@ -226,6 +226,7 @@ def fomod_declared_paths(mod_dir):
 
 def plan_mod(mod_dir):
     """[(source, destination, reason)] for one mod, or a str saying why it's left alone."""
+    mod_dir = os.path.realpath(mod_dir)  # Resolve Windows 8.3 aliases before deriving FOMOD-relative paths.
     entries = os.listdir(mod_dir)
     if any(os.path.splitext(e)[1].lower() in GAME_ROOT_EXT for e in entries
            if os.path.isfile(os.path.join(mod_dir, e))):
@@ -1232,6 +1233,7 @@ def run_pre_option_tidy(args):
     """Tidy BAIN packages before their options are offered: 00 Core unpacks into the root, the numbered optional
     folders move to Extras/<plugin> and the documentation to Docs/<plugin>, which is where the option window
     looks for the choices and their descriptions."""
+    args.staging = os.path.realpath(args.staging)
     raw = unprocessed_bain_packages(args.staging, args.only)
     if raw:
         print("MWMANAGER-PROGRESS: Unpacking BAIN packages before their options", flush=True)
@@ -1559,7 +1561,7 @@ def _write_packing_reports(staging, packing):
 def _path_plugin(path, staging):
     """The top-level staging package containing path, or None for records outside staging."""
     try:
-        rel = os.path.relpath(os.path.abspath(path), os.path.abspath(staging))
+        rel = os.path.relpath(os.path.realpath(path), os.path.realpath(staging))
     except (OSError, TypeError, ValueError):
         return None
     if rel == os.pardir or rel.startswith(os.pardir + os.sep) or os.path.isabs(rel):

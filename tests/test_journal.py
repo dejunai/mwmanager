@@ -48,7 +48,7 @@ SHIPPED = {
 
 class Fixture(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp())
+        self.tmp = Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
         self.game = self.tmp / "Morrowind"
         self.manager = self.tmp / "MWManager"

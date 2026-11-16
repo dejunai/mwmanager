@@ -123,18 +123,18 @@ def mutation_lock(manager_dir, game_dir=None):
                         fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 except OSError as exc:
                     try:
-                        stream.seek(0)
-                        lock_owner = json.loads(stream.read().lstrip(b"\0"))
+                        stream.seek(1)  # Windows denies reads of the locked byte itself.
+                        lock_owner = json.loads(stream.read())
                         inherited = json.loads(os.environ.get("MWMANAGER_DELEGATED_LOCKS", "{}"))
                         delegated = bool(inherited.get(key) and inherited[key] == lock_owner["token"])
-                    except (ValueError, KeyError, TypeError):
+                    except (OSError, ValueError, KeyError, TypeError):
                         pass
                     if not delegated:
                         stream.close()
                         raise RuntimeError("Another MWManager instance is modifying this game or staging tree.") from exc
                 if not delegated:
                     token = uuid.uuid4().hex
-                    stream.seek(0)
+                    stream.seek(1)  # Byte zero is reserved for the OS lock.
                     stream.truncate()
                     stream.write(json.dumps({"pid": os.getpid(), "token": token}).encode())
                     stream.flush()
@@ -204,10 +204,14 @@ class DurableTransaction:
             if database:
                 with closing(sqlite3.connect(path)) as source, closing(sqlite3.connect(saved)) as target:
                     source.backup(target)
+                with saved.open("r+b") as stream:
+                    os.fsync(stream.fileno())
             else:
-                shutil.copy2(path, saved)
-            with saved.open("rb") as stream:
-                os.fsync(stream.fileno())
+                with path.open("rb") as source, saved.open("wb") as target:
+                    shutil.copyfileobj(source, target, length=1024 * 1024)
+                    target.flush()
+                    os.fsync(target.fileno())
+                shutil.copystat(path, saved)
             entry.update(saved=str(saved), sha256=digest(saved))
         self.state["snapshots"].append(entry)
         self.save()
