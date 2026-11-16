@@ -43,7 +43,7 @@ class PreOptionTidyTests(unittest.TestCase):
         for path in (file, folder):
             os.chmod(path, stat.S_IREAD)
         self.assertEqual(ext.clear_readonly_flags(str(self.staging), ["Flat"]), 0)     # other packages untouched
-        self.assertEqual(ext.clear_readonly_flags(str(self.staging), [self.mod.name]), 2 if os.name == "nt" else 1)
+        self.assertEqual(ext.clear_readonly_flags(str(self.staging), [self.mod.name]), 2)
         self.assertTrue(all(os.stat(path).st_mode & stat.S_IWRITE for path in (file, folder)))
         shutil.rmtree(self.mod)
 

@@ -43,6 +43,10 @@ _NEXUS_TEXT_CACHE: dict[str, str] = {}
 _NEXUS_FETCH_ERRORS: dict[str, str] = {}
 _FOMOD_IMAGE_INDEX: dict[str, dict[str, list[Path]]] = {}
 
+
+class OptionsCancelled(RuntimeError):
+    """The user closed an unanswered selector; never mark this as accepted."""
+
 # Precompiled helper patterns for fast option evaluation
 EXCLUSIVE_DOC_RE = re.compile(
     r"\b(?:mutually exclusive|choose (?:only )?one|select (?:only )?one|"
@@ -2276,6 +2280,8 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             installed.update(_available_staged_plugins(Path(entry["mod_dir"])))
     eligible = []
     for p in sorted(staging.iterdir(), key=lambda x: x.name.casefold()):
+        if p.name.startswith("."):
+            continue
         if not p.is_dir() or p.name.casefold() in STAGING_RESERVED:
             continue
         if only and not any(p.name.casefold() == pat.casefold()
@@ -2382,7 +2388,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             answered_groups = _legacy_answer_groups(records)
         chosen = _show_selector(mod_dir.name, records, previous, installed, answered_groups)
         if chosen is None:
-            continue
+            raise OptionsCancelled(f"Option selection cancelled for {mod_dir.name}; this package is not ready.")
         prior_activation = (entry.get("activation", {}) if reopen_existing
                             and entry.get("selection_identity") == selection_identity else {})
         backup_root = _option_backup_root(output_dir, selection_identity)

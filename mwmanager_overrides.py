@@ -1167,7 +1167,8 @@ def run_cell_conflicts(args, plugins, collect=False):
             print(f"  (could not write {COLLIDE_DATA}: {e})", file=sys.stderr)
         try:                                       # MGE XE never sees those hides: keep them out of distant land
             import mge_ghosts
-            mge_ghosts.write(os.path.dirname(os.path.abspath(args.data_dir)), args.data_dir, plugins)
+            mge_ghosts.write(os.path.dirname(os.path.abspath(args.data_dir)), args.data_dir, plugins,
+                             manager_dir=MANAGER_DIR)
         except (OSError, ValueError, FormatError) as e:
             print(f"  (could not write the distant land overrides: {e})", file=sys.stderr)
     doors_at, arrivals = defaultdict(list), defaultdict(list)

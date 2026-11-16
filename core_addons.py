@@ -1177,6 +1177,14 @@ def scan_downloads(downloads_dir: str | os.PathLike, manager_dir: str | os.PathL
 def stage_core_master_archives(plan: dict, selected_masters: list[str], manager_dir: str | Path,
                                game_dir: str | Path, *, progress_callback=None,
                                clear_staging: bool = True) -> list[Path]:
+    from workflow_safety import mutation_lock
+    with mutation_lock(manager_dir, game_dir):
+        return _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir,
+                                           progress_callback=progress_callback, clear_staging=clear_staging)
+
+
+def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *,
+                                progress_callback=None, clear_staging=True):
     """Extract the selected masters' latest archives into MWManager staging only.
 
     Nothing is copied or linked into the live game's Data Files directory here.
@@ -1192,6 +1200,11 @@ def stage_core_master_archives(plan: dict, selected_masters: list[str], manager_
     if staging.is_symlink() or resolved_staging.parent != expected_parent:
         raise ValueError(f"Refusing to clear an unexpected major-master staging path: {resolved_staging}")
     if clear_staging:
+        from major_master_deploy import assert_package_disposable
+        configured = [p.name for p in staging.rglob("*") if p.suffix.casefold() == ".esm"]
+        for previous in staging.iterdir():
+            if previous.is_dir() and not previous.name.startswith("."):
+                assert_package_disposable(previous, staging, game / "Data Files", manager, configured)
         _preserve_only_major_master_fomod_selections(manager, staging)
     seven_zip = _seven_zip(manager)
     by_master = {name.casefold(): item for item in plan.get("archives", [])
@@ -1239,25 +1252,42 @@ def stage_core_master_archives(plan: dict, selected_masters: list[str], manager_
 
         safe_stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .") or "major-master"
         destination = staging / safe_stem
+        old_marker = _read_staged_archive_marker(destination)
+        if old_marker and (old_marker.get("archive", "").casefold() != archive.name.casefold() or
+                           (old_marker.get("archive_path") and
+                            os.path.normcase(old_marker["archive_path"]) != os.path.normcase(str(archive)))):
+            destination = staging / (safe_stem + "-" + hashlib.sha256(str(archive).encode()).hexdigest()[:12])
+            old_marker = _read_staged_archive_marker(destination)
+        package_masters = [name for name in selected_masters
+                           if name.casefold() in {m.casefold() for m in item.get("core_masters", [])}]
+        archive_hash = item.get("sha256") or _sha256(archive)
         prior = package_steps(destination) if destination.exists() else None
-        if prior and prior["extracted"]["completed_at"]:
+        same_identity = (old_marker.get("sha256") == archive_hash
+                         and old_marker.get("processing_version") == PACKAGE_PROCESSING_VERSION
+                         and {n.casefold() for n in old_marker.get("selected_masters", [])}
+                         == {n.casefold() for n in package_masters})
+        if prior and prior["extracted"]["completed_at"] and same_identity:
             # extracted by an earlier, interrupted run: the caller finishes its remaining steps
             staged.append(destination)
             if progress_callback:
                 progress_callback(f"Archive {index} of {len(ordered_archives)} is already extracted: {archive.name}")
             continue
-        if destination.exists():                      # an extraction that was cut off part-way starts over
-            shutil.rmtree(destination, onerror=_rmtree_clear_readonly)
+        published = destination
+        if destination.exists():
+            from major_master_deploy import assert_package_disposable
+            configured = [p.name for p in staging.rglob("*") if p.suffix.casefold() == ".esm"]
+            assert_package_disposable(destination, staging, game / "Data Files", manager, configured)
+        import uuid
+        destination = staging / (".extract-" + uuid.uuid4().hex)
         destination.mkdir(parents=True)
         # the marker is written first, so an extraction that is interrupted is on record and counted
         steps = {step: _step_blank() for step in PACKAGE_STEPS}
         if prior:
             steps["extracted"]["attempts"] = prior["extracted"]["attempts"]
-        package_masters = [name for name in selected_masters
-                           if name.casefold() in {m.casefold() for m in item.get("core_masters", [])}]
         base_marker = {
             **_stage_plugin_identity(item, package_masters),
-            "archive": archive.name, "sha256": item.get("sha256"),
+            "archive": archive.name, "sha256": archive_hash, "archive_path": str(archive),
+            "processing_version": PACKAGE_PROCESSING_VERSION,
             "selected_masters": package_masters,
         }
         _write_stage_marker(destination, {**base_marker, "steps": steps})
@@ -1283,14 +1313,27 @@ def stage_core_master_archives(plan: dict, selected_masters: list[str], manager_
             else:
                 if not seven_zip:
                     raise ValueError("7-Zip is required to extract this archive.")
-                result = subprocess.run([seven_zip, "x", str(archive), f"-o{destination}", "-y"],
-                                        capture_output=True, text=True, errors="replace", timeout=7200,
+                import managed_processes
+                result = managed_processes.run([seven_zip, "x", str(archive), f"-o{destination}", "-y"],
+                                        progress=progress_callback, text=True, errors="replace", timeout=7200,
                                         **_quiet_subprocess_options())
                 if result.returncode:
                     raise RuntimeError((result.stderr or result.stdout or
                                          f"7-Zip exited with code {result.returncode}")[-2000:])
             complete_package_step(destination, "extracted")
-            staged.append(destination)
+            if published.exists():
+                # Keep the old package until the replacement is fully extracted.
+                stale = staging / (".replaced-" + uuid.uuid4().hex)
+                os.replace(published, stale)
+                try:
+                    os.replace(destination, published)
+                except BaseException:
+                    os.replace(stale, published)
+                    raise
+                shutil.rmtree(stale, onerror=_rmtree_clear_readonly)
+            else:
+                os.replace(destination, published)
+            staged.append(published)
             if progress_callback:
                 progress_callback(f"Staged archive {index} of {len(ordered_archives)}: {archive.name}")
         except Exception as exc:
@@ -1299,8 +1342,9 @@ def stage_core_master_archives(plan: dict, selected_masters: list[str], manager_
             failed.update(completed_at=None, last_error=str(exc)[:2000])
             shutil.rmtree(destination, ignore_errors=True)
             try:
-                destination.mkdir(parents=True, exist_ok=True)
-                _write_stage_marker(destination, {**base_marker, "steps": {**steps, "extracted": failed}})
+                if not published.exists():
+                    published.mkdir(parents=True, exist_ok=True)
+                    _write_stage_marker(published, {**base_marker, "steps": {**steps, "extracted": failed}})
             except OSError:
                 pass
             raise
@@ -1311,6 +1355,7 @@ def stage_core_master_archives(plan: dict, selected_masters: list[str], manager_
 # setup step file does - when it started, when it completed, how many attempts, the last error - so an interrupted
 # Stage run is picked up at the package and step where it stopped.
 PACKAGE_STEPS = ("extracted", "tidied", "bsa_checked")
+PACKAGE_PROCESSING_VERSION = 1
 PACKAGE_STEP_LABELS = {"extracted": "extracting the archive", "tidied": "Tidy and the option installer",
                        "bsa_checked": "the BSA check"}
 
@@ -1321,7 +1366,7 @@ def _stage_time() -> str:
 
 
 def _step_blank() -> dict:
-    return {"started_at": None, "completed_at": None, "attempts": 0, "last_error": None}
+    return {"started_at": None, "completed_at": None, "attempts": 0, "last_error": None, "outcome": None}
 
 
 def _write_stage_marker(package: Path, data: dict) -> None:
@@ -1376,9 +1421,9 @@ def begin_package_step(package: str | Path, step: str) -> dict:
         started_at=_stage_time(), completed_at=None, attempts=int(entry.get("attempts") or 0) + 1, last_error=None))
 
 
-def complete_package_step(package: str | Path, step: str) -> dict:
+def complete_package_step(package: str | Path, step: str, *, outcome="completed") -> dict:
     def change(entry):
-        entry.update(completed_at=_stage_time(), last_error=None)
+        entry.update(completed_at=_stage_time(), last_error=None, outcome=outcome)
         entry["started_at"] = entry.get("started_at") or entry["completed_at"]
         entry["attempts"] = max(int(entry.get("attempts") or 0), 1)
     return _update_package_step(package, step, change)
@@ -1409,16 +1454,19 @@ def lua_texts(root):
 def lua_used_images(root):
     """The PNG/JPEG files under the image folders that a Lua script names: they stay loose, so a BSA packer must
     leave them out. Paths relative to the package."""
+    from major_master_deploy import _data_relative, SKIP_FOLDERS
+    root = Path(root)
     text, used = None, []
-    for top in os.listdir(root) if os.path.isdir(root) else ():
-        if top.casefold() not in IMAGE_ASSET_DIRS or not os.path.isdir(os.path.join(root, top)):
+    for dp, ds, fs in os.walk(root):
+        ds[:] = [d for d in ds if d.casefold() not in SKIP_FOLDERS and not d.startswith(".")]
+        rel = _data_relative(root, Path(dp))
+        if not rel.parts or rel.parts[0].casefold() not in IMAGE_ASSET_DIRS:
             continue
-        for dp, _ds, fs in os.walk(os.path.join(root, top)):
-            for fn in fs:
-                if fn.lower().endswith((".png", ".jpg", ".jpeg")):
-                    text = lua_texts(root) if text is None else text
-                    if fn.casefold() in text:
-                        used.append(os.path.relpath(os.path.join(dp, fn), root))
+        for fn in fs:
+            if fn.lower().endswith((".png", ".jpg", ".jpeg")):
+                text = lua_texts(root) if text is None else text
+                if fn.casefold() in text:
+                    used.append(os.path.relpath(os.path.join(dp, fn), root))
     return sorted(used, key=str.casefold)
 
 
@@ -1437,7 +1485,21 @@ def stamped_backup_path(path: str | Path, when: float | None = None) -> Path:
     return candidate
 
 
-def reset_partial_package(package: str | Path) -> None:
+def reset_partial_package(package: str | Path, *, manager_dir=None, game_dir=None, configured=()) -> None:
+    if manager_dir is not None:
+        from workflow_safety import mutation_lock
+        from major_master_deploy import assert_package_disposable
+        with mutation_lock(manager_dir, game_dir):
+            assert_package_disposable(package, Path(package).parent, Path(game_dir) / "Data Files",
+                                      manager_dir, list(configured))
+            _reset_partial_package(package)
+        return
+    if Path(package).parent.name == "major_masters":
+        raise ValueError("Resetting managed staging requires manager_dir and game_dir for ownership checks.")
+    _reset_partial_package(package)
+
+
+def _reset_partial_package(package):
     """Empty a package whose extraction never finished. Its marker stays, so the attempt count carries over to
     the next extraction; a folder that never had a marker is removed."""
     package = Path(package)
@@ -1455,7 +1517,8 @@ def unfinished_packages(staging: str | Path) -> list[tuple[Path, list[str]]]:
     found = []
     if not staging.is_dir():
         return found
-    for package in sorted((p for p in staging.iterdir() if p.is_dir() and not p.is_symlink()),
+    for package in sorted((p for p in staging.iterdir() if p.is_dir() and not p.is_symlink()
+                           and not p.name.startswith(".")),
                           key=lambda p: p.name.casefold()):
         steps = package_steps(package)
         missing = [step for step in PACKAGE_STEPS if steps is None or not steps[step]["completed_at"]]
@@ -1526,7 +1589,8 @@ def _read_staged_archive_marker(destination: Path) -> dict:
     """Read the archive marker, including copies moved by older tidy versions."""
     marker = destination / ".mwmanager-stage.json"
     try:
-        return json.loads(marker.read_text(encoding="utf-8"))
+        value = json.loads(marker.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
     except (OSError, ValueError):
         pass
     def onerror(_exc):
@@ -1536,7 +1600,8 @@ def _read_staged_archive_marker(destination: Path) -> dict:
             if name.casefold() != ".mwmanager-stage.json":
                 continue
             try:
-                return json.loads((Path(base) / name).read_text(encoding="utf-8"))
+                value = json.loads((Path(base) / name).read_text(encoding="utf-8"))
+                return value if isinstance(value, dict) else {}
             except (OSError, ValueError):
                 continue
     return {}

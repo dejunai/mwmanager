@@ -12,9 +12,15 @@ import subprocess
 import tempfile
 import threading
 import time
+import uuid
+import struct
+from collections import deque
+
+from workflow_safety import DurableTransaction, mutation_lock, require_space
+import managed_processes
 
 BSA_FOLDERS = {"bookart", "icons", "meshes", "textures", "video"}
-SKIP_FOLDERS = {"off", "bugreports", "fomod", "extras"}
+SKIP_FOLDERS = {"off", "bugreports", "fomod", "extras", ".mwmanager-pack"}
 GAME_ROOT_FOLDERS = {"mge3"}          # a package's top-level folders that belong beside Morrowind.exe, not in Data Files
 
 
@@ -31,14 +37,42 @@ def staged_masters(staging: Path, configured: list[str]) -> dict[str, Path]:
     found: dict[str, Path] = {}
     if not staging.is_dir():
         return found
-    for package in sorted((p for p in staging.iterdir() if p.is_dir()), key=lambda p: p.name.casefold()):
+    for package in sorted((p for p in staging.iterdir() if p.is_dir() and not p.name.startswith(".")
+                           and not p.is_symlink()), key=lambda p: p.name.casefold()):
         for base, dirs, files in os.walk(package):
-            dirs[:] = [name for name in dirs if name.casefold() not in SKIP_FOLDERS]
+            dirs[:] = [name for name in dirs if name.casefold() not in SKIP_FOLDERS and not name.startswith(".")]
             for filename in files:
                 key = filename.casefold()
                 if key in wanted and Path(filename).suffix.casefold() == ".esm":
                     found.setdefault(key, Path(base) / filename)
     return found
+
+
+def esm_master_names(path):
+    """Read a bounded TES3 dependency header without loading the plugin."""
+    try:
+        with Path(path).open("rb") as stream:
+            header = stream.read(16)
+            if len(header) != 16 or header[:4] != b"TES3":
+                return set()
+            size = struct.unpack_from("<I", header, 4)[0]
+            if size > 16 * 1024 * 1024:
+                raise ValueError(f"Unreasonably large TES3 header: {path}")
+            body = stream.read(size)
+        if len(body) != size:
+            raise ValueError(f"Truncated TES3 header: {path}")
+        names, offset = set(), 0
+        while offset + 8 <= len(body):
+            tag, length = body[offset:offset + 4], struct.unpack_from("<I", body, offset + 4)[0]
+            offset += 8
+            if offset + length > len(body):
+                raise ValueError(f"Truncated TES3 master entry: {path}")
+            if tag == b"MAST":
+                names.add(body[offset:offset + length].split(b"\0", 1)[0].decode("cp1252").casefold())
+            offset += length
+        return names
+    except OSError:
+        raise ValueError(f"Cannot inspect dependencies: {path}") from None
 
 
 def _data_relative(package: Path, path: Path) -> Path:
@@ -56,12 +90,16 @@ def count_bsa_eligible(staging: Path, masters: list[str]) -> int:
         packages.add(next((parent for parent in esm.parents if parent.parent == staging), esm.parent))
     count = 0
     for package in packages:
+        from core_addons import lua_used_images
+        keep_loose = {_data_relative(package, package / rel).as_posix().casefold()
+                      for rel in lua_used_images(package)}
         for base, dirs, files in os.walk(package):
             rel = _data_relative(package, Path(base))
-            dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS]
+            dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS and not d.startswith(".")]
             if not rel.parts or rel.parts[0].casefold() not in BSA_FOLDERS:
                 continue
-            count += sum(1 for f in files if not f.startswith("."))
+            count += sum(1 for f in files if not f.startswith(".")
+                         and (rel / f).as_posix().casefold() not in keep_loose)
     return count
 
 
@@ -95,91 +133,181 @@ def find_bsapack() -> Path | None:
 
 
 def _pack_assets(package: Path, plugin_name: str, tool: Path, progress=None) -> list[Path]:
-    """Pack supported asset folders. The tool handles automatic 2 GB splitting."""
+    with mutation_lock(package):
+        return _pack_assets_locked(package.resolve(), plugin_name, tool, progress)
+
+
+def _pack_assets_locked(package, plugin_name, tool, progress):
+    """Pack on the package's volume; write-ahead every publication/loose move."""
     from core_addons import lua_used_images
-    # images a Lua script loads stay loose: never packed, never moved to Off
-    keep_loose = {Path(rel).as_posix().casefold() for rel in lua_used_images(package)}
-    with tempfile.TemporaryDirectory(prefix="mwmanager-bsa-") as temp_name:
-        temp = Path(temp_name)
-        count = 0
-        for base, dirs, files in os.walk(package):
-            rel = _data_relative(package, Path(base))
-            dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS]
-            if not rel.parts or rel.parts[0].casefold() not in BSA_FOLDERS:
-                continue
-            for name in files:
-                src = Path(base) / name
-                if (rel / name).as_posix().casefold() in keep_loose:
+    from mwmanager_workflow import checkpoint
+    transaction_root = package / ".mwmanager-pack"
+    DurableTransaction.recover(transaction_root, [package])
+    DurableTransaction.recover(package / ".mwmanager-unpack", [package])
+    for stale in package.glob(".mwmanager-pack-work-*"):
+        if stale.is_dir() and not stale.is_symlink():
+            shutil.rmtree(stale)
+    keep_loose = {_data_relative(package, package / rel).as_posix().casefold()
+                  for rel in lua_used_images(package)}
+    files = []
+    for base, dirs, names in os.walk(package):
+        dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS and not d.startswith(".")]
+        rel = _data_relative(package, Path(base))
+        if rel.parts and rel.parts[0].casefold() in BSA_FOLDERS:
+            for name in names:
+                if name.startswith("."):
                     continue
-                dst = temp / rel / name
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    os.link(src, dst)
-                except OSError:
-                    shutil.copy2(src, dst)
-                count += 1
-                if progress and count % 2000 == 0:
-                    progress(f"Preparing BSA for {plugin_name}: {count:,} assets ready…")
-        if not count:
-            return []
+                source = Path(base) / name
+                if source.is_symlink():
+                    raise ValueError(f"Refusing to pack a symbolic link: {source}")
+                if (rel / name).as_posix().casefold() not in keep_loose:
+                    files.append((source, rel / name))
+    if not files:
+        return []
+    # Includes a conservative copy fallback plus archive output, on this volume.
+    require_space(package, sum(p.stat().st_size for p, _ in files) * 2 + 1024 * 1024)
+    with tempfile.TemporaryDirectory(prefix=".mwmanager-pack-work-", dir=package) as temp_name:
+        temp = Path(temp_name)
+        for count, (src, relative) in enumerate(files, 1):
+            checkpoint(progress)
+            dst = temp / relative
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists():
+                raise ValueError(f"Colliding normalized BSA path: {relative}")
+            try:
+                os.link(src, dst)
+            except OSError:
+                shutil.copy2(src, dst)
+            if progress and count % 2000 == 0:
+                progress(f"Preparing BSA for {plugin_name}: {count:,} assets ready…")
         base_name = Path(plugin_name).stem + "_assets.bsa"
         if progress:
             progress(f"Building BSA for {plugin_name} from {count:,} assets; please be patient…")
-        proc = subprocess.Popen([str(tool), "pack", base_name], cwd=temp, stdout=subprocess.PIPE,
-                                stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1,
+        proc = managed_processes.popen([str(tool), "pack", base_name], cwd=temp, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                text=True, errors="replace", bufsize=1,
                                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        output = []
+        output = deque(maxlen=80)
+        reader_errors = []
 
         def relay_output():
-            for line in proc.stdout:
-                line = line.rstrip()
-                if line:
-                    output.append(line)
-                    if progress:
-                        progress(f"BSAPack: {line}")
+            try:
+                with (temp / "bsapack.log").open("w", encoding="utf-8") as log:
+                    for line in proc.stdout:
+                        log.write(line)
+                        line = line.rstrip()
+                        if line:
+                            output.append(line[-4000:])
+                            if progress:
+                                progress(f"BSAPack: {line}")
+            except Exception as exc:
+                reader_errors.append(exc)
 
         reader = threading.Thread(target=relay_output, name="MWManager BSAPack output", daemon=True)
         reader.start()
         try:
-            returncode = proc.wait(timeout=7200)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-            raise RuntimeError(f"BSAPack timed out after two hours for {plugin_name}.")
+            deadline = time.monotonic() + 7200
+            while True:
+                checkpoint(progress)
+                if time.monotonic() >= deadline:
+                    raise RuntimeError(f"BSAPack timed out after two hours for {plugin_name}.")
+                try:
+                    returncode = proc.wait(timeout=0.2)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        except BaseException:
+            managed_processes.terminate(proc)
+            raise
         finally:
-            reader.join()
+            reader.join(timeout=2)
+            if reader.is_alive():
+                managed_processes.terminate(proc)
+                reader.join(timeout=2)
+        if reader.is_alive():
+            raise RuntimeError("BSAPack output pipe did not close; packing was not published.")
+        if reader_errors:
+            raise reader_errors[0]
+        log_path = package / "Off" / Path(plugin_name).stem / "bsapack.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(temp / "bsapack.log", log_path)
         if returncode:
             raise RuntimeError(f"BSAPack failed for {plugin_name}: {' | '.join(output)[-2000:]}")
         outputs = sorted(temp.glob(Path(base_name).stem + "*.bsa"), key=lambda p: p.name.casefold())
         if not outputs:
             raise RuntimeError(f"BSAPack reported success but created no archive for {plugin_name}.")
-        off = package / "Off" / Path(plugin_name).stem / "bsa packed"
-        moved: list[Path] = []
-        for source in outputs:
-            destination = package / source.name
-            if destination.exists():
-                destination = package / (source.stem + "_mwmanager" + source.suffix)
-            shutil.move(str(source), destination)
-            moved.append(destination)
-        # Move packed loose assets to Off/<plugin>/bsa packed/<asset path>, including wrapped layouts.
-        asset_roots = []
-        for base, dirs, _files in os.walk(package):
-            normalized = _data_relative(package, Path(base))
-            dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS]
-            if len(normalized.parts) == 1 and normalized.parts[0].casefold() in BSA_FOLDERS:
-                asset_roots.append(Path(base))
-        for folder in asset_roots:
-            dest = off / folder.name
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            if dest.exists():
-                shutil.rmtree(dest)
-            shutil.move(str(folder), dest)
-            for packed in dest.rglob("*"):
-                inside = Path(folder.name) / packed.relative_to(dest)
-                if packed.is_file() and inside.as_posix().casefold() in keep_loose:
-                    (folder / inside.relative_to(folder.name)).parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(packed), folder / inside.relative_to(folder.name))
-        return moved
+        off = package / "Off" / Path(plugin_name).stem / "bsa packed" / uuid.uuid4().hex
+        tx = DurableTransaction(transaction_root, [package]).begin()
+        try:
+            record_path = package / ".mwmanager-bsa-state.json"
+            tx.snapshot(record_path)
+            published = []
+            for source in outputs:
+                checkpoint(progress)
+                destination = package / source.name
+                tx.move(source, destination)
+                published.append(destination)
+            for source, _relative in files:
+                checkpoint(progress)
+                tx.move(source, off / source.relative_to(package))
+            from workflow_safety import atomic_json
+            atomic_json(record_path, {
+                "version": 1,
+                "archives": [{"path": str(path.relative_to(package)), "sha256": sha256(path)} for path in published],
+                "files": [{"source": str(Path(op["source"]).relative_to(package)),
+                           "backup": str(Path(op["target"]).relative_to(package)), "sha256": op["sha256"]}
+                          for op in tx.state["operations"] if Path(op["source"]).is_relative_to(package)
+                          and Path(op["target"]).is_relative_to(off)]})
+            tx.commit()
+            return published
+        except BaseException:
+            tx.rollback()
+            raise
+
+
+def restore_packed_assets(package):
+    """Restore retained loose inputs before changing options; remove only our exact outputs."""
+    package = Path(package).resolve()
+    with mutation_lock(package):
+        DurableTransaction.recover(package / ".mwmanager-pack", [package])
+        root = package / ".mwmanager-unpack"
+        DurableTransaction.recover(root, [package])
+        record_path = package / ".mwmanager-bsa-state.json"
+        if not record_path.exists():
+            return False
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        if record.get("version") != 1:
+            raise ValueError("Unsupported generated BSA record; restage this package before changing its options.")
+
+        def inside(relative):
+            path = package / relative
+            if not path.resolve().is_relative_to(package):
+                raise ValueError(f"Unsafe generated BSA path: {relative}")
+            return path
+
+        archives = [(inside(item["path"]), item["sha256"]) for item in record["archives"]]
+        files = [(inside(item["source"]), inside(item["backup"]), item["sha256"]) for item in record["files"]]
+        for path, expected in archives:
+            if not path.is_file() or sha256(path) != expected:
+                raise RuntimeError(f"Generated BSA changed; preserving it for review: {path}")
+        for source, backup, expected in files:
+            if not backup.is_file() or sha256(backup) != expected:
+                raise RuntimeError(f"Retained BSA input changed: {backup}")
+            if source.exists() and (not source.is_file() or sha256(source) != expected):
+                raise RuntimeError(f"Loose BSA input changed; preserving it for review: {source}")
+        tx = DurableTransaction(root, [package]).begin()
+        try:
+            for index, (archive, _hash) in enumerate(archives):
+                tx.move(archive, root / f"archive-{index}")
+            for source, backup, _hash in files:
+                if not source.exists():
+                    tx.move(backup, source)
+            tx.move(record_path, root / "old-state.json")
+            tx.commit()
+            return True
+        except BaseException:
+            tx.rollback()
+            raise
 
 
 def register_archives(ini_path: Path, archives: list[Path], manager_dir: Path | None = None) -> list[str]:
@@ -268,18 +396,90 @@ def _deployment_state_path(manager_dir: Path) -> Path:
 def _read_deployment_state(manager_dir: Path) -> dict:
     try:
         data = json.loads(_deployment_state_path(manager_dir).read_text(encoding="utf-8"))
-        if isinstance(data, dict) and isinstance(data.get("deployments"), list):
+        if (isinstance(data, dict) and isinstance(data.get("deployments"), list)
+                and all(isinstance(entry, dict) and isinstance(entry.get("operations", []), list)
+                        for entry in data["deployments"])):
             return data
-    except (OSError, ValueError, TypeError):
-        pass
-    return {"version": 1, "deployments": []}
+    except FileNotFoundError:
+        return {"version": 1, "deployments": []}
+    except (ValueError, TypeError) as exc:
+        raise RuntimeError("Deployment state is corrupt; preserve it and recover before continuing.") from exc
+    raise RuntimeError("Deployment state is invalid; refusing to discard its ownership records.")
 
 
 def _write_deployment_state(manager_dir: Path, state: dict) -> None:
-    path = _deployment_state_path(manager_dir)
-    temp = path.with_suffix(".tmp")
-    temp.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-    os.replace(temp, path)
+    from workflow_safety import atomic_json
+    atomic_json(_deployment_state_path(manager_dir), state)
+
+
+def recovery_pending(manager_dir):
+    return any((Path(manager_dir) / "transactions" / name).is_dir()
+               for name in ("major-master-deploy", "major-master-remove", "ghost-statics"))
+
+
+def recover_deployment(manager_dir, game_dir, staging=None):
+    manager_dir, game_dir = Path(manager_dir).resolve(), Path(game_dir).resolve()
+    with mutation_lock(manager_dir, game_dir):
+        recovered = False
+        for name in ("major-master-remove", "major-master-deploy", "ghost-statics"):
+            recovered |= DurableTransaction.recover(
+                manager_dir / "transactions" / name,
+                [manager_dir, game_dir, Path(staging) if staging else manager_dir / "staging" / "major_masters"])
+        return recovered
+
+
+def _snapshot_metadata(tx, manager_dir, data_dir):
+    for path in (data_dir.parent / "Morrowind.ini", _deployment_state_path(manager_dir),
+                 manager_dir / "journal" / "install.jsonl", manager_dir / "journal" / "runs.jsonl"):
+        tx.snapshot(path)
+    tx.snapshot(manager_dir / "game_catalog.sqlite3", database=True)
+
+
+def assert_package_disposable(package, staging, data_dir, manager_dir, configured, *, check_dependencies=True):
+    """Backend guard shared by Unstage, re-extraction, and staging reset."""
+    original = Path(package)
+    if original.is_symlink() or getattr(original, "is_junction", lambda: False)():
+        raise ValueError(f"Refusing to delete a linked package: {original}")
+    package, staging = original.resolve(), Path(staging).resolve()
+    if package == staging or package.parent != staging:
+        raise ValueError(f"Unsafe package deletion: {package}")
+    if recovery_pending(manager_dir):
+        raise RuntimeError("Recover the interrupted deployment before changing staging.")
+    for deployment in _read_deployment_state(Path(manager_dir))["deployments"]:
+        for op in deployment.get("operations", []):
+            if any(op.get(key) and Path(op[key]).resolve().is_relative_to(package)
+                   for key in ("source", "backup")):
+                raise ValueError(f"{package.name} is referenced by a deployment; remove that deployment first.")
+    for name, source in staged_masters(staging, configured).items():
+        if source.resolve().is_relative_to(package) and any(
+                path.name.casefold() == name for path in Path(data_dir).glob("*") if path.is_file()):
+            raise ValueError(f"{package.name} contains an installed master; remove its deployment first.")
+    if not check_dependencies:
+        return
+    # A fresh dependency scan, never GUI cached data, before any deletion.
+    staged = staged_masters(staging, configured)
+    masters = {name.casefold() for name, path in staged.items() if path.resolve().is_relative_to(package)}
+    for root in (staging, Path(data_dir)):
+        for base, dirs, files in os.walk(root):
+            dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS and not d.startswith(".")]
+            if Path(base).resolve().is_relative_to(package):
+                dirs[:] = []
+                continue
+            for name in files:
+                if Path(name).suffix.casefold() in {".esm", ".esp"}:
+                    if esm_master_names(Path(base) / name) & masters:
+                        raise ValueError(f"{package.name} is required by {name}; it cannot be discarded.")
+
+
+def unstage_packages(packages, staging, data_dir, manager_dir, configured, progress=None):
+    with mutation_lock(manager_dir, Path(data_dir).parent):
+        for package in packages:
+            assert_package_disposable(package, staging, data_dir, manager_dir, configured)
+        from core_addons import _rmtree_clear_readonly
+        for package in packages:
+            if progress:
+                progress(f"Removing staged package: {Path(package).name}")
+            shutil.rmtree(package, onerror=_rmtree_clear_readonly)
 
 
 def tracked_deployment_masters(manager_dir: Path) -> list[str]:
@@ -324,13 +524,41 @@ def _remove_firemoth_selected(manager_dir: Path, package: Path) -> bool:
         # A matching journal entry is authoritative, including when the option is unselected.
         return False
     for base, dirs, files in os.walk(package):
-        dirs[:] = [name for name in dirs if name.casefold() not in SKIP_FOLDERS]
+        dirs[:] = [name for name in dirs if name.casefold() not in SKIP_FOLDERS and not name.startswith(".")]
         if any(name.casefold() == "tr_firemoth_remover.esp" for name in files):
             return True
     return False
 
 
 def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=None) -> dict:
+    staging, data_dir, manager_dir = (Path(p).resolve() for p in (staging, data_dir, manager_dir))
+    with mutation_lock(manager_dir, Path(data_dir).parent):
+        recover_deployment(manager_dir, Path(data_dir).parent, staging)
+        tx = DurableTransaction(manager_dir / "transactions" / "major-master-remove",
+                                [manager_dir, data_dir.parent, staging]).begin()
+        try:
+            _snapshot_metadata(tx, manager_dir, data_dir)
+            result = _remove_deployed(staging, data_dir, manager_dir, progress, tx=tx)
+            changed = {Path(op[key]) for op in tx.state["operations"] for key in ("source", "target")
+                       if Path(op[key]).is_relative_to(data_dir.parent)}
+            if changed:
+                from mwmanager_journal import Journal, rel_of
+                ledger = Journal(manager_dir / "journal")
+                run = ledger.start_run("major_master_deploy.py", {"operation": "remove deployment"})
+                for path in sorted(changed):
+                    ledger.record(run["run"], rel_of(data_dir.parent, path),
+                                  "replace" if path.is_file() else "remove",
+                                  sha256(path) if path.is_file() else None,
+                                  {"kind": "absent"}, tag="major-master-removal")
+                ledger.finish_run(run)
+            tx.commit()
+            return result
+        except BaseException:
+            tx.rollback()
+            raise
+
+
+def _remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=None, *, tx) -> dict:
     """Remove only tracked MWManager links, restore overwritten files, and undo registrations/indexing."""
     staging, data_dir, manager_dir = staging.resolve(), data_dir.resolve(), manager_dir.resolve()
     state = _read_deployment_state(manager_dir)
@@ -358,22 +586,38 @@ def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=N
                 raise ValueError(f"Deployment state contains an unsafe target path: {target}")
             if source.is_absolute() and not source.is_relative_to(staging):
                 raise ValueError(f"Deployment state contains an unsafe source path: {source}")
+            if (backup and backup.is_file() and operation.get("original_sha256")
+                    and sha256(backup) != operation["original_sha256"]):
+                pending_operations.append(operation)
+                continue
+            if (target.is_file() and operation.get("original_sha256") and
+                    sha256(target) == operation["original_sha256"] and not (backup and backup.exists())):
+                continue  # An older interrupted removal already restored this original.
             source_matches = False
             if target.is_file() and source.is_file():
                 try:
                     source_matches = os.path.samefile(source, target)
                 except OSError:
                     pass
+            if source_matches and operation.get("sha256"):
+                source_matches = sha256(target) == operation["sha256"]
+            # Legacy records have no installed hash: preserve uncertain edits.
+            elif source_matches:
+                source_matches = False
             if source_matches:
-                target.unlink()
+                tx.move(target, tx.root / ("removed-" + uuid.uuid4().hex))
                 removed += 1
-            elif target.exists() and (backup and backup.exists() or not source.exists()):
+            elif target.exists():
                 # Preserve modified/uncertain targets and their backups for a later safe retry.
                 pending_operations.append(operation)
                 continue
-            if backup and backup.is_file() and backup.is_relative_to(staging) and not target.exists():
+            if backup and backup.is_file() and (backup.is_relative_to(staging) or
+                    backup.is_relative_to(manager_dir / "deployment_backups")) and not target.exists():
+                if operation.get("original_sha256") and sha256(backup) != operation["original_sha256"]:
+                    pending_operations.append(operation)
+                    continue
                 target.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(backup, target)
+                tx.move(backup, target)
                 restored += 1
             if progress and index % 100 == 0:
                 progress(f"Removing deployed masters: checked {index:,} of {len(operations):,} files.")
@@ -387,7 +631,7 @@ def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=N
                 pending_moves.append(move)
                 continue
             source.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(target, source)
+            tx.move(target, source)
             restored += 1
         if pending_operations or pending_moves:
             pending_deployments.append({**deployment, "operations": list(reversed(pending_operations)),
@@ -411,8 +655,16 @@ def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=N
 
 def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[str], *, build_bsa: bool = False,
            include_assets: bool = True, progress=None, selected: list[str] | None = None) -> dict:
+    with mutation_lock(manager_dir, Path(data_dir).parent):
+        recover_deployment(manager_dir, Path(data_dir).parent, staging)
+        return _deploy(staging, data_dir, manager_dir, configured, build_bsa=build_bsa,
+                       include_assets=include_assets, progress=progress, selected=selected)
+
+
+def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[str], *, build_bsa=False,
+            include_assets=True, progress=None, selected=None) -> dict:
     """Hardlink staged package files, register archives, and index ESM/BSA data."""
-    staging, data_dir = staging.resolve(), data_dir.resolve()
+    staging, data_dir, manager_dir = staging.resolve(), data_dir.resolve(), manager_dir.resolve()
     if os.path.splitdrive(str(staging))[0].casefold() != os.path.splitdrive(str(data_dir))[0].casefold():
         raise ValueError("Major-master staging and Data Files must be on the same drive for hardlinks.")
     staged = staged_masters(staging, configured)
@@ -439,8 +691,11 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
     operations = []
     moves = []
     registered_archives = []
-    rollback = []
+    tx = DurableTransaction(manager_dir / "transactions" / "major-master-deploy",
+                            [manager_dir, data_dir.parent, staging]).begin()
+    backup_root = manager_dir / "deployment_backups" / uuid.uuid4().hex
     try:
+        _snapshot_metadata(tx, manager_dir, data_dir)
         for package, plugins in package_info:
             if not any(name.casefold() == "tr_mainland.esm" for name in plugins):
                 continue
@@ -456,14 +711,16 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             digest = sha256(source)
-            os.replace(source, target)
+            tx.move(source, target)
             moves.append({"source": str(source), "target": str(target), "sha256": digest})
             if progress: progress("Moved shipped Siege at Firemoth.esp to Off/Official Add-Ons because Tamriel Rebuilt was deployed without Remove Firemoth.")
         for package, plugins in package_info:
             for base, dirs, files in os.walk(package):
-                dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS]
+                dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS and not d.startswith(".")]
                 for filename in files:
                     source = Path(base) / filename
+                    if source.is_symlink():
+                        raise ValueError(f"Refusing to deploy a symbolic link: {source}")
                     if filename.casefold() == ".mwmanager-stage.json" or filename.startswith("."):
                         continue
                     # Only deploy configured masters; other plugin files in the same archive remain staged.
@@ -479,26 +736,17 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
                               else data_dir / filename if source.suffix.casefold() in {".esm", ".esp", ".bsa"}
                               else data_dir / rel)
                     target.parent.mkdir(parents=True, exist_ok=True)
-                    backup_path = None
+                    backup = backup_root / package.name / str(len(operations)) / rel
                     if target.exists():
                         if target.is_file() and target.stat().st_size == source.stat().st_size and sha256(target) == sha256(source):
                             skipped.append(str(rel))
                             continue
                         if not target.is_file():
                             raise IsADirectoryError(f"A directory blocks deployment of {target}")
-                        from core_addons import stamped_backup_path
-                        backup = stamped_backup_path(
-                            package / "Off" / (plugins[0] if plugins else package.name) / "replaced" / rel)
-                        backup.parent.mkdir(parents=True, exist_ok=True)
-                        os.replace(target, backup)
-                        backup_path = backup
                         backed_up.append((target, backup))
-                        rollback.append(("backup", target, backup))
-                    os.link(source, target)
+                    operation = tx.link(source, target, backup)
                     linked.append(str(rel))
-                    operations.append({"source": str(source.resolve()), "target": str(target.resolve()),
-                                       "backup": str(backup_path.resolve()) if backup_path else None})
-                    rollback.append(("link", target, source))
+                    operations.append(operation)
         ini_path = data_dir.parent / "Morrowind.ini"
         archives = []
         seen_archives = set()
@@ -544,42 +792,14 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
             "moves": moves,
         })
         _write_deployment_state(manager_dir, deployment_state)
+        import mwmanager_journal
+        mwmanager_journal.Journal(manager_dir / "journal").record_deployment(
+            data_dir.parent, operations, moves=moves, tool="major_master_deploy.py", tag="major-master-deployment",
+            inputs={"masters": ready, "include_assets": include_assets})
+        tx.commit()
     except Exception:
-        if registered_archives:
-            try:
-                unregister_archives(data_dir.parent / "Morrowind.ini", registered_archives)
-            except OSError:
-                pass
-        try:
-            with closing(sqlite3.connect(manager_dir / "game_catalog.sqlite3")) as db, db:
-                for plugin in ready:
-                    db.execute("DELETE FROM esm_record WHERE lower(source_file)=lower(?)", (plugin,))
-                for archive in locals().get("archives", []):
-                    db.execute("DELETE FROM bsa_asset WHERE lower(archive_file)=lower(?)", (archive.name,))
-                db.commit()
-        except sqlite3.Error:
-            pass
-        for kind, target, source in reversed(rollback):
-            try:
-                if kind == "link" and target.exists(): target.unlink()
-                elif kind == "backup" and source.exists():
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(source, target)
-            except OSError:
-                pass
-        for move in reversed(moves):
-            try:
-                source, target = Path(move["source"]), Path(move["target"])
-                if target.is_file() and not source.exists() and sha256(target).casefold() == move["sha256"].casefold():
-                    source.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(target, source)
-            except OSError:
-                pass
+        tx.rollback()
         raise
-    import mwmanager_journal
-    mwmanager_journal.Journal(manager_dir / "journal").record_deployment(
-        data_dir.parent, operations, moves=moves, tool="major_master_deploy.py", tag="major-master-deployment",
-        inputs={"masters": ready, "include_assets": include_assets})
     return {"ready": ready, "linked": linked, "backed_up": [str(x[0]) for x in backed_up],
             "skipped_identical": skipped, "archives": [p.name for p in archives],
             "record_count": len(ready), "conflicts": conflicts,

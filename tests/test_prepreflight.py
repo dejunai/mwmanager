@@ -143,7 +143,7 @@ class ArchiveToolTests(unittest.TestCase):
 
         progress = Progress(yes_no=[True])
         with mock.patch.object(preinstall, "_seven_zip", return_value=None), \
-                mock.patch.object(preinstall.os, "name", "nt"), \
+                mock.patch.object(preinstall, "IS_WINDOWS", True), \
                 mock.patch.object(preinstall.platform, "machine", return_value="AMD64"):
             self.assertTrue(preinstall.ensure_archive_tool(root, progress, opener=opener, runner=runner))
         self.assertEqual(opened[0], preinstall.SEVEN_ZIP_DOWNLOAD_PAGE)
@@ -153,7 +153,7 @@ class ArchiveToolTests(unittest.TestCase):
     def test_declining_missing_archive_tool_stops(self):
         progress = Progress(yes_no=[False])
         with mock.patch.object(preinstall, "_seven_zip", return_value=None), \
-                mock.patch.object(preinstall.os, "name", "nt"):
+                mock.patch.object(preinstall, "IS_WINDOWS", True):
             self.assertFalse(preinstall.ensure_archive_tool(Path("manager"), progress))
 
 
