@@ -248,6 +248,37 @@ class TidySteps(unittest.TestCase):
         self.assertTrue((root / "Textures" / "floor.tga").exists())
         self.assertTrue(Path(operations[0]["dst"]).is_file() and "Off" in Path(operations[0]["dst"]).parts)
 
+    def test_a_large_splash_tga_gets_a_dds_without_mipmaps_and_stays(self):
+        import struct
+        root = self.staging / "ModA-1-1-0"
+        big, small = root / "Splash" / "big.tga", root / "Splash" / "small.tga"
+        mk(big, b"\0" * 12 + struct.pack("<HH", 2048, 1024) + b"\x20\0" + b"pixels")
+        mk(small, b"\0" * 12 + struct.pack("<HH", 1024, 512) + b"\x20\0" + b"pixels")
+        commands, operations = [], []
+
+        def convert(command, **_kwargs):
+            commands.append(command)
+            out = command[command.index("-o") + 1]
+            Path(out, Path(command[-1]).stem + ".dds").write_bytes(b"converted dds")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        assets = self.t._scanner.asset_health_module()
+        _issues, fixes = assets.check_folder(str(root), self.t._scanner, str(self.data), set())
+        splash = [f for f in fixes if f[0] == "tex" and "Splash" in f[2]]
+        self.assertEqual([(Path(f[1]).name, f[3]) for f in splash],
+                         [("big.tga", {"convert": ".dds", "nomips": True, "keep": True})])
+        with tempfile.TemporaryDirectory() as tools:
+            Path(tools, "texconv.exe").write_bytes(b"")
+            with mock.patch.object(assets, "TOOLS_DIR", tools),                     mock.patch.object(assets.subprocess, "run", side_effect=convert):
+                self.assertEqual(assets.apply_folder(str(root), splash, self.t._scanner, str(self.data.parent),
+                                                     "ModA", journal_ops=operations), (1, []))
+        self.assertEqual(commands[0][commands[0].index("-m") + 1], "1")              # no mipmaps
+        self.assertEqual(big.with_suffix(".dds").read_bytes(), b"converted dds")
+        self.assertTrue(big.exists())                                                 # the TGA stays
+        self.assertEqual([op.get("generated") for op in operations], [str(big.with_suffix(".dds"))])
+        _issues, again = assets.check_folder(str(root), self.t._scanner, str(self.data), set())
+        self.assertFalse([f for f in again if f[2].endswith("big.tga")])              # not moved to Off next time
+
     def test_staged_png_and_jpeg_become_dds_or_tga_with_the_texture_repairs(self):
         root = self.staging / "ModA-1-1-0"
         texture, page, shot = root / "Textures" / "ring.png", root / "BookArt" / "page.jpg", root / "shot.png"

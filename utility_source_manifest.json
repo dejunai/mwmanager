@@ -301,6 +301,17 @@
       "snapshot_sha256": "feb1538b7f771b0033022664c09ce3c51faed9e396aa2232b6dd496dbdd96f33",
       "working_sha256": "feb1538b7f771b0033022664c09ce3c51faed9e396aa2232b6dd496dbdd96f33",
       "working_matches_upstream": true
+    },
+    {
+      "name": "shared module mwdialog_mgeghosts",
+      "source": "<Steam Morrowind>\\mwdialog_mgeghosts.py",
+      "snapshot": "tools\\steam-upstream\\mwdialog_mgeghosts.py",
+      "working": "mwdialog_mgeghosts.py",
+      "working_copy_action": "upstream verbatim (2026-11-16)",
+      "source_sha256": "a11e0446e44438d2eb40696d76766ef41963b5605f9035db8ba71933dea35fb0",
+      "snapshot_sha256": "a11e0446e44438d2eb40696d76766ef41963b5605f9035db8ba71933dea35fb0",
+      "working_sha256": "a11e0446e44438d2eb40696d76766ef41963b5605f9035db8ba71933dea35fb0",
+      "working_matches_upstream": true
     }
   ],
   "tracked_configs": [

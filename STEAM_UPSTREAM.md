@@ -124,6 +124,27 @@ which drops those orphan findings after the upstream check. All shared files are
 `=> NOT PATCHED: <why>`. Without `done` the plan text is unchanged. MWManager's `backup_relative_to` was taken upstream
 (keyword-only, so tests that set `apply_report.__defaults__` still work).
 
+### 9. Distant-land ghost statics (`mwdialog_mgeghosts.py`)
+
+**Done 2026-11-16 (Steam source, vendored):** `--cell-conflicts` writes `mge3\Conflict Tools Ghost Statics.toml` (MGE XE
+G7, detected by `mgeXE.toml`; `exclude_objects`) or `.ovr` (other forks; `mesh=ignore`): doors that swing open in place
+(distant land bakes them shut) and objects mwcollide hides everywhere they are placed. MWManager keeps its own
+`mge_ghosts.py` (same rules plus its locked, journaled writes) and its `run_cell_conflicts` override calls that.
+Test: `tests/test_mgeghosts.py`.
+
+### 10. Cell Fixes: deletions a later, unaware plugin brings back stay deleted
+
+**Done 2026-11-16 (Steam source and MWManager's `fix_cell_winners` override):** when a plugin deletes another plugin's
+object and a later plugin without the deleter among its masters changes it again, the Cell Fixes patch writes the
+deletion back (chosen interiors are left to the cell winners). Test: `tests/test_revived_refs.py`.
+
+### 11. Splash screens and WAV conversion in Steam's apply step
+
+**Done 2026-11-16 (Steam source, vendored):** a splash TGA over 1024x1024 gets a same-name DDS (BC3, no mipmaps) beside
+it, the TGA kept; a WAV marked for MP3 becomes a same-stem MP3 with the WAV kept in Off (Steam's apply step used to
+re-encode it as WAV). MWManager's asset extension does the same in its own apply step and never moves a splash TGA to
+Off.
+
 ## MWManager-only behavior — do not put upstream
 
 These remain project extensions:

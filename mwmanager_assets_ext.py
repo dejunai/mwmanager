@@ -381,7 +381,7 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                         skipped.append(f"{rel} (texconv.exe not found)")
                         continue
                     os.makedirs(tmp, exist_ok=True)
-                    a = [texconv, "-nologo", "-y", "-dx9", "-o", tmp, "-m", "0"]
+                    a = [texconv, "-nologo", "-y", "-dx9", "-o", tmp, "-m", "1" if job.get("nomips") else "0"]
                     if job.get("convert"):
                         a += ["-ft", job["convert"][1:]] + (["-f", "BC3_UNORM"] if job["convert"] == ".dds" else [])
                     if job.get("dxt"):
@@ -435,6 +435,16 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                     continue
             if kind == "tex" and job.get("convert"):
                 replacement = os.path.splitext(full)[0] + job["convert"]
+            if kind == "tex" and job.get("keep"):
+                # the original stays where it is: only the DDS beside it is new
+                partial = replacement + ".mwmanager-tmp"
+                with open(partial, "wb") as output:
+                    output.write(new)
+                os.replace(partial, replacement)
+                if journal_ops is not None:
+                    journal_ops.append({"generated": replacement, "sha256": hashlib.sha256(new).hexdigest()})
+                done += 1
+                continue
             backup = _backup_in_mod(root, rel, full, plugin_name, m, FEATURE_OF.get(kind, "repair"))
             if kind == "tex" and job.get("convert") and os.path.exists(replacement):
                 # the mod ships its own DDS/TGA of that name, which the game prefers: the PNG only goes to Off
@@ -695,8 +705,11 @@ def check_folder(root, m, data_dir=None, bsa_meshes=None, stats=None, progress_c
             ds[:] = [d for d in ds if d.casefold() in IMAGE_ASSET_DIRS]
             continue
         dds_stems = {os.path.splitext(fn)[0].casefold() for fn in fs if fn.lower().endswith(".dds")}
+        splash = rel_dir.casefold().split(os.sep)[0] == "splash"
         for fn in fs:
             stem, ext = os.path.splitext(fn)
+            if splash and ext.lower() == ".tga":
+                continue                     # the splash list may be read by name: its TGA stays beside a DDS
             if ext.lower() in (".tga", ".bmp") and stem.casefold() in dds_stems:
                 # the engine loads the .dds whenever a .tga/.bmp of that name is asked for: this file is never used
                 rel = os.path.relpath(os.path.join(dp, fn), root)
