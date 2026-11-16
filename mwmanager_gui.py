@@ -4297,6 +4297,7 @@ class ManagerGUI(tk.Tk):
     def _after_major_master_staging(self, initializing, prompt):
         """Staging is finished: record it and offer deployment. Initialization is complete once the masters are
         deployed, or once deployment is declined here - not before."""
+        self._set_staging_run(None)
         self._setup_complete("major_masters_staged")
         if self._staged_major_master_names() and messagebox.askyesno("Deploy staged major masters?", prompt, parent=self):
             self.after(100, self.deploy_major_masters)

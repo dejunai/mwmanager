@@ -289,6 +289,13 @@ class GuiProbes(unittest.TestCase):
             self.app.deploy_major_masters()
         warning.assert_not_called()
 
+    def test_completed_stage_clears_the_run_so_unstage_does_not_requeue_it(self):
+        self.package(complete=True)
+        self.app._set_staging_run(["A.esm"])
+        with mock.patch.object(self.g.messagebox, "askyesno", return_value=False):
+            self.app._after_major_master_staging(False, "Deploy?")
+        self.assertNotIn("staging_run", self.app.gui_state)
+
     def test_cancel_resume_deploy_remove_end_to_end(self):
         root = self.g.APP_DIR
         # Real extraction, persisted failure, resumed package work, and real
