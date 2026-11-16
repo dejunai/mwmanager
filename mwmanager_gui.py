@@ -21,6 +21,7 @@ import mwmanager_setup_state as setup_state
 from mwmanager_workflow import JobCancelled, JobControl, JobView, checkpoint, preflight_signature
 
 from mwmanager_theme import COLORS, FONTS, SPACE, apply_theme, center, tree_tags
+from bsa_pack import BSA_OFFER_SETTING, DEFAULT_THRESHOLD as DEFAULT_BSA_OFFER, MIN_THRESHOLD as MIN_BSA_OFFER
 
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_FILE = APP_DIR / "mwmanager_gui_settings.json"
@@ -65,6 +66,10 @@ TIDY_SCRIPT = APP_DIR / "mwmanager_install.py"
 TIDY_REFUSED = 2                                      # mwmanager_install.py --apply: plan missing or changed
 
 
+class TidyPlanPaused(RuntimeError):
+    """The user kept a repeatedly changing Tidy package staged for a later retry."""
+
+
 def _atomic_write(path: Path, data: bytes) -> None:
     temporary = path.with_name(path.name + ".tmp")
     try:
@@ -78,8 +83,8 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
                    reopen: bool = False, env=None, quiet=None, on_line=None, log=None) -> int | None:
     """Run GUI Tidy options, build its plan, then apply it without prompting.
 
-    Returns the number of mods covered; raises RuntimeError when a step fails or --apply refuses because the plan
-    changed after it was built.
+    A plan that changes while being validated is rebuilt automatically. The user is asked what to do only after
+    three consecutive refusals.
     """
     base = [str(py), "-u", str(TIDY_SCRIPT), "--staging", str(staging), "--game-data-files", str(data_files)]
     if only:
@@ -125,19 +130,51 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
     code, recent, mods, plan = step(["--options-only" if reopen else "--options"], "options and plan")
     if code:
         raise RuntimeError(f"{label}: the option step failed (exit code {code}).\n\n" + "\n".join(recent)[-4000:])
-    checkpoint(progress)
-    state, plan_path = plan
-    if state == "empty":
-        progress(f"{label}: nothing to tidy.")
-        return mods
-    if state != "pending" or plan_path is None:
-        raise RuntimeError(f"{label}: Tidy did not report a valid plan state. Deployment is halted.")
-    progress(f"{label}: applying the validated Tidy plan automatically.")
-    code, recent, _mods, _plan = step(["--apply", "--yes"], "apply")
-    if code == TIDY_REFUSED:
-        raise RuntimeError(f"{label}: Tidy refused to apply the plan - it changed since it was reviewed, or there "
-                           f"was none. Nothing was changed; run it again to review the new plan.\n\n"
-                           + "\n".join(recent)[-4000:])
+    refusals, refusal_series = 0, 1
+    while True:
+        checkpoint(progress)
+        state, plan_path = plan
+        if state == "empty":
+            progress(f"{label}: nothing to tidy.")
+            return mods
+        if state != "pending" or plan_path is None:
+            raise RuntimeError(f"{label}: Tidy did not report a valid plan state. Deployment is halted.")
+        progress(f"{label}: applying the validated Tidy plan automatically.")
+        code, recent, _mods, _plan = step(["--apply", "--yes"], "apply")
+        if code == 0:
+            break
+        # Refused (the plan changed) or only partly applied (Tidy saw new work after its moves): either way a fresh
+        # pass sorts it out, so it starts again quietly; the user hears about it only after three in a row.
+        refusals += 1
+        if refusals == 3:
+            stop = ("Stop the install", "stop")
+            first = refusal_series == 1
+            action = progress.ask_choice(
+                "Tidy keeps finding new work",
+                f"{label}: Tidy found a different plan on three passes in a row, so it has not finished. "
+                "Nothing it was unsure of was applied.\n\n" +
+                ("Try again runs three more passes. Stop the install keeps the staged files as they are."
+                 if first else
+                 "Apply Anyway applies the plan Tidy calculates now, even though it keeps changing. Stop the "
+                 "install keeps the staged files as they are."),
+                [("Try Again", "retry"), stop] if first else [("Apply Anyway", "apply_anyway"), stop], "stop")
+            if action == "apply_anyway":
+                progress(f"{label}: applying the plan Tidy calculates now, as asked.")
+                code, recent, _mods, _plan = step(
+                    ["--apply", "--yes", "--force-plan"], "apply changing plan by user request")
+                break
+            if action != "retry":
+                raise TidyPlanPaused(f"{label}: the install was stopped. The staged files and Tidy's latest plan "
+                                     f"are kept:\n{plan_path}")
+            refusals = 0
+            refusal_series += 1
+        progress(f"{label}: Tidy found more to do on that pass; starting again (attempt {refusals + 1} of 3).")
+        code, recent, new_mods, plan = step([], "rebuild changed plan")
+        if code:
+            raise RuntimeError(f"{label}: Tidy could not rebuild its changed plan (exit code {code}).\n\n"
+                               + "\n".join(recent)[-4000:])
+        if new_mods is not None:
+            mods = new_mods
     if code:
         raise RuntimeError(f"{label}: Tidy could not apply every action (exit code {code}). The remaining actions "
                            f"stay in {plan_path}; deployment is halted.\n\n" + "\n".join(recent)[-4000:])
@@ -655,6 +692,11 @@ def read_settings() -> dict:
                                           for key in ("archive_downloads_dir", *LEGACY_PATH_KEYS["archive_downloads_dir"])
                                           if str(paths.get(key, "")).strip()), "")
     data["always_elevate_game_dir"] = str(paths.get("always_elevate_game_dir", "")).strip()
+    try:
+        threshold = ini.getint("Staging", BSA_OFFER_SETTING, fallback=DEFAULT_BSA_OFFER)
+    except ValueError:
+        threshold = DEFAULT_BSA_OFFER
+    data[BSA_OFFER_SETTING] = threshold if threshold >= MIN_BSA_OFFER else DEFAULT_BSA_OFFER
     detected_exe = vortex_install_path()
     data["vortex_detected"] = bool(detected_exe or vortex_registered())
     data["vortex_exe"] = str(detected_exe) if detected_exe else ""
@@ -685,11 +727,21 @@ def write_settings(settings: dict) -> None:
     for legacy in LEGACY_PATH_KEYS.values():
         for key in legacy:
             ini.remove_option("Paths", key)
+    if not ini.has_section("Staging"):
+        ini.add_section("Staging")
+    try:
+        threshold = int(settings.get(BSA_OFFER_SETTING, DEFAULT_BSA_OFFER))
+        if threshold < MIN_BSA_OFFER:
+            raise ValueError
+    except (TypeError, ValueError):
+        threshold = DEFAULT_BSA_OFFER
+    ini.set("Staging", BSA_OFFER_SETTING, str(threshold))
     with MWMANAGER_INI.open("w", encoding="utf-8", newline="\n") as stream:
         ini.write(stream)
 
     preferences = {key: value for key, value in settings.items()
-                   if key not in PATH_SETTING_KEYS and key not in RUNTIME_KEYS and key not in LEGACY_PREFERENCE_KEYS}
+                   if key not in PATH_SETTING_KEYS and key != BSA_OFFER_SETTING
+                   and key not in RUNTIME_KEYS and key not in LEGACY_PREFERENCE_KEYS}
     SETTINGS_FILE.write_text(json.dumps(preferences, indent=2) + "\n", encoding="utf-8")
 
 
@@ -1020,6 +1072,9 @@ class ManagerGUI(tk.Tk):
             self.after(150, lambda: self._run_initial_catalog(resume))
         elif not first_run and self.settings.get("init_complete", 0) != 1:
             self.after(150, self._begin_init)
+        elif not first_run and setup_state.interrupted(self._setup_path(), self.settings["game_dir"])[0] in (
+                "major_masters_staged", "major_masters_deployed"):
+            self.after(150, self._resume_interrupted_major_masters)
         elif not first_run and (self.settings.get("archive_source") is None
                                 or not self.settings.get("archive_downloads_dir")):
             self.after(150, self._ensure_archive_downloads)
@@ -1204,7 +1259,7 @@ class ManagerGUI(tk.Tk):
                 if not skip:
                     self._setup_begin("initial_full_pass_complete")
                 self.generate_patches(
-                    mode="full", force=True, asset_repair=True, on_success=full_completed, skip_first_pass=skip,
+                    mode="full", force=True, on_success=full_completed, skip_first_pass=skip,
                     on_first_pass=lambda: setup_state.complete(state_path, game, "initial_full_pass_complete"),
                     on_review=lambda: setup_state.reset(state_path, game, "initial_full_pass_complete"),
                     on_spawn=lambda pid: setup_state.set_pid(state_path, game, "initial_full_complete", pid),
@@ -1486,6 +1541,14 @@ class ManagerGUI(tk.Tk):
 
         ttk.Button(form, text="Browse…", command=browse_downloads).grid(row=row, column=1, padx=(8, 0), pady=(3, 12))
         row += 1
+        bsa_offer_var = tk.StringVar(value=str(self.settings.get(BSA_OFFER_SETTING, DEFAULT_BSA_OFFER)))
+        if first_run:
+            ttk.Label(form, text="Offer BSA when this many assets are found").grid(
+                row=row, column=0, columnspan=2, sticky="w")
+            row += 1
+            ttk.Entry(form, textvariable=bsa_offer_var, width=12).grid(
+                row=row, column=0, sticky="w", pady=(3, 12))
+            row += 1
 
         def approve():
             game = mwmanager_detect.valid_install(game_var.get())
@@ -1494,6 +1557,16 @@ class ManagerGUI(tk.Tk):
                                      "The selected folder must contain Morrowind.exe and a Data Files folder.",
                                      parent=dialog)
                 return
+            if first_run:
+                try:
+                    bsa_offer = int(bsa_offer_var.get())
+                    if bsa_offer < MIN_BSA_OFFER:
+                        raise ValueError
+                except ValueError:
+                    messagebox.showerror("Invalid BSA threshold",
+                                         f"The BSA offer threshold must be an integer of at least {MIN_BSA_OFFER}.",
+                                         parent=dialog)
+                    return
             folder = downloads_var.get().strip()
             source = source_var.get() or "unmanaged"
             if source != "unmanaged" and folder and mwmanager_detect.source_for_folder(managers, folder) != source:
@@ -1503,7 +1576,8 @@ class ManagerGUI(tk.Tk):
                 self.open_options(first_run=False, game=str(game), downloads=folder, archive_source=source)
                 return
             self.settings.update({"game_dir": str(game), "archive_downloads_dir": folder,
-                                  "archive_source": source, "first_run": 1, "init_complete": 0})
+                                  "archive_source": source, BSA_OFFER_SETTING: bsa_offer,
+                                  "first_run": 1, "init_complete": 0})
             write_settings(self.settings)
             self._setup_start()
             offer_elevation(game)
@@ -1542,6 +1616,7 @@ class ManagerGUI(tk.Tk):
         self._setup_begin("initialization_complete")
         self._initializing_manager = True
         self.status.set("Initial setup is ready for major-master selection and staging.")
+        self._resume_interrupted_major_masters(open_dialog=False)
         self.open_major_masters()
 
     def _launch_vortex(self) -> bool:
@@ -1675,11 +1750,11 @@ class ManagerGUI(tk.Tk):
         self.tree = ttk.Treeview(tree_box, columns=("active", "state", "type"), show="tree headings",
                                  selectmode="browse")
         self.tree.heading("#0", text="#   Plugin", anchor="w")
-        self.tree.heading("active", text="On")
+        self.tree.heading("active", text="Enabled")
         self.tree.heading("state", text="Status")
         self.tree.heading("type", text="Kind")
         self.tree.column("#0", width=360, stretch=True)
-        self.tree.column("active", width=52, anchor="center", stretch=False)
+        self.tree.column("active", width=68, anchor="center", stretch=False)
         self.tree.column("state", width=120, anchor="w", stretch=False)
         self.tree.column("type", width=110, anchor="w", stretch=False)
         tree_scroll = ttk.Scrollbar(tree_box, orient="vertical", command=self.tree.yview)
@@ -2067,6 +2142,7 @@ class ManagerGUI(tk.Tk):
                                     pack_package_assets, pull_updated_steam_luas,
                                     index_deployment, record_deployment, remove_superseded_plugins)
         from major_master_deploy import register_archives
+        from core_addons import extraction_status
 
         staging_root = APP_DIR / "staging" / "plugins"
         game_dir = Path(self.settings["game_dir"])
@@ -2257,7 +2333,7 @@ class ManagerGUI(tk.Tk):
                         else:
                             progress(f"Reprocessing existing staged files for {archive.name}.")
                     else:
-                        progress(f"Extracting {index} of {len(items)}: {archive.name}")
+                        progress(extraction_status(archive, index, len(items)))
                         package = extract_archive(item, destination, APP_DIR)
                     if not prepared:
                         progress(f"Running Tidy and mock FOMOD/BAIN options for {archive.name}…")
@@ -2282,16 +2358,17 @@ class ManagerGUI(tk.Tk):
                             progress(f"Omitted older duplicate plugin file(s): {', '.join(omitted)}")
                         progress(f"Checking BSA eligibility and final staged contents for {archive.name}…")
                         eligible = count_bsa_assets(package)
-                        if eligible > 10000 and len(install_plugins) == 1:
+                        bsa_offer = int(self.settings.get(BSA_OFFER_SETTING, DEFAULT_BSA_OFFER))
+                        if eligible >= bsa_offer and len(install_plugins) == 1:
                             plugin_label = install_plugins[0]
                             make_bsa = progress.ask_yes_no(
                                 "Build a BSA?",
                                 f"{plugin_label} has {eligible:,} BSA-compatible assets after Tidy.\n\n"
                                 "Build and register a BSA before deployment? BSAPack may split it into multiple archives.")
                             if make_bsa:
-                                packed = pack_package_assets(package, plugin_label, APP_DIR)
+                                packed = pack_package_assets(package, plugin_label, APP_DIR, progress)
                                 progress(f"Built {len(packed)} BSA archive(s) for {plugin_label}.")
-                        elif eligible > 10000:
+                        elif eligible >= bsa_offer:
                             progress(f"BSA packing skipped for {archive.name}: its assets cannot be attributed to exactly one plugin.")
                         item["selected_plugins"] = install_plugins
                         mark_ready(item, package, install_plugins)
@@ -2310,6 +2387,11 @@ class ManagerGUI(tk.Tk):
         def completed(result, error):
             if error:
                 log_install_phase(f"ERROR: {error}")
+                if isinstance(error, TidyPlanPaused):
+                    self.status.set("Plugin Tidy paused; staged files were preserved for a later retry.")
+                    messagebox.showinfo("Plugin Tidy paused", str(error), parent=self)
+                    self.refresh()
+                    return
                 self.status.set("Plugin installation stopped; completed batches remain installed.")
                 messagebox.showerror("Plugin installation failed", str(error), parent=self)
                 self.refresh()
@@ -2494,7 +2576,7 @@ class ManagerGUI(tk.Tk):
         self.generate_patches(mode="full", force=True)
         return "break"
 
-    def generate_patches(self, mode="all", force=False, on_success=None, asset_repair=False, *,
+    def generate_patches(self, mode="all", force=False, on_success=None, *,
                          skip_first_pass=False, on_first_pass=None, on_review=None, on_spawn=None,
                          on_failure=None):
         """skip_first_pass / on_first_pass / on_review / on_spawn / on_failure: setup's checkpoints (called from
@@ -2517,8 +2599,6 @@ class ManagerGUI(tk.Tk):
         mode = "full" if mode == "full" else "all"
         pass_flag = "--full" if mode == "full" else "--all"
         command = [str(self._console_python()), "-u", str(script), str(data_dir), "--sort", pass_flag, "--yes"]
-        if asset_repair:
-            command.append("--asset-repair")
         report_path = APP_DIR / "outputs" / "mwmanager_report.txt"
         try:
             report_before = report_path.stat().st_mtime_ns
@@ -3007,12 +3087,12 @@ class ManagerGUI(tk.Tk):
         ttk.Label(frame, text="Installed masters can be enabled and prioritized here. Missing masters stay in this catalog only.", wraplength=660).pack(anchor="w", pady=(3, 8))
         tree_box = ttk.Frame(frame)
         tree_box.pack(fill="both", expand=True)
-        tree = ttk.Treeview(tree_box, columns=("active", "installed"), show="tree headings", selectmode="browse")
+        tree = ttk.Treeview(tree_box, columns=("active", "installed"), show="tree headings", selectmode="extended")
         tree.heading("#0", text="Priority / Master")
-        tree.heading("active", text="On")
+        tree.heading("active", text="Enable")
         tree.heading("installed", text="Status")
         tree.column("#0", width=390, stretch=True)
-        tree.column("active", width=55, anchor="center", stretch=False)
+        tree.column("active", width=70, anchor="center", stretch=False)
         tree.column("installed", width=100, anchor="center")
         tree.grid(row=0, column=0, sticky="nsew")
         master_scroll = ttk.Scrollbar(tree_box, orient="vertical", command=tree.yview)
@@ -3086,46 +3166,57 @@ class ManagerGUI(tk.Tk):
                     self.unstage_master_button.state(["disabled"])
                 return
             idx = masters.index(selection[0])
-            up.state(["disabled"] if idx == 0 else ["!disabled"])
-            down.state(["disabled"] if idx == len(masters) - 1 else ["!disabled"])
+            single = len(selection) == 1                        # reordering moves one row at a time
+            up.state(["!disabled"] if single and idx > 0 else ["disabled"])
+            down.state(["!disabled"] if single and idx < len(masters) - 1 else ["disabled"])
             if hasattr(self, "unstage_master_button"):
                 staged = self._staged_major_master_names()
-                ready = (selection[0].casefold() in staged and not (data_dir / selection[0]).is_file()
-                         and selection[0].casefold() not in self._required_major_master_names())
+                required = self._required_major_master_names()
+                ready = any(name.casefold() in staged and not (data_dir / name).is_file()
+                            and name.casefold() not in required for name in selection)
                 self.unstage_master_button.state(["!disabled"] if ready else ["disabled"])
 
         def unstage_selected():
             import mwmanager_dialogs as messagebox
             import shutil
+            from core_addons import _rmtree_clear_readonly
             from major_master_deploy import staged_masters
             selection = tree.selection()
             if not selection:
                 return
-            name = selection[0]
             staging_root = (APP_DIR / "staging" / "major_masters").resolve()
             staged_map = staged_masters(staging_root, masters)
-            esm = staged_map.get(name.casefold())
-            if esm is None or (data_dir / name).is_file():
+            required = self._required_major_master_names()
+            packages = []
+            for name in selection:
+                esm = staged_map.get(name.casefold())
+                if esm is None or (data_dir / name).is_file() or name.casefold() in required:
+                    continue
+                package = next((parent for parent in esm.parents if parent.parent == staging_root), None)
+                if (package is None or package.resolve() == staging_root
+                        or not package.resolve().is_relative_to(staging_root)):
+                    messagebox.showerror("Cannot unstage master",
+                                         "The staged package path is outside major-master staging.", parent=dialog)
+                    return
+                if package not in packages:
+                    packages.append(package)
+            if not packages:
                 return
-            package = next((parent for parent in esm.parents if parent.parent == staging_root), None)
-            if (package is None or package.resolve() == staging_root
-                    or not package.resolve().is_relative_to(staging_root)):
-                messagebox.showerror("Cannot unstage master",
-                                     "The staged package path is outside major-master staging.", parent=dialog)
-                return
+            resolved = [package.resolve() for package in packages]
             package_masters = [key for key, path in staged_map.items()
-                               if package.resolve() in path.resolve().parents]
+                               if any(root in path.resolve().parents for root in resolved)]
             display = [next((master for master in masters if master.casefold() == key), key)
                        for key in package_masters]
             if not messagebox.askyesno(
-                    "Unstage major-master package?",
-                    f"Remove the staged package containing {name}?\n\n"
-                    f"This package also contains: {', '.join(display)}\n\n"
+                    "Unstage major-master packages?",
+                    f"Remove {len(packages)} staged package(s): {', '.join(p.name for p in packages)}?\n\n"
+                    f"Masters in them: {', '.join(display)}\n\n"
                     "The live Data Files folder will not be changed.", parent=dialog):
                 return
             def remove_package(progress):
-                progress(f"Removing staged package: {package.name}")
-                shutil.rmtree(package)
+                for package in packages:
+                    progress(f"Removing staged package: {package.name}")
+                    shutil.rmtree(package, onerror=_rmtree_clear_readonly)   # archives can carry read-only folders
                 return display
 
             def package_removed(result, error):
@@ -3140,7 +3231,7 @@ class ManagerGUI(tk.Tk):
                 refresh_masters()
                 self.status.set(f"Unstaged {', '.join(result)}. Live game files were not changed.")
 
-            self._run_progress_job("Unstage major master", f"Removing staged package {package.name}…",
+            self._run_progress_job("Unstage major master", f"Removing {len(packages)} staged package(s)…",
                                    remove_package, package_removed)
 
         def click_master(event):
@@ -3303,8 +3394,31 @@ class ManagerGUI(tk.Tk):
         self._major_master_refresh = refresh_masters
         refresh_masters()
 
+    def _master_scan_cached(self, kind, compute):
+        """Walking staging and Data Files takes seconds once the big masters are staged, and the master list asks
+        on every click. Reuse the last answer until a package folder, the staging folder or Data Files changes
+        (their modification times move when a master is extracted, tidied to the package root, deployed or removed)."""
+        staging = APP_DIR / "staging" / "major_masters"
+        stamps = [tuple(self.major_masters)]
+        for folder in (staging, Path(self.settings["game_dir"]) / "Data Files"):
+            try:
+                stamps.append(folder.stat().st_mtime_ns)
+            except OSError:
+                stamps.append(None)
+        try:
+            stamps += [(entry.name, entry.stat().st_mtime_ns) for entry in os.scandir(staging) if entry.is_dir()]
+        except OSError:
+            pass
+        cache = self.__dict__.setdefault("_master_scan_cache", {})
+        if cache.get(kind, (None,))[0] != stamps:
+            cache[kind] = (stamps, compute())
+        return set(cache[kind][1])
+
     def _staged_major_master_names(self):
         """Return configured major-master ESMs present in current staged packages."""
+        return self._master_scan_cached("staged", self._scan_staged_major_master_names)
+
+    def _scan_staged_major_master_names(self):
         staging = APP_DIR / "staging" / "major_masters"
         if not staging.is_dir():
             return set()
@@ -3371,6 +3485,9 @@ class ManagerGUI(tk.Tk):
 
     def _required_major_master_names(self):
         """Return configured masters referenced by another installed or staged major master."""
+        return self._master_scan_cached("required", self._scan_required_major_master_names)
+
+    def _scan_required_major_master_names(self):
         configured = {name.casefold() for name in self.major_masters}
         roots = [Path(self.settings["game_dir"]) / "Data Files", APP_DIR / "staging" / "major_masters"]
         required = set()
@@ -3495,9 +3612,14 @@ class ManagerGUI(tk.Tk):
             if hasattr(self, "deploy_master_button"):
                 self.deploy_master_button.state(["!disabled"])
             if error:
+                self._setup_fail("major_masters_deployed", error)
                 self.status.set("Major-master deployment stopped with an error.")
                 messagebox.showerror("Could not deploy major masters", str(error), parent=self)
                 return
+            self._setup_complete("major_masters_deployed")
+            if getattr(self, "_initializing_manager", False):
+                self._initializing_manager = False
+                self._complete_init()                # setup's major-master step ends with the deployment
             self.active_names.update(name.casefold() for name in result["ready"])
             self.selected_major_masters.update(name.casefold() for name in result["ready"])
             major_keys = {name.casefold() for name in self.major_masters}
@@ -3525,6 +3647,7 @@ class ManagerGUI(tk.Tk):
             if result.get("conflicts"):
                 self._resolve_major_master_conflicts(result["conflicts"])
 
+        self._setup_begin("major_masters_deployed")
         self._run_progress_job("Deploy Major Masters", "Hardlinking selected masters and their assets…", worker, completed)
 
     def remove_deployed_major_masters(self):
@@ -4091,39 +4214,243 @@ class ManagerGUI(tk.Tk):
         _end_children()
         self.destroy()
 
+    def _archive_downloads_folder(self):
+        """The Archive Downloads folder, or None. If the value held in memory is empty or gone, the saved one
+        (mwmanager.ini) is read again before giving up."""
+        held = str(self.settings.get("archive_downloads_dir") or "").strip()
+        if held and Path(held).is_dir():
+            return Path(held)
+        saved = str(read_settings().get("archive_downloads_dir") or "").strip()
+        if saved and Path(saved).is_dir():
+            self.settings["archive_downloads_dir"] = saved
+            return Path(saved)
+        return None
+
+    def _after_major_master_staging(self, initializing, prompt):
+        """Staging is finished: record it and offer deployment. Initialization is complete once the masters are
+        deployed, or once deployment is declined here - not before."""
+        self._setup_complete("major_masters_staged")
+        if self._staged_major_master_names() and messagebox.askyesno("Deploy staged major masters?", prompt, parent=self):
+            self.after(100, self.deploy_major_masters)
+            return
+        if initializing:
+            self._initializing_manager = False
+            self._complete_init()
+            self.after(100, self.open_major_masters)
+
+    def _resume_interrupted_major_masters(self, *, open_dialog=True) -> bool:
+        """At start: if staging or deploying the major masters was interrupted, say so and pick it up."""
+        step, _entry = setup_state.interrupted(self._setup_path(), self.settings["game_dir"])
+        if step not in ("major_masters_staged", "major_masters_deployed"):
+            return False
+        if not self._setup_resume_check():
+            return True
+        if step == "major_masters_staged":
+            from core_addons import unfinished_packages
+            if unfinished_packages(APP_DIR / "staging" / "major_masters") or self._pending_stage_masters():
+                self.after(300, self.stage_major_masters)   # resumes from each package's own step record
+            else:
+                # every package is finished and none is owed: only the deploy question was left unanswered.
+                # Nothing is re-run; the option installers are not opened again.
+                self.after(300, lambda: self._after_major_master_staging(
+                    bool(getattr(self, "_initializing_manager", False)),
+                    "Major-master staging had finished when MWManager was closed.\n\n"
+                    "Deploy the staged masters to the game now?"))
+        if open_dialog:
+            self.open_major_masters()
+        return True
+
+    def _set_staging_run(self, masters):
+        """Remember (or, with None, forget) the masters chosen for the staging run in progress."""
+        if masters:
+            self.gui_state["staging_run"] = {"masters": list(masters),
+                                             "started_at": setup_state._now()}
+        else:
+            self.gui_state.pop("staging_run", None)
+        write_gui_state(self.gui_state)
+
+    def _pending_stage_masters(self) -> list[str]:
+        """Masters of an interrupted staging run that are neither staged nor deployed yet, in priority order."""
+        run = self.gui_state.get("staging_run")
+        wanted = {str(name).casefold() for name in (run or {}).get("masters", [])} if isinstance(run, dict) else set()
+        have = self._staged_major_master_names() | deployed_master_names()
+        return [name for name in self.major_masters if name.casefold() in wanted and name.casefold() not in have]
+
     def stage_major_masters(self, *, force_scan=False):
         """Review downloaded major masters and unpack selected archives into MWManager staging."""
         initializing = bool(getattr(self, "_initializing_manager", False))
         staging = APP_DIR / "staging" / "major_masters"
-        if staging.is_dir() and any(staging.iterdir()) and not force_scan:
-            game_data_files = APP_DIR / "staging" / "Data Files"
+        game_data_files = Path(self.settings["game_dir"]) / "Data Files"
+        from core_addons import (PACKAGE_STEP_LABELS, begin_package_step, complete_package_step, fail_package_step,
+                                 package_steps, reset_partial_package, unfinished_packages)
+
+        def console_python():
             py = Path(sys.executable)
             if py.name.casefold() == "pythonw.exe":
                 console_py = py.with_name("python.exe")
                 if console_py.is_file():
                     py = console_py
-            if py.name.casefold() not in {"python.exe", "python3.exe", "python"}:
+            return py if py.name.casefold() in {"python.exe", "python3.exe", "python"} else None
+
+        def quiet_options():
+            if os.name != "nt":
+                return {}
+            startup = subprocess.STARTUPINFO()
+            startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startup.wShowWindow = subprocess.SW_HIDE
+            return {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
+
+        def process_package(progress, py, quiet, mod_dir, group_masters, *, reopen=False):
+            """Tidy with the option installer, then the BSA check. Each step is recorded in the package's marker
+            as it starts and completes; a step already completed is not run again."""
+            steps = package_steps(mod_dir) or {}
+            from core_addons import _read_staged_archive_marker
+            marker = _read_staged_archive_marker(mod_dir)
+            primary_master = Path(group_masters[0]) if group_masters else next(mod_dir.glob("*.esm"), None)
+            PLUGIN_NAME = marker.get("PLUGIN_NAME") or (primary_master.stem if primary_master else mod_dir.name)
+            label = ", ".join(group_masters) or mod_dir.name
+
+            def run(step, work):
+                if (steps.get(step) or {}).get("completed_at"):
+                    return
+                begin_package_step(mod_dir, step)
+                try:
+                    work()
+                except Exception as exc:
+                    fail_package_step(mod_dir, step, exc)
+                    raise
+                complete_package_step(mod_dir, step)
+
+            def tidy():
+                progress(f"Running tidy and option installer for {label}. "
+                         "Choose any optional packages in the installer window that opens.")
+
+                def tidy_line(clean_line):
+                    if clean_line.startswith("ASSET CHECK"):
+                        progress(f"Tidy {mod_dir.name}: checking assets")
+
+                env = os.environ.copy()          # the option window's "Open source archive" button reads this
+                archive = _read_staged_archive_marker(mod_dir).get("archive")
+                if archive:
+                    source_archive = Path(archive)
+                    if not source_archive.is_absolute():
+                        source_archive = Path(self.settings.get("archive_downloads_dir", "")) / source_archive
+                    env["MWMANAGER_SOURCE_ARCHIVE"] = str(source_archive)
+                env["MWMANAGER_PLUGIN_NAME"] = PLUGIN_NAME
+                run_tidy_steps(py, staging, game_data_files, progress, f"Tidy {mod_dir.name}",
+                               only=mod_dir.name, reopen=reopen, env=env, quiet=quiet, on_line=tidy_line)
+
+            def bsa_check():
+                if not group_masters:
+                    return
+                progress(f"Checking BSA eligibility for {label} after final Tidy pass…")
+                from major_master_deploy import count_bsa_eligible
+                eligible_assets = count_bsa_eligible(staging, group_masters)
+                if eligible_assets >= int(self.settings.get(BSA_OFFER_SETTING, DEFAULT_BSA_OFFER)):
+                    if progress.ask_yes_no(
+                            f"Build a BSA for {PLUGIN_NAME}?",
+                            f"{PLUGIN_NAME} has {eligible_assets:,} BSA-compatible assets after Tidy and FOMOD selection.\n\n"
+                            "Build its BSA archive(s) now? BSAPack will split archives before they reach 2 GB. "
+                            "The resulting archives will be registered in Morrowind.ini when deployed."):
+                        from plugin_install import pack_package_assets
+                        packed = pack_package_assets(mod_dir, PLUGIN_NAME, APP_DIR, progress)
+                        progress(f"Built {len(packed)} BSA archive(s) for {PLUGIN_NAME}.")
+
+            run("tidied", tidy)
+            run("bsa_checked", bsa_check)
+            progress(f"Finished tidy and installer for {label}.")
+
+        def unstaged_masters():
+            have = self._staged_major_master_names() | deployed_master_names()
+            return [name for name in self.major_masters if name.casefold() not in have]
+
+        # every staged package finished but masters are still missing: go straight to the selection window
+        if (staging.is_dir() and any(staging.iterdir()) and not force_scan
+                and not unfinished_packages(staging) and unstaged_masters()):
+            force_scan = True
+        if staging.is_dir() and any(staging.iterdir()) and not force_scan:
+            py = console_python()
+            if py is None:
                 messagebox.showerror("Cannot reopen staged options",
                                      "The mock FOMOD needs the Python console executable beside pythonw.exe.", parent=self)
+                return
+
+            unfinished = unfinished_packages(staging)
+            if unfinished or self._pending_stage_masters():
+                # an earlier Stage run stopped part-way: finish each package from the step its marker stops at
+                def resume(progress):
+                    from core_addons import _read_staged_archive_marker
+                    restage = 0
+                    for number, (package, missing) in enumerate(unfinished, 1):
+                        if "extracted" in missing:
+                            # a folder with no step record at all may have been put there by hand: ask first
+                            if package_steps(package) is None and not progress.ask_yes_no(
+                                    "Staged folder without a record",
+                                    f"{package.name} has no staging record. Its extraction was interrupted, or the "
+                                    "folder was put into staging by hand.\n\nRemove it and extract its archive again?"):
+                                progress(f"{package.name}: left as it is.")
+                                continue
+                            progress(f"{package.name}: the archive was never fully extracted; it will be staged again.")
+                            reset_partial_package(package)
+                            restage += 1
+                            continue
+                        progress(f"Resuming package {number} of {len(unfinished)}: {package.name} - "
+                                 + ", ".join(PACKAGE_STEP_LABELS[step] for step in missing))
+                        masters = [str(name) for name in
+                                   _read_staged_archive_marker(package).get("selected_masters", []) if name]
+                        process_package(progress, py, quiet_options(), package, masters, reopen=True)
+                    return restage
+
+                def resumed(restage, error):
+                    if error:
+                        if isinstance(error, TidyPlanPaused):
+                            self._initializing_manager = False
+                            self.status.set("Major-master Tidy paused; staged files were preserved.")
+                            messagebox.showinfo("Major-master Tidy paused", str(error), parent=self)
+                            return
+                        self._setup_fail("major_masters_staged", error)
+                        self._initializing_manager = False
+                        self.status.set("Resuming major-master staging stopped with an error.")
+                        messagebox.showerror("Could not resume major-master staging", str(error), parent=self)
+                        return
+                    if hasattr(self, "_major_master_refresh"):
+                        self._major_master_refresh()
+                    if restage or unstaged_masters():
+                        # masters are still missing from staging: open the selection window for them
+                        self.status.set("Interrupted packages are finished. Choose the masters still to stage.")
+                        self.after(100, lambda: self.stage_major_masters(force_scan=True))
+                        return
+                    self.status.set("The interrupted major-master staging is finished.")
+                    self._after_major_master_staging(
+                        initializing, "The interrupted major-master staging is finished and every staged package "
+                                      "is processed.\n\nDeploy the staged masters to the game now?")
+
+                self._setup_begin("major_masters_staged")
+                self.status.set("Resuming the interrupted major-master staging…")
+                self._run_progress_job(
+                    "Resume major-master staging",
+                    f"Finishing {len(unfinished)} package(s) from the step each one stopped at:\n{staging}\n"
+                    "Completed steps are not repeated.",
+                    resume, resumed)
                 return
 
             def reopen_options(progress):
                 checkpoint(progress)
                 names = self._staged_major_master_names()
                 self._set_master_stage_ready(names, False)
-                quiet = {}
-                if os.name == "nt":
-                    startup = subprocess.STARTUPINFO()
-                    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                    startup.wShowWindow = subprocess.SW_HIDE
-                    quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
                 run_tidy_steps(py, staging, game_data_files, progress, "Saved mock FOMOD choices",
-                               reopen=True, quiet=quiet)
+                               reopen=True, quiet=quiet_options())
                 self._set_master_stage_ready(names, True)
                 return True
 
             def options_reopened(_result, error):
                 if error:
+                    if isinstance(error, TidyPlanPaused):
+                        self._initializing_manager = False
+                        self.status.set("Staged mock FOMOD Tidy paused; staged files were preserved.")
+                        messagebox.showinfo("Staged Tidy paused", str(error), parent=self)
+                        return
+                    self._setup_fail("major_masters_staged", error)
                     self._initializing_manager = False
                     self.status.set("Staged mock FOMOD stopped with an error.")
                     messagebox.showerror("Could not reopen staged options", str(error), parent=self)
@@ -4136,19 +4463,11 @@ class ManagerGUI(tk.Tk):
                 self.status.set("Saved mock FOMOD choices applied to the existing major-master stage.")
                 if hasattr(self, "_major_master_refresh"):
                     self._major_master_refresh()
-                if initializing:
-                    self._initializing_manager = False
-                    self._complete_init()
-                if staged and messagebox.askyesno(
-                        "Staged options updated",
-                        "The existing stage is processed and ready. No archives were extracted.\n\n"
-                        "Deploy the selected staged masters now? Choose No to keep them staged for later.",
-                        parent=self):
-                    self.after(100, self.deploy_major_masters)
-                elif initializing:
-                    self._setup_flow_active = False
-                    self.after(100, self.open_major_masters)
+                self._after_major_master_staging(
+                    initializing, "The existing major-master stage is processed and ready. No archives were "
+                                  "re-extracted.\n\nDeploy the staged masters to the game now?")
 
+            self._setup_begin("major_masters_staged")
             self.status.set("Reopening mock FOMOD for the existing major-master stage…")
             self._run_progress_job(
                 "Reopen major-master options",
@@ -4156,12 +4475,15 @@ class ManagerGUI(tk.Tk):
                 "The archive extraction step will be skipped.",
                 reopen_options, options_reopened)
             return
-        downloads_setting = str(self.settings.get("archive_downloads_dir") or "").strip()
-        downloads = Path(downloads_setting).expanduser()
+        downloads = self._archive_downloads_folder()
         game_dir = Path(self.settings["game_dir"])
-        if not downloads_setting or not downloads.is_dir():
-            messagebox.showwarning("Archive Downloads not set",
-                                   "Choose the Archive Downloads folder in Options first.", parent=self)
+        if downloads is None:
+            held = self.settings.get("archive_downloads_dir") or ""
+            messagebox.showwarning(
+                "Archive Downloads not set",
+                (f"The Archive Downloads folder cannot be opened from this session:\n{held}\n\n" if held
+                 else "No Archive Downloads folder is saved.\n\n")
+                + "Choose the Archive Downloads folder in Options first.", parent=self)
             self.open_options()
             return
         try:
@@ -4186,6 +4508,7 @@ class ManagerGUI(tk.Tk):
                     self.after(100, lambda: self.stage_major_masters(force_scan=True))
                     return
                 if selected is None:
+                    self._set_staging_run(None)                 # cancelled: nothing is left to resume
                     self._initializing_manager = False
                     if initializing:
                         self.status.set("Initialization paused at major-master selection; it will resume next launch.")
@@ -4200,8 +4523,11 @@ class ManagerGUI(tk.Tk):
                     else:
                         messagebox.showinfo("No masters selected", "No new major masters were selected for staging.", parent=self)
                     return
+                # the masters of this run are written down before anything is extracted, so a run that is
+                # interrupted knows which ones it still owes
+                self._set_staging_run(selected)
                 selected_keys = {name.casefold() for name in selected}
-                selected_archives = {str(item["archive"]).casefold(): item for item in plan.get("archives", [])
+                selected_archives ={str(item["archive"]).casefold(): item for item in plan.get("archives", [])
                                      if any(name.casefold() in selected_keys for name in item.get("core_masters", []))}
                 total_bytes = sum(int(item.get("size_bytes") or 0) for item in selected_archives.values())
                 size_text = f"{total_bytes / (1024 ** 3):.2f} GB" if total_bytes else "unknown size"
@@ -4209,11 +4535,18 @@ class ManagerGUI(tk.Tk):
 
                 def staged(result, stage_error):
                     if stage_error:
+                        if isinstance(stage_error, TidyPlanPaused):
+                            self._initializing_manager = False
+                            self.status.set("Major-master Tidy paused; staged files were preserved.")
+                            messagebox.showinfo("Major-master Tidy paused", str(stage_error), parent=self)
+                            return
+                        self._setup_fail("major_masters_staged", stage_error)
                         self._initializing_manager = False
                         self.status.set("Major-master staging and tidy stopped with an error.")
                         messagebox.showerror("Could not process major masters", str(stage_error), parent=self)
                         return
                     destinations = result
+                    self._set_staging_run(None)                 # every master of the run is staged
                     self.selected_major_masters.update(name.casefold() for name in selected)
                     self.gui_state["selected_major_masters"] = [name for name in self.major_masters
                                                                 if name.casefold() in self.selected_major_masters]
@@ -4221,18 +4554,9 @@ class ManagerGUI(tk.Tk):
                     if hasattr(self, "_major_master_refresh"):
                         self._major_master_refresh()
                     self.status.set(f"Staged and tidied {len(destinations)} archive(s). No live game files were changed.")
-                    if initializing:
-                        self._initializing_manager = False
-                        self._complete_init()
-                    if messagebox.askyesno(
-                            "Major masters ready",
-                            f"Processed {len(destinations)} archive(s). Live game files have not changed.\n\n"
-                            "Deploy the selected masters now? Choose No to keep them staged for later.",
-                            parent=self):
-                        self.after(100, self.deploy_major_masters)
-                    elif initializing:
-                        self._setup_flow_active = False
-                        self.open_major_masters()
+                    self._after_major_master_staging(
+                        initializing, f"Processed {len(destinations)} archive(s). Live game files have not changed.\n\n"
+                                      "Deploy the selected staged masters now?")
 
                 def stage_and_process(progress):
                     # Preserve configured master priority, grouping masters that share one archive.
@@ -4254,59 +4578,28 @@ class ManagerGUI(tk.Tk):
                         groups.append((item, masters_in_archive or [master]))
 
                     staged_paths = []
-                    staging_root = APP_DIR / "staging" / "major_masters"
-                    game_data_files = APP_DIR / "staging" / "Data Files"
-
-                    py = Path(sys.executable)
-                    if py.name.casefold() == "pythonw.exe":
-                        console_py = py.with_name("python.exe")
-                        if console_py.is_file():
-                            py = console_py
-                    if py.name.casefold() not in {"python.exe", "python3.exe", "python"}:
+                    py = console_python()
+                    if py is None:
                         raise RuntimeError("The tidy utility needs the Python console executable beside pythonw.exe.")
-                    quiet = {}
-                    if os.name == "nt":
-                        startup = subprocess.STARTUPINFO()
-                        startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-                        startup.wShowWindow = subprocess.SW_HIDE
-                        quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
+                    quiet = quiet_options()
 
                     for index, (item, group_masters) in enumerate(groups, 1):
                         checkpoint(progress)
                         self._set_master_stage_ready(group_masters, False)
-                        # Every Stage action extracts fresh archives and reruns the full pipeline.
+                        # Each archive is extracted, tidied and BSA-checked in turn; every step is recorded in
+                        # the package's marker, so a run that stops here resumes at this package and step.
                         progress(f"Staging master {index} of {len(groups)}: {', '.join(group_masters)}")
                         paths = stage_core_master_archives(plan, group_masters, APP_DIR, game_dir,
                                                            progress_callback=progress,
                                                            clear_staging=(index == 1 and not any(staging.iterdir())))
                         for mod_dir in paths:
                             staged_paths.append(mod_dir)
-                            progress(f"Running tidy and option installer for {', '.join(group_masters)}. "
-                                     "Choose any optional packages in the installer window that opens.")
-                            def tidy_line(clean_line, name=mod_dir.name):
-                                if clean_line.startswith("ASSET CHECK"):
-                                    progress(f"Tidy {name}: checking assets")
-
-                            run_tidy_steps(py, staging_root, game_data_files, progress, f"Tidy {mod_dir.name}",
-                                           only=mod_dir.name, quiet=quiet, on_line=tidy_line)
-                            progress(f"Checking BSA eligibility for {', '.join(group_masters)} after final Tidy pass…")
-                            from major_master_deploy import count_bsa_eligible
-                            eligible_assets = count_bsa_eligible(staging_root, group_masters)
-                            if eligible_assets > 10000:
-                                plugin_label = group_masters[0]
-                                if progress.ask_yes_no(
-                                        f"Build a BSA for {plugin_label}?",
-                                        f"{plugin_label} has {eligible_assets:,} BSA-compatible assets after Tidy and FOMOD selection.\n\n"
-                                        "Build its BSA archive(s) now? BSAPack will split archives before they reach 2 GB. "
-                                        "The resulting archives will be registered in Morrowind.ini when deployed."):
-                                    from plugin_install import pack_package_assets
-                                    packed = pack_package_assets(mod_dir, plugin_label, APP_DIR)
-                                    progress(f"Built {len(packed)} BSA archive(s) for {plugin_label}.")
-                            progress(f"Finished tidy and installer for {', '.join(group_masters)}.")
+                            process_package(progress, py, quiet, mod_dir, group_masters)
                         self._set_master_stage_ready(group_masters, True)
                         checkpoint(progress)
                     return staged_paths
 
+                self._setup_begin("major_masters_staged")
                 self.status.set("Unpacking major masters into staging…")
                 self._run_progress_job(
                     "Staging major masters",
@@ -4319,6 +4612,7 @@ class ManagerGUI(tk.Tk):
                 def checked(message):
                     checkpoint(progress)
                     progress(message)
+                checked.ask_yes_no = progress.ask_yes_no
                 plan = verify_nexus_versions(
                     scan_downloads(downloads, APP_DIR, APP_DIR / "outputs", progress_callback=checked),
                     progress_callback=checked)
@@ -4347,6 +4641,7 @@ class ManagerGUI(tk.Tk):
         game_var = tk.StringVar(value=game if game is not None else self.settings["game_dir"])
         downloads_var = tk.StringVar(value=downloads if downloads is not None
                                      else self.settings.get("archive_downloads_dir", ""))
+        bsa_offer_var = tk.StringVar(value=str(self.settings.get(BSA_OFFER_SETTING, DEFAULT_BSA_OFFER)))
         ttk.Label(form, text="Morrowind install folder").grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Entry(form, textvariable=game_var, width=62).grid(row=1, column=0, sticky="ew", pady=(3, 12))
         ttk.Button(form, text="Browse…", command=lambda: game_var.set(filedialog.askdirectory(title="Select Morrowind install", initialdir=game_var.get()) or game_var.get())).grid(row=1, column=1, padx=(8, 0), pady=(3, 12))
@@ -4358,9 +4653,21 @@ class ManagerGUI(tk.Tk):
         ttk.Entry(form, textvariable=downloads_var, width=62).grid(row=3, column=0, sticky="ew", pady=(3, 5))
         ttk.Button(form, text="Browse…", command=lambda: downloads_var.set(filedialog.askdirectory(title="Select the Archive Downloads folder", initialdir=downloads_var.get() or str(Path.home())) or downloads_var.get())).grid(row=3, column=1, padx=(8, 0), pady=(3, 5))
         ttk.Label(form, text="Used to find downloaded mods. Install staging is configured separately.", wraplength=520).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        ttk.Label(form, text="Offer BSA when this many assets are found").grid(
+            row=5, column=0, columnspan=2, sticky="w")
+        ttk.Entry(form, textvariable=bsa_offer_var, width=12).grid(row=6, column=0, sticky="w", pady=(3, 12))
 
         def save_close():
             game, downloads = Path(game_var.get()).expanduser(), Path(downloads_var.get()).expanduser()
+            try:
+                bsa_offer = int(bsa_offer_var.get())
+                if bsa_offer < MIN_BSA_OFFER:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Invalid BSA threshold",
+                                     f"The BSA offer threshold must be an integer of at least {MIN_BSA_OFFER}.",
+                                     parent=dialog)
+                return
             if not (game / "Data Files").is_dir():
                 messagebox.showerror("Invalid game folder", "The selected folder must contain a Data Files folder.", parent=dialog)
                 return
@@ -4373,6 +4680,7 @@ class ManagerGUI(tk.Tk):
             downloads_changed = old_downloads.casefold() != str(downloads).casefold()
             self.settings["game_dir"] = str(game)
             self.settings["archive_downloads_dir"] = str(downloads) if downloads_var.get().strip() else ""
+            self.settings[BSA_OFFER_SETTING] = bsa_offer
             if archive_source is not None:
                 self.settings["archive_source"] = archive_source
             if first_run:
@@ -4437,7 +4745,7 @@ class ManagerGUI(tk.Tk):
                 self.status.set("Options saved.")
 
         buttons = ttk.Frame(form)
-        buttons.grid(row=5, column=0, columnspan=2, sticky="e")
+        buttons.grid(row=7, column=0, columnspan=2, sticky="e")
         def cancel_options():
             dialog.destroy()
             if first_run:

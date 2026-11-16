@@ -29,7 +29,8 @@ from pathlib import Path
 
 # BAIN packages use numeric prefix folder spellings ("00 - Core", "00 Core", "00_Core", "000 - Core").
 OPTION_RE = re.compile(r"^(\d{1,3})(?:\s*[-_.:)]\s*|\s+)(.+)$")
-DOC_EXTS = {".txt", ".md", ".rtf", ".pdf", ".docx", ".html", ".htm"}
+DOC_EXTS = {".txt", ".md", ".rtf", ".pdf", ".docx", ".doc", ".html", ".htm"}
+DOC_LIMIT = 200_000                      # characters kept per doc; only the excerpt shown is short
 GAME_DIRS = {"meshes", "textures", "icons", "sound", "music", "bookart", "splash", "fonts",
              "video", "distantland", "mwse", "mge3", "shaders", "grass", "mcpatch"}
 GAME_DIRS.add("sounds")  # Some packages pluralize Sound; activation normalizes it below.
@@ -43,8 +44,6 @@ _NEXUS_FETCH_ERRORS: dict[str, str] = {}
 _FOMOD_IMAGE_INDEX: dict[str, dict[str, list[Path]]] = {}
 
 # Precompiled helper patterns for fast option evaluation
-HEADING_RE = re.compile(r"^\s*(?:[-*•]\s*)?0*(\d{1,3})\s*(?:[-.:)]|\s+)\s*(.*?)\s*$")
-SECTION_DIVIDER_RE = re.compile(r"^\s*={3,}\s*[^=].*={3,}\s*$")
 EXCLUSIVE_DOC_RE = re.compile(
     r"\b(?:mutually exclusive|choose (?:only )?one|select (?:only )?one|"
     r"do not use both|don't use both|either [^.\n\r]{0,100}\bor)\b", re.I
@@ -60,7 +59,20 @@ HTML_SCRIPT_STYLE_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.I | re.S)
 
 
 def _package_display_name(mod_dir: Path) -> str:
-    """Use Vortex's package metadata as the shared owner directory, with folder-name fallback."""
+    """Use the processing identity, staged primary master, Vortex name, then the folder name."""
+    established = os.environ.get("MWMANAGER_PLUGIN_NAME", "").strip()
+    if established:
+        return re.sub(r'[<>:"/\\|?*]', "_", established).rstrip(" .") or mod_dir.name
+    try:
+        marker = json.loads((mod_dir / ".mwmanager-stage.json").read_text(encoding="utf-8"))
+        marker_name = str(marker.get("PLUGIN_NAME") or "").strip()
+        if marker_name:
+            return re.sub(r'[<>:"/\\|?*]', "_", marker_name).rstrip(" .") or mod_dir.name
+        masters = marker.get("selected_masters", [])
+        if masters:
+            return re.sub(r'[<>:"/\\|?*]', "_", Path(masters[0]).stem).rstrip(" .") or mod_dir.name
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
     candidates = [mod_dir / "meta.ini"]
     extras = next((p for p in mod_dir.iterdir() if p.is_dir() and p.name.casefold() == "extras"), None)
     if extras:
@@ -273,6 +285,14 @@ def _fomod_payload(mod_dir: Path, plugin: ET.Element, payload_root: Path | None 
             source.relative_to(source_root.resolve())
         except ValueError:
             continue
+        if not source.exists() and source_root != mod_dir:
+            # Tidy moved the fomod folder to Extras/<plugin> but left an option folder where it was packed
+            fallback = (mod_dir / Path(source_text.replace("\\", os.sep))).resolve()
+            try:
+                fallback.relative_to(mod_dir.resolve())
+                source = fallback
+            except ValueError:
+                pass
         destination = Path(destination_text.replace("\\", "/"))
         if destination.is_absolute() or ".." in destination.parts:
             continue
@@ -381,6 +401,23 @@ def _discover_fomod(mod_dir: Path, installed: set[str]) -> list[dict]:
     return records
 
 
+def _is_core_folder(name: str) -> bool:
+    """A BAIN 00 folder ("00 Core", "00 - Data Files"): always installed, never offered as a choice."""
+    match = OPTION_RE.match(name)
+    return bool(match and int(match.group(1)) == 0)
+
+
+def _unpacked_by_tidy(folder: Path) -> bool:
+    """A 00 folder Tidy kept after linking its files into the package root: its files have a second name."""
+    for path in _safe_rglob(folder):
+        try:
+            if path.is_file():
+                return path.stat().st_nlink > 1
+        except OSError:
+            return False
+    return False
+
+
 def _option_dirs(mod_dir: Path) -> list[Path]:
     extras = next((p for p in mod_dir.iterdir() if p.is_dir() and p.name.casefold() == "extras"), None)
     if not extras:
@@ -399,8 +436,14 @@ def _option_dirs(mod_dir: Path) -> list[Path]:
     # "Optional textures", "No grass", or "Patch for X" instead. Treat plausible
     # payload folders as options, while avoiding a plugin-name container that only
     # groups its own option subfolders.
+    kept_cores: list[Path] = []
     for folder in directories:
         if any(parent in found for parent in folder.parents):
+            continue
+        if any(parent in kept_cores for parent in folder.parents):
+            continue
+        if _is_core_folder(folder.name) and _unpacked_by_tidy(folder):
+            kept_cores.append(folder)     # Tidy linked it into the root; the copy here is for repeating the install
             continue
         if OPTION_RE.match(folder.name):
             found.append(folder)
@@ -415,11 +458,33 @@ def _option_dirs(mod_dir: Path) -> list[Path]:
     return sorted(set(found), key=lambda p: (len(p.parts), str(p).casefold()))
 
 
+def _decode_doc(raw: bytes) -> str:
+    """Readmes are UTF-8, UTF-16 with a BOM, or (older and non-English ones) Windows-1252."""
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16", errors="replace")
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252", errors="replace")
+
+
+_DASHES = str.maketrans({"‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "−": "-",
+                         "“": '"', "”": '"', "„": '"', "‘": "'", "’": "'", " ": " "})
+_MARKUP_RE = re.compile(r"\[/?(?:b|i|u|s|size|color|font|url|center|quote|list|\*)(?:=[^\]]*)?\]|\*\*|__|`|^\s*#{1,6}\s+",
+                        re.IGNORECASE)
+
+
+def _normalize_line(line: str) -> str:
+    """A readme line as matched, never as shown: one kind of dash and quote, no markup, single spaces, casefolded."""
+    line = _MARKUP_RE.sub("", line.translate(_DASHES))
+    return re.sub(r"\s+", " ", line).strip(" \t-*•>").casefold()
+
+
 def _read_docs(paths: list[Path]) -> str:
     chunks = []
     seen = set()
     support_dirs = {"off", "bugreports", "extras", "screenshots", "grass", "openmw",
-                    "fomod", "logs", "cache", "outputs", "previously merged", "__pycache__"}
+                    "fomod", "logs", "cache", "outputs", "previously merged", "__pycache__", "__macosx"}
     for root in paths:
         if not root.exists():
             continue
@@ -444,62 +509,276 @@ def _read_docs(paths: list[Path]) -> str:
                             tree = ET.fromstring(archive.read("word/document.xml"))
                         content = " ".join(node.text or "" for node in tree.iter()
                                            if node.tag.endswith("}t"))
+                    elif path.suffix.casefold() == ".doc":
+                        # Word 97 keeps its text as plain character runs: enough for matching
+                        content = "\n".join(re.findall(r"[\x20-\x7e\t]{4,}", path.read_bytes().decode("latin-1")))
                     else:
-                        content = path.read_text(encoding="utf-8-sig", errors="replace")
+                        content = _decode_doc(path.read_bytes())
                         if path.suffix.casefold() in {".html", ".htm"}:
                             content = HTML_SCRIPT_STYLE_RE.sub(" ", content)
                             content = html.unescape(re.sub(r"<[^>]+>", " ", content))
                         elif path.suffix.casefold() == ".rtf":
                             content = re.sub(r"\\'[0-9a-fA-F]{2}|\\[a-zA-Z]+-?\d* ?|[{}]", "", content)
-                    content = content[:12000]
+                    content = content.replace("﻿", "")[:DOC_LIMIT]
                 except (OSError, ValueError, zipfile.BadZipFile, ET.ParseError):
                     continue
                 chunks.append(f"--- {path.name} ---\n{content}")
     return "\n\n".join(chunks)
 
 
-def _relevant_doc_excerpt(text: str, label: str, plugin_names=(), option_number: int | None = None) -> str:
-    """Return only README lines tied to this choice, prioritizing its plugin filenames."""
-    if option_number is not None:
-        lines = text.splitlines()
-        section_start = None
-        for index, raw in enumerate(lines):
-            match = HEADING_RE.match(raw)
-            if match and int(match.group(1)) == option_number:
-                section_start = index
-                break
-        if section_start is not None:
-            section_end = len(lines)
-            for index in range(section_start + 1, len(lines)):
-                raw = lines[index]
-                match = HEADING_RE.match(raw)
-                if match or SECTION_DIVIDER_RE.match(raw):
-                    section_end = index
-                    break
-            scoped = "\n".join(lines[section_start:section_end]).strip()
-            if scoped:
-                return scoped[:1800]
-    filenames = [Path(name).name.casefold() for name in plugin_names if name]
-    tokens = {token.casefold() for token in re.findall(r"[A-Za-z0-9]{3,}", label)}
-    tokens -= {"the", "and", "for", "with", "from", "this", "that", "data", "files", "option", "install"}
+_KEY_STOP = {"the", "and", "for", "with", "from", "this", "that", "data", "files", "file", "option", "optional",
+             "install", "patch", "addon", "version", "mod", "core", "main"}
+_LABEL_PREFIX_RE = re.compile(r"^(?:patch|addon|add-on|optional|option)\s*-\s*", re.IGNORECASE)
+_LABEL_SUFFIX_RE = re.compile(r"\s*(?:-\s*(?:merged|modular)|\(choose one\)|\bv?\d+(?:\.\d+)+)\s*$", re.IGNORECASE)
+_PATHLIKE_RE = re.compile(r"(?:^|\s)\.{1,2}/|--\w|\b\w+[\\/]\w+[\\/]|&>|^(?:python|wine|\$|cd)\s")  # commands, paths
+_DIVIDER_RE = re.compile(r"^\s*[-=*_~#]{3,}\s*$")
+_DOC_SEPARATOR_RE = re.compile(r"^--- (.+) ---$")              # put between readme files by _read_docs
+_TIER_SCORE = {"heading": 100, "name": 80, "plugin": 70, "number": 60}
+
+
+def _option_keys(option: dict, common: set[str], shared_plugins: set[str] = frozenset()) -> dict:
+    """What a readme line may call this option: its folder name, label variants, number, plugins, and the label
+    words no sibling option shares (the package's own name is in every label and tells them apart from nothing)."""
+    folder = _normalize_line(option["folder"].rsplit("/", 1)[-1])
+    label = _normalize_line(option.get("label") or folder)
+    variants = {label, _normalize_line(_LABEL_SUFFIX_RE.sub("", _LABEL_PREFIX_RE.sub("", label)))} - {""}
+    tokens = {t for t in re.findall(r"[a-z0-9]{3,}", label) if t not in _KEY_STOP} - common
+    plugins = [p.casefold() for p in option.get("plugins", ()) if p and p.casefold() not in shared_plugins]
+    # "01 Patch" for "01 Patch Solstheim - Tomb of the Snow Prince": the number keeps a short name specific
+    short = re.match(r"(\d{1,3})\s*[-_.:)]?\s*([a-z0-9']{3,})", folder)
+    return {"folder": folder, "variants": variants, "short": f"{short.group(1)} {short.group(2)}" if short else None, "tokens": tokens, "number": option.get("number"),
+            "padded": bool(re.match(r"0\d", folder)), "plugins": plugins}
+
+
+def _line_tier(line: str, keys: dict) -> tuple[int, str] | None:
+    """The best way this normalized line names the option, scored; None when it does not."""
+    if not line:
+        return None
+    number = keys["number"]
+    numbered = rf"(?:(?:option|module|step|folder)\s*)?[\[(]?0*{number}[\])]?\s*[-:.)]?\s*" if number is not None else ""
+    for variant in keys["variants"] | {keys["folder"]}:
+        if line == variant or line.rstrip(":") == variant or (
+                numbered and re.fullmatch(numbered + re.escape(variant) + r"\s*:?", line)):
+            return _TIER_SCORE["heading"], "heading"
+    if _PATHLIKE_RE.search(line):
+        return None
+    if len(keys["folder"]) >= 4 and keys["folder"] in line:
+        return _TIER_SCORE["name"], "name"
+    if any(len(v) >= 6 and f'"{v}"' in line for v in keys["variants"]):
+        return _TIER_SCORE["name"], "name"
+    if keys["short"] and re.search(rf"(?<![\w.]){re.escape(keys['short'])}\b", line):
+        return _TIER_SCORE["name"], "name"
+    if any(re.search(rf"(?<![\w.]){re.escape(p)}(?![\w])", line) for p in keys["plugins"]):
+        return _TIER_SCORE["plugin"], "plugin"
+    words = set(re.findall(r"[a-z0-9]{3,}", line))
+    if number is not None:
+        lead = re.match(r"[\[(]?(\d{1,3})[\])]?\s*[-:.)]", line)
+        span = re.match(r"(\d{1,3})\s*-\s*(\d{1,3})\s*[-:]", line)
+        if lead and int(lead.group(1)) == number and (
+                (keys["padded"] and lead.group(1).startswith("0")) or keys["tokens"] & words):
+            return _TIER_SCORE["number"], "number"
+        if span and int(span.group(1)) <= number <= int(span.group(2)):
+            return _TIER_SCORE["number"], "number"
+    tokens = keys["tokens"]
+    if tokens:
+        coverage = len(tokens & words) / len(tokens)
+        if coverage >= 0.75 and (len(tokens & words) >= 2 or len(tokens) == 1):
+            return int(40 * coverage), "fuzzy"
+    return None
+
+
+def _option_excerpts(text: str, options: list[dict]) -> dict[str, str]:
+    """The readme text for each option of one package, keyed by folder. Each line belongs to the option(s) naming it
+    best, so siblings no longer share one line. An option the readme does not mention gets no text."""
     lines = text.splitlines()
-    ranked = []
-    for index, raw in enumerate(lines):
-        line = re.sub(r"\s+", " ", raw).strip(" \t-*•")
-        if len(line) < 8:
+    norm = [_normalize_line(line) for line in lines]
+    token_sets = [{t for t in re.findall(r"[a-z0-9]{3,}", _normalize_line(o.get("label") or o["folder"]))}
+                  for o in options]
+    common = set.intersection(*token_sets) if len(token_sets) > 1 else set()
+    seen_plugins: dict[str, int] = {}
+    for o in options:
+        for plugin in {p.casefold() for p in o.get("plugins", ())}:
+            seen_plugins[plugin] = seen_plugins.get(plugin, 0) + 1
+    shared_plugins = {p for p, count in seen_plugins.items() if count > 1}   # a patch replacing the core's .esp
+    keys = [_option_keys(o, common, shared_plugins) for o in options]
+    owners: dict[int, list[tuple[int, int, str]]] = {}
+    separators = {index for index, line in enumerate(lines) if _DOC_SEPARATOR_RE.match(line)}
+    for index, line in enumerate(norm):
+        if index in separators:
+            # "--- ropes woven explanations.txt ---": a readme named after an option is all about that option
+            stem = set(re.findall(r"[a-z0-9]{3,}", Path(_DOC_SEPARATOR_RE.match(lines[index]).group(1)).stem.casefold()))
+            scored = [(90, n, "document") for n, k in enumerate(keys)
+                      if len(k["tokens"] & stem) >= 2 and len(k["tokens"] & stem) / len(k["tokens"]) >= 0.75]
+            if len(scored) == 1:                      # a readme fitting several options is the package's own
+                owners[index] = scored
             continue
-        folded = line.casefold()
-        exact = sum(12 for name in filenames if name in folded)
-        overlap = sum(2 for token in tokens if token in folded)
-        if exact or overlap:
-            ranked.append((exact + overlap, index, line))
-    if not ranked:
+        scored = [(hit[0], n, hit[1]) for n, k in enumerate(keys) if (hit := _line_tier(line, k))]
+        if scored:
+            best = max(score for score, _n, _tier in scored)
+            owners[index] = [item for item in scored if item[0] == best]
+
+    def block(start: int, tier: str) -> list[str]:
+        end = start + 1
+        blanks = 0
+        while end < len(lines):
+            if end in separators:
+                break
+            if tier == "document":                     # the whole readme file, up to the next one
+                end += 1
+                continue
+            if _DIVIDER_RE.match(lines[end]) or (end in owners and owners[end][0][2] in ("heading", "number")):
+                break
+            if not norm[end]:
+                blanks += 1
+                if tier != "heading" or blanks >= 2:
+                    break
+            else:
+                blanks = 0
+                if tier != "heading" and re.match(r"\s*(?:[-*•]|\d{1,3}[.)])\s", lines[end]) \
+                        and not lines[end].startswith((" ", "\t")):
+                    break
+            end += 1
+        return [line.rstrip() for line in lines[start:end] if line.strip()]
+
+    result = {}
+    for n, option in enumerate(options):
+        hits = sorted(((score, index, tier) for index, owned in owners.items()
+                       for score, owner, tier in owned if owner == n), key=lambda h: (-h[0], h[1]))
+        chunks, used = [], set()
+        for _score, index, tier in hits[:4]:
+            if index in used:
+                continue
+            chunk = block(index, tier)
+            used.update(range(index, index + len(chunk)))
+            chunks.append("\n".join(chunk))
+        if not chunks and keys[n]["tokens"]:
+            # named nowhere: the one prose line sharing most of its distinctive words, even if a sibling owns it
+            # (a readme often covers two variants in one sentence)
+            # ties go to a line that names some option, then to the earliest (install notes precede changelogs)
+            best = max(((len(keys[n]["tokens"] & set(re.findall(r"[a-z0-9]{3,}", line))), index in owners, -index)
+                        for index, line in enumerate(norm) if len(line) >= 8 and index not in separators
+                        and not _PATHLIKE_RE.search(line)),
+                       default=(0, False, 0))
+            # one shared word is chance ("potions", "vivec") unless it is the option's only distinctive word
+            if best[0] >= min(2, len(keys[n]["tokens"])):
+                chunks.append(lines[-best[2]].strip())
+        result[option["folder"]] = "\n\n".join(dict.fromkeys(chunks))[:1800]
+    return result
+
+
+def _plugin_description(path: Path) -> str:
+    """The description an author typed into the plugin's TES3 header (HEDR: version, flags, 32-byte author,
+    256-byte description)."""
+    try:
+        with open(path, "rb") as handle:
+            head = handle.read(512)
+    except OSError:
         return ""
-    # Prefer lines naming this option's actual plugin; use label matches only as fallback.
-    if any(score >= 12 for score, _index, _line in ranked):
-        ranked = [item for item in ranked if item[0] >= 12]
-    chosen = sorted(ranked, key=lambda item: (-item[0], item[1]))[:8]
-    return "\n".join(dict.fromkeys(line for _score, _index, line in chosen))[:1800]
+    at = head.find(b"HEDR")
+    if not head.startswith(b"TES3") or at < 0 or len(head) < at + 8 + 8 + 32 + 256:
+        return ""
+    raw = head[at + 8 + 8 + 32:at + 8 + 8 + 32 + 256].split(b"\0", 1)[0]
+    return raw.decode("cp1252", errors="replace").strip()
+
+
+def _option_outputs(path: Path) -> set[str]:
+    """The files an option would install, relative to its own root and casefolded; docs are not output."""
+    return {str(p.relative_to(path)).replace("\\", "/").casefold() for p in _safe_rglob(path)
+            if p.is_file() and p.suffix.casefold() not in DOC_EXTS}
+
+
+def _contents_summary(outputs: set[str]) -> str:
+    """'2 plugins, 31 meshes, 12 textures' for an option the readme says nothing about."""
+    kinds = {"plugin": 0, "mesh": 0, "texture": 0, "sound": 0, "script": 0, "other": 0}
+    for rel in outputs:
+        suffix = Path(rel).suffix
+        kind = ("plugin" if suffix in PLUGIN_EXTS else "mesh" if suffix in {".nif", ".kf"} else
+                "texture" if suffix in {".dds", ".tga", ".bmp"} else "sound" if suffix in {".wav", ".mp3"} else
+                "script" if suffix in {".lua", ".omwscripts", ".toml"} else "other")
+        kinds[kind] += 1
+    plural = {"mesh": "meshes"}
+    parts = [f"{n} {plural.get(k, k + 's') if n != 1 else k}" for k, n in kinds.items() if n]
+    return ", ".join(parts)
+
+
+_REQUIRED_RE = re.compile(r"\b(?:always|must|required|mandatory)\b.{0,30}\binstall|\binstall\b.{0,20}\balways\b"
+                          r"|^\s*0*0\s*[-_ .]*\s*(?:core|main|base|required|data files)\b", re.IGNORECASE)
+_CHOOSE_ONE_RE = re.compile(r"\b(?:choose|pick|select|use|install)\s+(?:only\s+)?one\b|mutually exclusive|"
+                            r"\binstead of\b|\bnot both\b|\(choose one\)", re.IGNORECASE)
+_REQUIRES_RE = re.compile(r"\b(?:requires?|needs?)\s+(?:the\s+)?(?P<a>[^.,;:()\n]{2,60})"
+                          r"|\bif you (?:use|have|play with|are using)\s+(?:the\s+)?(?P<b>[^.,;:()\n]{2,60})"
+                          r"|^\s*(?:\d{1,3}\s*[-_.:)]?\s*)?patch for\s+(?P<c>[^.,;:()\n]{2,60})", re.IGNORECASE)
+_ORDER_RE = re.compile(r"\b(?:install|load)\s+(?:this\s+|it\s+)?(?:after|on top of|over)\s+(?P<x>[^.,;:()\n]{2,60})",
+                       re.IGNORECASE)
+_LANGUAGE_RE = re.compile(r"\b(german|deutsch|french|fran[cç]ais|russian|polish|spanish)\b", re.IGNORECASE)
+# readme shorthand for the common shared masters
+_REQUIRE_ALIASES = {"td": "tamriel_data", "tamriel data": "tamriel_data", "oaab": "oaab_data",
+                    "oaab data": "oaab_data", "tr": "tr_mainland", "tamriel rebuilt": "tr_mainland",
+                    "pt": "cyr_main", "project tamriel": "cyr_main", "mwse": "mwse"}
+
+
+def _plain_name(text: str) -> str:
+    text = re.sub(r"\.(?:esp|esm|omwaddon)\b", "", text.casefold())
+    return re.sub(r"[^a-z0-9]+", " ", text).strip()
+
+
+def _requirement_met(name: str, installed: set[str]) -> bool | None:
+    """True or False when the requirement names a plugin MWManager can see; None when it cannot tell."""
+    plain = _plain_name(re.split(r"\s+(?:and|or|by|from|to|for|if|which|that)\s+", name.casefold())[0])
+    if not plain:
+        return None
+    target = _plain_name(_REQUIRE_ALIASES.get(plain, plain))
+    if target == "mwse":
+        return None
+    names = {_plain_name(p) for p in installed}
+    if target in names or any(len(target) >= 5 and (n.startswith(target) or target in n) for n in names):
+        return True
+    plugin_like = re.search(r"\.(?:esp|esm)\b|^\w+_\w+$", name.strip(), re.IGNORECASE)   # TR_Mainland, Sky_Main
+    return False if _REQUIRE_ALIASES.get(plain) or plugin_like else None
+
+
+def _option_badges(folder: str, docs: str, installed: set[str]) -> list[str]:
+    """Short notes for the option window, from the option's readme text and its folder name."""
+    text = f"{folder}\n{docs}"
+    badges = []
+    if _REQUIRED_RE.search(folder) or _REQUIRED_RE.search(docs):
+        badges.append("Always install")
+    if _CHOOSE_ONE_RE.search(text):
+        badges.append("Choose one")
+    seen = set()
+    for match in _REQUIRES_RE.finditer(text):
+        name = re.split(r"\s+-\s+|\s+(?:to|for|if|which|that|so|because|in order)\s+",
+                        (match.group("a") or match.group("b") or match.group("c")))[0].strip(" '\"-")
+        name = re.sub(r"\s+(?:is\s+)?installed$", "", name, flags=re.IGNORECASE)
+        key = _plain_name(name)
+        # a name, not a phrase: capitalized as written, a plugin file, or known shorthand ("a texture replacer" is not)
+        named = name[:1].isupper() or re.search(r"\.(?:esp|esm)\b", name, re.IGNORECASE) or key in _REQUIRE_ALIASES
+        if not key or not named or key in seen or len(seen) >= 3 or key in {"openmw", "mwse", "this", "this package"}:
+            continue
+        seen.add(key)
+        met = _requirement_met(name, installed)
+        badges.append(f"Requires {name}" + {True: " (installed)", False: " (not installed)", None: ""}[met])
+    order = _ORDER_RE.search(docs)
+    if order:
+        badges.append(f"Install after {order.group('x').strip()}")
+    if re.search(r"\bopenmw\b", folder, re.IGNORECASE):
+        badges.append("OpenMW")
+    if re.search(r"\bmwse\b", folder, re.IGNORECASE) and not re.search(r"\bno[ _-]?mwse\b", folder, re.IGNORECASE):
+        badges.append("MWSE")
+    language = _LANGUAGE_RE.search(folder)
+    if language:
+        badges.append(f"Language: {language.group(1).title()}")
+    return badges
+
+
+def _relevant_doc_excerpt(text: str, label: str, plugin_names=(), option_number: int | None = None) -> str:
+    """The readme text for one choice, matched without its siblings (FOMOD and plugin choices)."""
+    if option_number is not None and option_number < 1000:
+        folder = f"{option_number:02d} {label}"
+    else:
+        folder, option_number = label, None
+    option = {"folder": folder, "label": label, "number": option_number, "plugins": [Path(p).name for p in plugin_names]}
+    return _option_excerpts(text, [option])[folder]
 
 
 def _active_staged_plugins(mod_dir: Path) -> set[str]:
@@ -549,6 +828,14 @@ def _discover(mod_dir: Path, installed: set[str]) -> list[dict]:
     base_masters = set().union(*(_plugin_masters(p) for p in base_plugins)) if base_plugins else set()
     base_plugin_stems = {re.sub(r"[^a-z0-9]+", " ", p.stem.casefold()).strip() for p in base_plugins}
     shared_docs = _read_docs([mod_dir / "Docs", mod_dir / "docs", mod_dir])
+    specs = []
+    for path in option_dirs:
+        match = OPTION_RE.match(path.name)
+        specs.append({"folder": str(path.relative_to(mod_dir)), "number": int(match.group(1)) if match else None,
+                      "label": match.group(2).strip() if match else path.name,
+                      "plugins": [p.name for p in _safe_rglob(path) if p.is_file()
+                                  and p.suffix.casefold() in PLUGIN_EXTS]})
+    shared_excerpts = _option_excerpts(shared_docs, specs) if shared_docs else {}
     records = []
     loose_records = []
     for order, path in enumerate(option_dirs):
@@ -558,8 +845,10 @@ def _discover(mod_dir: Path, installed: set[str]) -> list[dict]:
         option_docs = _read_docs([path])
         option_plugins = [p for p in _safe_rglob(path) if p.is_file() and p.suffix.casefold() in PLUGIN_EXTS
                           and "off" not in {part.casefold() for part in p.relative_to(path).parts}]
-        docs = _relevant_doc_excerpt(option_docs or shared_docs, label,
-                                     [plugin.name for plugin in option_plugins], option_number=number)
+        # the option's own readme speaks only of it; the package readme is shared out among the siblings
+        docs = (_relevant_doc_excerpt(option_docs, label, [plugin.name for plugin in option_plugins],
+                                      option_number=number) if option_docs
+                else shared_excerpts.get(str(path.relative_to(mod_dir)), ""))
         masters = set().union(*(_plugin_masters(p) for p in option_plugins)) if option_plugins else set()
         targets = masters - base_masters - BASE_GAME_MASTERS
         mentioned = {m.group(0).strip().casefold() for m in PLUGIN_REF_RE.finditer(docs)}
@@ -577,13 +866,33 @@ def _discover(mod_dir: Path, installed: set[str]) -> list[dict]:
                         "has_master_payload": any(p.suffix.casefold() == ".esm" for p in option_plugins),
                         "informational_utility": informational_utility,
                         "targets": sorted(targets), "compatible": compatible,
-                        "missing_masters": missing_masters, "docs": docs, "mod_dir": mod_dir}
+                        "missing_masters": missing_masters, "docs": docs, "mod_dir": mod_dir,
+                        "badges": _option_badges(path.name, docs, installed),
+                        "outputs": _option_outputs(path)}
+        if not docs:
+            # no readme text: the plugin header's own description, else what the folder holds
+            described = [d for d in (_plugin_description(p) for p in option_plugins) if d]
+            record["fallback_text"] = ("From the plugin header: " + " / ".join(dict.fromkeys(described))
+                                       if described else "Contents: " + (_contents_summary(record["outputs"])
+                                                                         or "no files"))
         record["required"] = _is_hidden_required_option(record)
         if match:
             records.append(record)
         else:
             loose_records.append(record)
 
+    # Several "00" folders are all core and installed without asking (every 00 is required); only a readme saying
+    # they are alternatives turns them into one choice
+    zeros = [r for r in records if r["number"] == 0]
+    if len(zeros) > 1 and any("Choose one" in r["badges"] or EXCLUSIVE_DOC_RE.search(r["docs"]) for r in zeros):
+        for r in zeros:
+            r.update(required=False, always_optional=True)
+    # numbered options are installed in number order; a later one replacing an earlier one's files is worth saying
+    for later in records:
+        for earlier in records:
+            if earlier["number"] < later["number"] and earlier["outputs"] & later["outputs"]:
+                later["badges"].append(f"Replaces {len(earlier['outputs'] & later['outputs'])} file(s) "
+                                       f"from {earlier['path'].name}")
     if loose_records:
         all_docs = "\n\n".join(record["docs"] for record in loose_records).casefold()
         explicit = bool(EXCLUSIVE_DOC_RE.search(all_docs))
@@ -595,7 +904,10 @@ def _discover(mod_dir: Path, installed: set[str]) -> list[dict]:
         stems = [set(re.findall(r"[a-z0-9]{3,}", item["label"].casefold())) for item in loose_records]
         similar = any(len(a & b) / max(1, len(a | b)) >= 0.4
                       for i, a in enumerate(stems) for b in stems[i + 1:])
-        exclusive = explicit or (same_masters and similar)
+        # folders that install the same files cannot both be kept: they are alternatives whatever the readme says
+        overlapping = any(a["outputs"] & b["outputs"] for i, a in enumerate(loose_records)
+                          for b in loose_records[i + 1:])
+        exclusive = explicit or (same_masters and similar) or overlapping
         for record in loose_records:
             if exclusive:
                 record.update(number=900, group_key="legacy-folder-options",
@@ -648,10 +960,14 @@ def _discover_plugin_choices(mod_dir: Path, installed: set[str],
         relative = path.relative_to(mod_dir)
         if len(relative.parts) < 2:
             continue
+        # A lone "Data Files" wrapper is packaging, not a choice: its masters are the package itself.
+        if path.suffix.casefold() == ".esm" and [part.casefold() for part in relative.parts[:-1]] == ["data files"]:
+            continue
         normalized_parts = {re.sub(r"[_-]+", " ", part).strip().casefold() for part in relative.parts[:-1]}
         if any(part.casefold() in excluded_parts for part in relative.parts[:-1]):
             continue
-        if normalized_parts & required_parts:
+        if normalized_parts & required_parts or (any(_is_core_folder(part) for part in relative.parts[:-1])
+                                                 and path.stat().st_nlink > 1):     # a kept 00 copy, already active
             continue
         if represented and path.resolve() in represented:
             continue
@@ -786,6 +1102,41 @@ def _nexus_page_url(mod_dir: Path) -> str:
         return ""
 
 
+MAINTAINER_NOTES = Path(__file__).resolve().with_name("mock_fomod_notes.json")
+
+
+def _maintainer_notes(item: dict) -> str:
+    """MWManager's own notes for an option, from mock_fomod_notes.json: what the FOMOD, the readmes and the mod
+    page do not say (a modder's resource, a patch nobody needs). Shown after all of them, never instead."""
+    try:
+        mods = json.loads(MAINTAINER_NOTES.read_text(encoding="utf-8")).get("mods", [])
+    except (OSError, ValueError):
+        return ""
+    mod_dir = Path(item.get("mod_dir") or item["path"])
+    try:
+        mod_id = _nexus_mod_id(mod_dir)
+    except Exception:
+        mod_id = ""
+    path = Path(item["path"]) if item.get("path") else None
+    try:
+        relative = str(path.relative_to(mod_dir)) if path else ""
+    except ValueError:
+        relative = ""
+    names = {str(value).replace("\\", "/").casefold()
+             for value in (item.get("label"), item.get("key"), path.name if path else "", relative) if value}
+    notes = []
+    for mod in mods:
+        if not ((mod_id and str(mod.get("nexus_id", "")) == mod_id)
+                or any(fnmatch.fnmatch(mod_dir.name.casefold(), pattern.casefold())
+                       for pattern in mod.get("packages", []))):
+            continue
+        for pattern, text in mod.get("options", {}).items():
+            pattern = pattern.replace("\\", "/").casefold()
+            if any(fnmatch.fnmatch(name, pattern) for name in names):
+                notes.append(str(text).strip())
+    return "\n\n".join(dict.fromkeys(note for note in notes if note))
+
+
 def _nexus_mod_id(mod_dir: Path) -> str:
     match = re.search(r"/mods/(\d+)(?:/|$)", _nexus_page_url(mod_dir))
     return match.group(1) if match else ""
@@ -878,6 +1229,8 @@ def _nexus_page_text(mod_dir: Path, *, refresh=False) -> str:
 
 def _option_description(record: dict, mod_dir: Path, page_text: str = "") -> str:
     """Choose the most relevant packaged or already-fetched online description."""
+    if record.get("fomod_description"):
+        return ""
     labels = [record.get("label", ""), *record.get("targets", [])]
     labels.extend(Path(path).name for path in record.get("payload_files", {}).keys())
     terms = {token.casefold() for label in labels for token in re.findall(r"[A-Za-z0-9]{3,}", label)}
@@ -891,9 +1244,9 @@ def _option_description(record: dict, mod_dir: Path, page_text: str = "") -> str
         chosen = [line for score, line in sorted(ranked, key=lambda item: (-item[0], len(item[1]))) if score]
         return "\n".join(dict.fromkeys(chosen[:5]))
 
-    local = best(record.get("docs", ""))
-    if local:
-        return local
+    # readme text was already matched to this option, in reading order: shown as it is, never re-ranked
+    if record.get("docs", "").strip():
+        return record["docs"].strip()
     if not page_text:
         return ""
     # Mod-page text: stemmed, definition-aware matching on the folder's own name
@@ -1280,46 +1633,6 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
 
         threading.Thread(target=capture, daemon=True).start()
 
-    def fetch_page_automatically():
-        """Load Nexus page text for options lacking packaged descriptions without a button click."""
-        candidates = [item for item in records
-                      if not item.get("fomod_description")
-                      and not _option_description(item, Path(item.get("mod_dir") or item["path"]))]
-        if not candidates:
-            return
-        first = candidates[0]
-        mod_dir = Path(first.get("mod_dir") or first["path"])
-        key = first["key"]
-        if not _nexus_page_url(mod_dir):
-            return
-        info_state["status"][key] = "Checking the mod page for optional component details…"
-
-        def fetch():
-            found = _nexus_page_text(mod_dir)
-
-            def finish():
-                nonlocal page_text
-                page_text = found
-                cache_key = str(mod_dir.resolve()).casefold()
-                search_button.configure(text="Search for more info" if found else "Retry from browser")
-                info_state["status"][key] = (
-                    "Mod page checked; matching text is shown as a suggested description."
-                    if found else _NEXUS_FETCH_ERRORS.get(
-                        cache_key,
-                        "Could not retrieve the mod page. Use Search for more info to retry."
-                    )
-                )
-                current = info_state.get("item")
-                if current:
-                    show(current)
-
-            try:
-                root.after(0, finish)
-            except tk.TclError:
-                pass
-
-        threading.Thread(target=fetch, daemon=True).start()
-
     search_button = ttk.Button(search_bar, text="Search for more info", command=search_for_info)
     read_browser_button = ttk.Button(search_bar, text="Read page from browser",
                                      command=read_nexus_browser_page)
@@ -1408,6 +1721,8 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
                 target.insert("end", "\n")
         if item.get("preset_technology") == "mwse":
             target.insert("end", "MWSE version selected automatically and locked. OpenMW files are unsupported by this vanilla Morrowind install.\n\n")
+        if item.get("badges"):
+            target.insert("end", "Readme notes: " + " · ".join(item["badges"]) + "\n\n")
         if item.get("evidence"):
             target.insert("end", "Plugin grouping: " + item["evidence"] + ".\n\n")
         if item.get("option_type"):
@@ -1420,12 +1735,15 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         if item.get("fomod_description"):
             target.insert("end", item["fomod_description"] + "\n\n")
         description = _option_description(item, Path(item.get("mod_dir") or item["path"]), page_text)
+        note = _maintainer_notes(item)
         if description:
             target.insert("end", "Suggested option description:\n" + description + "\n\n")
-        elif page_text:
-            target.insert("end", "Retrieved page text:\n" + page_text[:5000] + "\n\n")
-        else:
+        elif item.get("fallback_text"):
+            target.insert("end", "No readme text found for this option.\n" + item["fallback_text"] + "\n\n")
+        elif not item.get("fomod_description") and not note:
             target.insert("end", "No relevant option-specific documentation found.\n\n")
+        if note:                                   # last: after the FOMOD, readme and mod-page text
+            target.insert("end", "MWManager Insight:\n" + note + "\n\n")
         status = info_state["status"].get(item["key"])
         if status:
             target.insert("end", status)
@@ -1573,6 +1891,9 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
     source_archive = Path(os.environ["MWMANAGER_SOURCE_ARCHIVE"]) \
         if os.environ.get("MWMANAGER_SOURCE_ARCHIVE") else None
     nexus_mod_dir = Path(records[0].get("mod_dir") or records[0]["path"]) if records else None
+    if (source_archive is None or not source_archive.is_file()) and nexus_mod_dir:
+        from core_addons import staged_source_archive      # the staging record, wherever the window was opened from
+        source_archive = staged_source_archive(nexus_mod_dir)
     nexus_page = _nexus_page_url(nexus_mod_dir) if nexus_mod_dir else ""
 
     def inspect_source_archive():
@@ -1647,7 +1968,6 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
     root.attributes("-topmost", True)
     root.focus_force()
     root.after(500, lambda: root.attributes("-topmost", False))
-    root.after(100, fetch_page_automatically)
     if utility_alerts:
         summaries = []
         for item in utility_alerts:
@@ -1705,14 +2025,9 @@ def _payload_files(option: dict) -> dict[str, Path]:
 
 
 def _safe_backup_path(backup_root: Path, rel: str) -> Path:
-    target = backup_root / Path(rel)
+    from core_addons import stamped_backup_path
+    target = stamped_backup_path(backup_root / Path(rel))     # recorded in the activation journal
     target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists():
-        stem, ext = target.stem, target.suffix
-        n = 2
-        while target.with_name(f"{stem}.mwmanager-{n}{ext}").exists():
-            n += 1
-        target = target.with_name(f"{stem}.mwmanager-{n}{ext}")
     return target
 
 
@@ -1779,6 +2094,7 @@ def _activate(mod_dir: Path, plugin: str, records: list[dict], chosen: set[str],
         if option["key"] in chosen and not option.get("plugin_choice"):
             desired.update(_payload_files(option))      # ascending number: higher groups win overlaps
     new_state = {}
+    kept_in_extras = None
     for rel, source in desired.items():
         destination = mod_dir / rel
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -1786,15 +2102,42 @@ def _activate(mod_dir: Path, plugin: str, records: list[dict], chosen: set[str],
         if destination.exists() and source.resolve() == destination.resolve():
             new_state[rel] = {"backup": backup_rel, "source": str(source)}
             continue
+        restore_from = None
         if destination.exists() and backup_rel is None:
-            backup = _safe_backup_path(backup_root, rel)
-            shutil.copy2(destination, backup)
-            backup_rel = str(backup.resolve())
+            # A file Tidy linked in from a 00 folder still has its copy under Extras: no backup is needed, undo
+            # links it back. Anything else (a package's own loose Textures\...) is backed up first.
+            if kept_in_extras is None:
+                kept_in_extras = _extras_file_ids(mod_dir)
+            stat = destination.stat()
+            restore_from = kept_in_extras.get((stat.st_dev, stat.st_ino))
+            if restore_from is None:
+                backup = _safe_backup_path(backup_root, rel)
+                shutil.copy2(destination, backup)
+                backup_rel = str(backup.resolve())
+        if destination.exists():
+            destination.unlink()          # never write through a hard link into the Extras or Data Files copy
         shutil.copy2(source, destination)
         new_state[rel] = {"backup": backup_rel, "source": str(source)}
+        if restore_from:
+            new_state[rel]["restore_from"] = restore_from
     result = {"files": new_state, "selected": sorted(chosen)}
     _prune_option_backups(backup_root, result)
     return result
+
+
+def _extras_file_ids(mod_dir: Path) -> dict[tuple[int, int], str]:
+    """(device, file id) -> path for every file under the package's Extras: a root file with the same id is a hard
+    link Tidy made from a 00 folder kept there."""
+    ids = {}
+    extras = next((p for p in mod_dir.iterdir() if p.is_dir() and p.name.casefold() == "extras"), None)
+    for path in _safe_rglob(extras) if extras else ():
+        try:
+            if path.is_file():
+                stat = path.stat()
+                ids[(stat.st_dev, stat.st_ino)] = str(path)
+        except OSError:
+            continue
+    return ids
 
 
 def _restore_activation(mod_dir: Path, prior_state: dict) -> dict[str, str | None]:
@@ -1810,10 +2153,18 @@ def _restore_activation(mod_dir: Path, prior_state: dict) -> dict[str, str | Non
             continue
         if destination.exists():
             destination.unlink()
+        kept = Path(info["restore_from"]) if info.get("restore_from") else None
         if backup and backup.is_file():
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(backup, destination)
             reusable[rel] = info.get("backup")
+        elif kept and kept.is_file():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.link(kept, destination)      # the 00 Core file again, from its copy under Extras
+            except OSError:
+                shutil.copy2(kept, destination)
+            reusable[rel] = None
         else:
             reusable[rel] = None
     return reusable

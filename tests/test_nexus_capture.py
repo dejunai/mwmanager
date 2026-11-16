@@ -146,8 +146,25 @@ class OptionMatching(unittest.TestCase):
         desc = mock_fomod._option_description(record, Path("staging/AURA"), self.text)
         self.assertTrue(desc.startswith("Replacer - a replacer for some of the \"worst offenders\""), desc)
 
+    def test_fomod_description_is_authoritative(self):
+        import mock_fomod
+        record = {"label": "HD Data", "targets": [], "docs": "", "fomod_description": "Install HD assets."}
+        self.assertEqual(mock_fomod._option_description(record, Path("staging/AATL"), self.text), "")
+
 
 class BrowserModule(unittest.TestCase):
+    def test_populated_files_page_is_ready_without_description_delay(self):
+        import mwnexus_browser
+        page = {"url": "https://www.nexusmods.com/morrowind/mods/58854?tab=files",
+                "readyState": "complete", "description": "",
+                "text": "Sound_Data\nVersion\n2.0\nMain files\nSound_Data"}
+        self.assertTrue(mwnexus_browser._capture_ready(page, 0))
+
+    def test_capture_navigation_rejects_non_nexus_urls(self):
+        import mwnexus_browser
+        with self.assertRaises(ValueError):
+            mwnexus_browser.capture_page("45096", url="https://example.com/files")
+
     def test_js_api_has_no_public_window_reference(self):
         """Regression: pywebview walks public js_api attributes; api.window froze the browser."""
         src = (HERE.parent / "mwnexus_browser.py").read_text(encoding="utf-8")

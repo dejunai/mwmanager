@@ -17,6 +17,38 @@ import test_gui_smoke as smoke
 
 
 class WorkflowLogicTests(unittest.TestCase):
+    def test_bsa_build_reports_file_progress_and_packer_wait(self):
+        from major_master_deploy import _pack_assets
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp) / "package"
+            textures = package / "Textures"
+            textures.mkdir(parents=True)
+            for index in range(2001):
+                (textures / f"asset-{index}.dds").write_bytes(b"x")
+            messages = []
+
+            class FakeProcess:
+                stdout = iter(("Packed 500 files\n", "Starting segment 2\n"))
+
+                def wait(self, timeout=None):
+                    return 0
+
+                def kill(self):
+                    pass
+
+            def fake_popen(*_args, **kwargs):
+                (Path(kwargs["cwd"]) / "Example_assets.bsa").write_bytes(b"bsa")
+                return FakeProcess()
+
+            with mock.patch("major_master_deploy.subprocess.Popen", side_effect=fake_popen):
+                packed = _pack_assets(package, "Example.esm", Path("bsapack.exe"), messages.append)
+
+            self.assertTrue(packed[0].is_file())
+            self.assertIn("Preparing BSA for Example.esm: 2,000 assets ready…", messages)
+            self.assertIn("Building BSA for Example.esm from 2,001 assets; please be patient…", messages)
+            self.assertIn("BSAPack: Packed 500 files", messages)
+            self.assertIn("BSAPack: Starting segment 2", messages)
+
     def test_cancellation_is_cooperative_and_opt_in(self):
         control = JobControl()
         control.check()
@@ -127,7 +159,7 @@ class WorkflowGuiTests(unittest.TestCase):
         self.assertIn("Second step", text)
         self.assertEqual(done, [None, None])
 
-    def test_output_does_not_drag_reader_back_to_bottom(self):
+    def test_follow_output_stays_at_bottom_until_disabled(self):
         from mwmanager_workflow import JobView
         view = JobView(self.app)
         self.app.update_idletasks()
@@ -136,6 +168,11 @@ class WorkflowGuiTests(unittest.TestCase):
         self.app.update_idletasks()
         view.log.yview_moveto(0.25)
         view.append("A new log item")
+        self.app.update_idletasks()
+        self.assertGreater(view.log.yview()[1], 0.99)
+        view.follow.set(False)
+        view.log.yview_moveto(0.25)
+        view.append("Read without following")
         self.assertLess(view.log.yview()[1], 0.8)
 
     def test_cancel_waits_for_safe_boundary_and_all_actions_restore(self):

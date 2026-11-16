@@ -159,6 +159,13 @@ class ArchiveSettingsTests(unittest.TestCase):
         self.g.SETTINGS_FILE.write_text(json.dumps({"uses_vortex": True}))
         self.assertEqual(self.g.read_settings()["archive_source"], "vortex")
 
+    def test_bsa_offer_threshold_is_stored_in_ini_and_invalid_values_use_default(self):
+        self.g.write_settings({"game_dir": str(self.game), "offer_bsa_when_assets_found": 2500})
+        self.assertEqual(self.g.read_settings()["offer_bsa_when_assets_found"], 2500)
+        self.assertIn("offer_bsa_when_assets_found = 2500", self.g.MWMANAGER_INI.read_text())
+        self.g.MWMANAGER_INI.write_text("[Staging]\noffer_bsa_when_assets_found = 49\n")
+        self.assertEqual(self.g.read_settings()["offer_bsa_when_assets_found"], 10000)
+
     def test_new_key_wins_over_old(self):
         other = Path(self.tmp.name) / "old"
         self.g.MWMANAGER_INI.write_text(f"[Paths]\ndownloads_dir = {other}\narchive_downloads_dir = "
@@ -259,7 +266,6 @@ class GuiSmokeTests(unittest.TestCase):
         self.pump(0.3)
         self.assertEqual(called[0]["mode"], "full")
         self.assertTrue(called[0]["force"])
-        self.assertTrue(called[0]["asset_repair"])
         self.assertEqual(self.app.settings["first_run"], 1)
         called[0]["on_success"]()
         self.assertEqual((self.app.settings["first_run"], catalogued, offered), (0, [True], [True]))
@@ -322,15 +328,104 @@ class GuiSmokeTests(unittest.TestCase):
         package = self.g.APP_DIR / "staging" / "major_masters" / "Tamriel Data"
         package.mkdir(parents=True)
         (package / "Tamriel_Data.esm").write_bytes(b"TES3")
+        done = {"started_at": "t", "completed_at": "t", "attempts": 1, "last_error": None}
+        (package / ".mwmanager-stage.json").write_text(json.dumps({
+            "archive": "x.7z", "sha256": "", "selected_masters": ["Tamriel_Data.esm"],
+            "steps": {"extracted": done, "tidied": done, "bsa_checked": done}}), encoding="utf-8")
         deployed = []
         self.app.deploy_major_masters = lambda: deployed.append(True)
         self.app._run_progress_job = lambda _title, _description, _worker, completed: completed(True, None)
-        with mock.patch.object(self.g.messagebox, "showinfo"), \
-                mock.patch.object(self.g.messagebox, "askyesno", return_value=True):
+        with mock.patch.object(self.g.messagebox, "askyesno", return_value=True) as deploy_prompt:
             self.app.stage_major_masters()
             self.pump(0.2)
         self.assertEqual(deployed, [True])
+        self.assertEqual(deploy_prompt.call_args.args[0], "Deploy staged major masters?")
         self.assertIn("tamriel_data.esm", self.app.selected_major_masters)
+        self.assertTrue(self.app._setup_done("major_masters_staged"))
+
+    def _legacy_package(self):
+        package = self.g.APP_DIR / "staging" / "major_masters" / "Tamriel Data"
+        package.mkdir(parents=True)
+        (package / "Tamriel_Data.esm").write_bytes(b"TES3")
+        (package / ".mwmanager-stage.json").write_text(json.dumps({       # as written before steps were recorded
+            "archive": "x.7z", "sha256": "", "selected_masters": []}), encoding="utf-8")
+        self.app.selected_major_masters = {"tamriel_data.esm"}
+
+        def run_now(_title, _description, worker, completed):
+            try:
+                result, error = worker(lambda _message: None), None
+            except Exception as exc:
+                result, error = None, exc
+            completed(result, error)
+        self.app._run_progress_job = run_now
+        return package
+
+    def test_interrupted_staging_resumes_at_each_packages_step(self):
+        """A package extracted but never tidied is finished from its own step record; nothing is re-extracted,
+        and initialization is complete only once deployment is declined (or done)."""
+        from core_addons import package_steps
+        self.app.settings["init_complete"] = 0
+        self.g.setup_state.reset(self.app._setup_path(), self.app.settings["game_dir"], "initialization_complete")
+        self.app._initializing_manager = True
+        self.app.open_major_masters = lambda: None
+        package = self._legacy_package()
+        tidied = []
+        with mock.patch.object(self.g, "run_tidy_steps",
+                               side_effect=lambda *a, **k: tidied.append(
+                                   (k.get("only"), k.get("env", {}).get("MWMANAGER_PLUGIN_NAME"), Path(a[2])))), \
+                mock.patch.object(self.g.messagebox, "askyesno", return_value=False) as deploy_prompt:
+            self.app.stage_major_masters()
+            self.pump(0.2)
+        self.assertEqual(tidied, [("Tamriel Data", "Tamriel_Data",
+                                   Path(self.app.settings["game_dir"]) / "Data Files")])
+        steps = package_steps(package)
+        for step in ("extracted", "tidied", "bsa_checked"):
+            self.assertTrue(steps[step]["completed_at"], step)
+        self.assertEqual(steps["tidied"]["attempts"], 1)
+        self.assertEqual(deploy_prompt.call_args.args[0], "Deploy staged major masters?")
+        self.assertTrue(self.app._setup_done("major_masters_staged"))
+        self.assertTrue(self.app._setup_done("initialization_complete"))       # deployment was declined
+
+    def test_finished_stage_with_missing_masters_opens_the_selection(self):
+        """Every staged package is finished but a master is still unstaged: Stage goes to the downloads scan
+        and selection window; no option installer is re-run and the deploy prompt is not shown."""
+        package = self._legacy_package()
+        done = {"started_at": "t", "completed_at": "t", "attempts": 1, "last_error": None}
+        (package / ".mwmanager-stage.json").write_text(json.dumps({
+            "archive": "x.7z", "sha256": "", "selected_masters": ["Tamriel_Data.esm"],
+            "steps": {"extracted": done, "tidied": done, "bsa_checked": done}}), encoding="utf-8")
+        self.app.major_masters = ["Tamriel_Data.esm", "OAAB_Data.esm"]
+        self.app._set_staging_run(["Tamriel_Data.esm", "OAAB_Data.esm"])
+        self.assertEqual(self.app._pending_stage_masters(), ["OAAB_Data.esm"])
+        # no downloads folder: the scan path announces itself with this warning
+        with mock.patch.object(self.g, "run_tidy_steps") as tidy,                 mock.patch.object(self.app, "_archive_downloads_folder", return_value=None),                 mock.patch.object(self.app, "open_options"),                 mock.patch.object(self.g.messagebox, "showwarning") as warned,                 mock.patch.object(self.g.messagebox, "askyesno") as asked:
+            self.app.stage_major_masters()
+            self.pump(0.3)
+        tidy.assert_not_called()
+        asked.assert_not_called()
+        self.assertEqual(warned.call_args[0][0], "Archive Downloads not set")
+        self.app._set_staging_run(None)
+        self.assertEqual(self.app._pending_stage_masters(), [])
+
+    def test_failed_package_step_is_recorded_and_retried(self):
+        from core_addons import package_steps
+        package = self._legacy_package()
+        with mock.patch.object(self.g, "run_tidy_steps", side_effect=RuntimeError("tidy broke")), \
+                mock.patch.object(self.g.messagebox, "showerror"):
+            self.app.stage_major_masters()
+        steps = package_steps(package)
+        self.assertIsNone(steps["tidied"]["completed_at"])
+        self.assertEqual(steps["tidied"]["attempts"], 1)
+        self.assertIn("tidy broke", steps["tidied"]["last_error"])
+        step, entry = self.g.setup_state.interrupted(self.app._setup_path(), self.app.settings["game_dir"])
+        self.assertEqual(step, "major_masters_staged")
+        self.assertIn("tidy broke", entry["last_error"])
+        with mock.patch.object(self.g, "run_tidy_steps"), \
+                mock.patch.object(self.g.messagebox, "askyesno", return_value=False):
+            self.app.stage_major_masters()
+        steps = package_steps(package)
+        self.assertTrue(steps["tidied"]["completed_at"])
+        self.assertEqual(steps["tidied"]["attempts"], 2)
 
     def test_first_window_lists_detected_installs_and_hands_them_to_options(self):
         import mwmanager_detect
@@ -384,20 +479,24 @@ class GuiSmokeTests(unittest.TestCase):
                 mock.patch.object(self.app, "_begin_first_run", side_effect=lambda: began.append(True)):
             dialog = self.app._open_detected_paths(first_run=True)
             self.pump(0.2)
-            buttons = []
+            buttons, labels = [], []
 
             def walk(widget):
                 for child in widget.winfo_children():
                     if child.winfo_class() == "TButton":
                         buttons.append(child)
+                    elif child.winfo_class() == "TLabel":
+                        labels.append(child.cget("text"))
                     walk(child)
 
             walk(dialog)
+            self.assertIn("Offer BSA when this many assets are found", labels)
             next(button for button in buttons if button.cget("text") == "Approve").invoke()
             self.pump(0.3)
         self.assertEqual(opened, [])
         self.assertEqual(began, [True])
         self.assertEqual(self.app.settings["game_dir"], str(game))
+        self.assertEqual(self.app.settings["offer_bsa_when_assets_found"], 10000)
 
     def test_first_window_offers_manager_folder_or_own_folder(self):
         import mwmanager_detect

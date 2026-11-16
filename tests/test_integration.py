@@ -64,29 +64,19 @@ class Composition(unittest.TestCase):
         self.assertEqual((mc.CACHE_FILE, t.PLAN), before)
 
 
-class AssetRepairSwitch(unittest.TestCase):
-    def test_off_unless_asked(self):
+class AssetRepairAlwaysOn(unittest.TestCase):
+    """Asset repairs are part of every fix and every Tidy: there is no switch to turn them off."""
+    def test_there_is_no_switch(self):
         import mwmanager as m
-        with tempfile.TemporaryDirectory() as tmp, mwmanager_upstream.use_manager_dir(tmp):
-            self.assertFalse(m.asset_repair_enabled(None))
-            self.assertFalse(m.asset_repair_enabled(mock.Mock(asset_repair=None)))
-            self.assertTrue(m.asset_repair_enabled(mock.Mock(asset_repair=True)))
-            Path(tmp, "mwmanager.ini").write_text("[Repair]\nasset_repair = true\n", encoding="utf-8")
-            self.assertTrue(m.asset_repair_enabled(mock.Mock(asset_repair=None)))
-
-    def test_fix_leaves_asset_files_out_when_off(self):
-        src = (ROOT / "mwmanager_overrides.py").read_text(encoding="utf-8")
-        self.assertIn("if not asset_repair_enabled(args):", src)
-        self.assertIn('"--asset-repair"', src)
-
-    def test_full_pass_propagates_requested_asset_repairs(self):
-        src = (ROOT / "mwmanager_overrides.py").read_text(encoding="utf-8")
-        self.assertIn('if asset_repair_enabled(args):\n        common.append("--asset-repair")', src)
+        self.assertFalse(hasattr(m, "asset_repair_enabled"))
+        for name in ("mwmanager_overrides.py", "mwmanager_tidy_ext.py", "mwmanager_gui.py", "mwmanager_state.py"):
+            src = (ROOT / name).read_text(encoding="utf-8")
+            self.assertNotIn("--asset-repair", src, name)
+            self.assertNotIn("asset_repair_enabled", src, name)
 
     def test_full_pass_always_regenerates_missing_assets(self):
         src = (ROOT / "mwmanager_overrides.py").read_text(encoding="utf-8")
         self.assertIn('"--generate-missing-assets"]', src)
-        self.assertIn('repair_generated = bool(getattr(args, "generate_missing_assets", False))', src)
 
 
 class TidySteps(unittest.TestCase):
@@ -140,6 +130,11 @@ class TidySteps(unittest.TestCase):
         self.assertEqual(rc, 0)
         run.assert_called_once_with(str(self.data), apply_changes=True)
 
+    def test_staged_tidy_refuses_an_invented_data_files_default(self):
+        with mock.patch.dict(os.environ, {"MWMANAGER_DATA_FILES": ""}):
+            with self.assertRaises(SystemExit):
+                self.t.mwmanager_main(["--staging", str(self.staging), "--no-lua", "--no-assets"])
+
     def test_initial_tidy_commits_asset_cache_before_full(self):
         assets = mock.Mock()
         with mock.patch.object(self.t, "run_data_files_tidy", return_value=0), \
@@ -148,7 +143,7 @@ class TidySteps(unittest.TestCase):
             rc = self.t.run_initial_tidy(str(self.data), apply_changes=True)
         self.assertEqual(rc, 0)
         self.assertIn("--asset-check", scan.call_args.args[0])
-        self.assertIn("--asset-repair", scan.call_args.args[0])
+        self.assertNotIn("--asset-repair", scan.call_args.args[0])
         assets.close_caches.assert_called_once_with()
 
     def test_initial_tidy_continues_after_repairs(self):
@@ -175,6 +170,181 @@ class TidySteps(unittest.TestCase):
         self.assertEqual(Path(operations[0]["restore"]), asset)
         self.assertEqual(Path(operations[0]["backup"]).read_bytes(), original)
 
+    def test_catalogued_animation_is_a_replacement_not_an_orphan(self):
+        import sqlite3
+        root = self.staging / "ModA-1-1-0"
+        animation = root / "Meshes" / "xbase_anim.kf"
+        mk(animation, self.t._scanner.asset_health_module().NIF_HEAD + b"\n" + b"\0" * 600)
+        database = sqlite3.connect(self.manager / "game_catalog.sqlite3")
+        try:
+            database.execute("CREATE TABLE bsa_asset (asset_path_norm TEXT NOT NULL)")
+            database.execute("INSERT INTO bsa_asset VALUES (?)", ("meshes/xbase_anim.kf",))
+            database.commit()
+        finally:
+            database.close()
+        issues, fixes = self.t._scanner.asset_health_module().check_folder(
+            str(root), self.t._scanner, str(self.data), set())
+        self.assertFalse(any("orphaned animation" in message for _severity, _path, message in issues))
+        self.assertFalse(any(kind == "orphan" for kind, _full, _relative, _job in fixes))
+
+    def test_gui_asset_scan_reports_every_two_thousand_files(self):
+        assets = self.t._scanner.asset_health_module()
+
+        def fake_walk(*_args, **_kwargs):
+            for index in range(2001):
+                yield "textures", f"Textures\\{index}.dds", f"file-{index}"
+
+        def upstream(*_args, **_kwargs):
+            list(assets._walk("unused", set()))
+            return [], []
+
+        output = io.StringIO()
+        with mock.patch.object(assets, "_walk", fake_walk), \
+                mock.patch.object(assets, "_upstream_check_folder", side_effect=upstream), \
+                mock.patch.dict(os.environ, {"MWMANAGER_GUI": "1"}), contextlib.redirect_stdout(output):
+            assets.check_folder(str(self.staging / "ModA-1-1-0"), self.t._scanner, str(self.data), set())
+        self.assertIn("MWMANAGER-PROGRESS: Checked 2,000 asset files", output.getvalue())
+        self.assertIn("Asset scan complete: 2,001 files checked", output.getvalue())
+
+    def test_staged_wav_becomes_journaled_same_stem_mp3(self):
+        root = self.staging / "ModA-1-1-0"
+        sound = root / "Sound" / "ambient.wav"
+        mk(sound, b"RIFF original WAV")
+        operations = []
+
+        def convert(command, **_kwargs):
+            Path(command[-1]).write_bytes(b"MP3 converted")
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        assets = self.t._scanner.asset_health_module()
+        issues, fixes = assets.check_folder(str(root), self.t._scanner, str(self.data), set())
+        self.assertTrue(any("WAV (converted to MP3" in message for _severity, _path, message in issues))
+        self.assertTrue(any(kind == "snd" and job.get("mp3")
+                            for kind, _full, _relative, job in fixes))
+        with mock.patch.object(assets, "find_ffmpeg", return_value="ffmpeg.exe"), \
+                mock.patch.object(assets.subprocess, "run", side_effect=convert):
+            done, skipped = assets.apply_folder(
+                str(root), fixes,
+                self.t._scanner, str(self.data.parent), "ModA", journal_ops=operations)
+        self.assertEqual((done, skipped), (1, []))
+        self.assertFalse(sound.exists())
+        self.assertEqual(sound.with_suffix(".mp3").read_bytes(), b"MP3 converted")
+        self.assertTrue(any(op.get("restore") == str(sound) for op in operations))
+        self.assertTrue(any(op.get("generated") == str(sound.with_suffix(".mp3")) for op in operations))
+
+    def test_tga_beside_a_dds_of_the_same_name_is_moved_to_off(self):
+        root = self.staging / "ModA-1-1-0"
+        mk(root / "Textures" / "wall.dds", b"dds")
+        mk(root / "Textures" / "wall.TGA", b"tga")
+        mk(root / "Textures" / "floor.tga", b"tga")                # no .dds: in use
+        assets = self.t._scanner.asset_health_module()
+        _issues, fixes = assets.check_folder(str(root), self.t._scanner, str(self.data), set())
+        unused = [f for f in fixes if f[0] == "orphan"]
+        self.assertEqual([Path(f[1]).name for f in unused], ["wall.TGA"])
+        operations = []
+        self.assertEqual(assets.apply_folder(str(root), unused, self.t._scanner, str(self.data.parent), "ModA",
+                                             journal_ops=operations), (1, []))
+        self.assertFalse((root / "Textures" / "wall.TGA").exists())
+        self.assertTrue((root / "Textures" / "floor.tga").exists())
+        self.assertTrue(Path(operations[0]["dst"]).is_file() and "Off" in Path(operations[0]["dst"]).parts)
+
+    def test_staged_png_and_jpeg_become_dds_or_tga_with_the_texture_repairs(self):
+        root = self.staging / "ModA-1-1-0"
+        texture, page, shot = root / "Textures" / "ring.png", root / "BookArt" / "page.jpg", root / "shot.png"
+        has_own = root / "Textures" / "own.png"
+        lua_png = root / "Textures" / "menu" / "Logo.png"
+        for path in (texture, page, shot, has_own, root / "MWSE" / "mods" / "x" / "icon.png",
+                     root / "Extras" / "ModA" / "Images" / "title.jpg", root / "fomod" / "images" / "x.png", lua_png):
+            mk(path, b"image")
+        mk(root / "Textures" / "own.dds", b"the mod's own")
+        mk(root / "MWSE" / "mods" / "x" / "main.lua", b'local image = "textures/menu/logo.png"')
+        operations = []
+
+        def convert(command, **_kwargs):
+            out, kind = command[command.index("-o") + 1], command[command.index("-ft") + 1]
+            Path(out, Path(command[-1]).stem + "." + kind).write_bytes(b"converted " + kind.encode())
+            return mock.Mock(returncode=0, stdout="", stderr="")
+
+        assets = self.t._scanner.asset_health_module()
+        _issues, fixes = assets.check_folder(str(root), self.t._scanner, str(self.data), set())
+        jobs = {Path(full).name: job for kind, full, _rel, job in fixes if kind == "tex" and job.get("convert")}
+        self.assertEqual(jobs, {"ring.png": {"convert": ".dds"}, "page.jpg": {"convert": ".tga"},
+                                "own.png": {"convert": ".dds"}})   # not root, MWSE, Extras, fomod or Lua-named
+        self.assertTrue(any(rel.endswith("Logo.png") and "Lua" in message for _s, rel, message in _issues))
+        self.assertEqual([p.casefold() for p in assets.lua_used_images(str(root))],
+                         [str(Path("textures/menu/logo.png"))])
+        with tempfile.TemporaryDirectory() as tools:
+            Path(tools, "texconv.exe").write_bytes(b"")
+            with mock.patch.object(assets, "TOOLS_DIR", tools), \
+                    mock.patch.object(assets.subprocess, "run", side_effect=convert):
+                done, skipped = assets.apply_folder(str(root), [f for f in fixes if isinstance(f[3], dict) and f[3].get("convert")],
+                                                    self.t._scanner, str(self.data.parent), "ModA",
+                                                    journal_ops=operations)
+        self.assertEqual((done, skipped), (3, []))
+        self.assertEqual(texture.with_suffix(".dds").read_bytes(), b"converted dds")
+        self.assertEqual(page.with_suffix(".tga").read_bytes(), b"converted tga")
+        self.assertEqual((root / "Textures" / "own.dds").read_bytes(), b"the mod's own")
+        self.assertFalse(texture.exists() or page.exists() or has_own.exists())
+        self.assertTrue(shot.exists())
+        kept = [Path(op["backup"]) for op in operations if op.get("backup")]
+        self.assertEqual(len(kept), 3)
+        self.assertTrue(all(path.is_file() and "Off" in path.parts for path in kept))
+
+    def test_staged_asset_report_is_kept_in_the_package(self):
+        root = self.staging / "ModA-1-1-0"
+        assets = mock.Mock()
+        assets.nexus_id.return_value = None
+        assets.bug_report_header.return_value = ["header"]
+        assets.package_bug_report_path.return_value = str(root / "bugreports" / "ModA.bugreport.txt")
+        ares = {"ah": assets, "m": self.t._scanner,
+                "mods": {root.name: {"root": str(root),
+                                     "issues": [("ERROR", "Textures\\missing.dds", "missing asset")]}}}
+        with mock.patch.dict(os.environ, {"MWMANAGER_PLUGIN_NAME": "ModA"}):
+            self.t._write_package_asset_bug_reports(ares)
+        report_path, section, _header, lines = assets.update_bug_report.call_args.args
+        self.assertEqual(Path(report_path).parent, root / "bugreports")
+        self.assertEqual(section, "vortex_tidy (files)")
+        self.assertTrue(any("missing asset" in line for line in lines))
+
+    def test_lua_originals_are_kept_in_the_package(self):
+        root = self.staging / "ModA-1-1-0"
+        lua = mock.Mock()
+        lua.apply_report.return_value = (1, [])
+        lua.format_report.return_value = (["  repaired main.lua"], {"G1": 1})
+        report = mock.Mock()
+        args = mock.Mock(staging=str(self.staging), yes=True, _journal_extra={})
+        lres = {"n_ok": 1, "checker": object(), "lf": lua, "reps": [(root.name, report)], "done": []}
+        with mock.patch.dict(os.environ, {"MWMANAGER_PLUGIN_NAME": "ModA"}):
+            self.t.lua_apply(args, lres)
+        self.assertEqual(Path(lua.apply_report.call_args.kwargs["backup_root"]),
+                         root / "Off" / "ModA" / "LuaRepairs")
+        self.assertEqual(Path(lua.apply_report.call_args.kwargs["backup_relative_to"]), root)
+        bugreport = root / "bugreports" / "ModA.mwse.bugreport.txt"
+        self.assertTrue(bugreport.is_file())
+        self.assertIn("repaired main.lua", bugreport.read_text(encoding="utf-8"))
+
+    def test_rejected_lua_repair_still_writes_package_bugreport(self):
+        root = self.staging / "ModA-1-1-0"
+        lua = mock.Mock()
+        lua.apply_report.return_value = (0, [(str(root / "MWSE" / "mods" / "A" / "main.lua"),
+                                              "syntax check failed")])
+        lua.format_report.return_value = (["  considered main.lua"], {"G1": 1})
+        args = mock.Mock(staging=str(self.staging), yes=True, _journal_extra={})
+        lres = {"n_ok": 1, "checker": object(), "lf": lua,
+                "reps": [(root.name, mock.Mock())], "done": []}
+        self.t.lua_apply(args, lres)
+        report = root / "bugreports" / "ModA.mwse.bugreport.txt"
+        self.assertIn("considered main.lua", report.read_text(encoding="utf-8"))
+        self.assertEqual(set(lua.format_report.call_args.kwargs["refused"].values()), {"syntax check failed"})
+
+    def test_asset_and_lua_reports_share_plugin_name_and_nexus_id(self):
+        assets = self.t._scanner.asset_health_module()
+        root = self.staging / "OAAB_Data 49042 2.7.5 2026-11-05T04-50Z sZJEZCNJ"
+        asset = Path(assets.package_bug_report_path(str(root), "OAAB_Data.esm"))
+        lua = Path(assets.package_bug_report_path(str(root), "OAAB_Data.esm", "mwse"))
+        self.assertEqual(asset.name, "OAAB_Data [Nexus 49042].bugreport.txt")
+        self.assertEqual(lua.name, "OAAB_Data [Nexus 49042].mwse.bugreport.txt")
+
     def test_plan_then_apply_then_undo(self):
         start = self.files()
         rc, out = self.run_tidy()
@@ -191,6 +361,36 @@ class TidySteps(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.files(), start)
         self.assertEqual(sorted(os.listdir(self.data)), [])       # nothing written into the game folder
+
+    def test_platform_packaging_debris_is_quarantined_and_undoable(self):
+        root = self.staging / "ModA-1-1-0"
+        debris = [root / "__MACOSX" / "._resource", root / "Textures" / ".DS_Store",
+                  root / "Meshes" / "._mesh.nif", root / "Thumbs.db", root / ".directory"]
+        for path in debris:
+            mk(path, b"metadata")
+        rc, out = self.run_tidy()
+        self.assertEqual(rc, 0, out)
+        self.assertIn("remove platform packaging metadata", out)
+        rc, out = self.run_tidy("--apply", "--yes")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(all(not path.exists() for path in debris))
+        quarantined = list((root / "Off").rglob("Packaging Metadata"))
+        self.assertEqual(len(quarantined), 1)
+        self.assertEqual(len([path for path in quarantined[0].rglob("*") if path.is_file()]), len(debris))
+        rc, out = self.run_tidy("--undo")
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(all(path.is_file() for path in debris))
+
+    def test_force_plan_only_bypasses_plan_comparison(self):
+        original_compare = self.t.PF.compare
+
+        def upstream(_args):
+            self.assertEqual(self.t.PF.compare("reviewed", "fresh", None), ([], []))
+            return 7
+
+        with mock.patch.object(self.t, "_upstream_apply_main", side_effect=upstream):
+            self.assertEqual(self.t.apply_main(mock.Mock(force_plan=True)), 7)
+        self.assertIs(self.t.PF.compare, original_compare)
 
     def test_undo_only_restores_one_staged_plugin(self):
         mod_b = self.staging / "ModB-2-0"
@@ -303,7 +503,7 @@ class GuiTidySteps(unittest.TestCase):
             messages.append(message)
         return progress, messages
 
-    def test_options_plan_auto_applies_and_refusal(self):
+    def test_options_plan_auto_applies_and_replans_after_refusal(self):
         pending = ["vortex_tidy plan, 2026-01-01 00:00: 1 mod(s), 1 to change, 0 left alone",
                    "MWMANAGER-PLAN: pending plan.txt"]
         calls, patch = self.fake([(0, pending), (0, ["done"])])
@@ -315,21 +515,93 @@ class GuiTidySteps(unittest.TestCase):
         progress.ask_choice.assert_not_called()
         self.assertTrue(any("automatically" in message for message in messages))
         self.assertIn("--options", calls[0])
+        self.assertNotIn("--asset-repair", calls[0])
         self.assertNotIn("--apply", calls[0])
         self.assertIn("--apply", calls[1])
         self.assertIn("--yes", calls[1])
         self.assertIn("done", messages)
-        calls, patch = self.fake([(0, pending), (2, ["REFUSED: the plan ..."])])
-        with patch, self.assertRaises(RuntimeError):
+        calls, patch = self.fake([
+            (0, pending), (2, ["REFUSED: the plan ..."]), (0, pending), (0, ["done after rebuild"]),
+        ])
+        with patch:
             self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
+        self.assertEqual(len(calls), 4)
+        self.assertNotIn("--options", calls[2])
+        self.assertNotIn("--apply", calls[2])
+        self.assertIn("--apply", calls[3])
 
-    def test_partial_apply_halts_deployment(self):
+    def test_three_changed_plans_offer_retry_or_stop(self):
         pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]
-        calls, patch = self.fake([(0, pending), (1, ["one action failed"])])
+        calls, patch = self.fake([
+            (0, pending), (2, ["refused 1"]), (0, pending), (2, ["refused 2"]),
+            (0, pending), (2, ["refused 3"]),
+        ])
+        progress, _messages = self.progress()
+        progress.ask_choice = mock.Mock(return_value="stop")
+        with patch, self.assertRaises(self.gui.TidyPlanPaused):
+            self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
+        self.assertEqual(len(calls), 6)
+        progress.ask_choice.assert_called_once()
+        self.assertEqual(progress.ask_choice.call_args.args[2], [("Try Again", "retry"), ("Stop the install", "stop")])
+
+    def test_three_changed_plans_can_retry(self):
+        pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]
+        calls, patch = self.fake([
+            (0, pending), (2, ["refused 1"]), (0, pending), (2, ["refused 2"]),
+            (0, pending), (2, ["refused 3"]), (0, pending), (0, ["done"]),
+        ])
+        progress, _messages = self.progress()
+        progress.ask_choice = mock.Mock(return_value="retry")
+        with patch:
+            self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
+        self.assertEqual(len(calls), 8)
+        progress.ask_choice.assert_called_once()
+
+    def test_second_failed_series_offers_apply_anyway(self):
+        pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]
+        outputs = [(0, pending)]
+        for number in range(1, 7):
+            outputs.append((2, [f"refused {number}"]))
+            if number != 6:
+                outputs.append((0, pending))
+        outputs.append((0, ["applied current plan"]))
+        calls, patch = self.fake(outputs)
+        progress, _messages = self.progress()
+        progress.ask_choice = mock.Mock(side_effect=["retry", "apply_anyway"])
+        with patch:
+            self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
+        self.assertEqual(len(calls), 13)
+        self.assertIn("--force-plan", calls[-1])
+        self.assertEqual(progress.ask_choice.call_count, 2)
+        first_choices = progress.ask_choice.call_args_list[0].args[2]
+        second_choices = progress.ask_choice.call_args_list[1].args[2]
+        self.assertNotIn(("Apply Anyway", "apply_anyway"), first_choices)
+        self.assertEqual(second_choices, [("Apply Anyway", "apply_anyway"), ("Stop the install", "stop")])
+
+    def test_partial_apply_starts_again_quietly(self):
+        pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]
+        calls, patch = self.fake([(0, pending), (1, ["111 repair(s) appeared after the moves"]),
+                                  (0, pending), (0, ["done"])])
         progress, _ = self.progress()
+        progress.ask_choice = mock.Mock(side_effect=AssertionError("one partial pass must not ask"))
+        with patch:
+            self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
+        self.assertEqual(len(calls), 4)
+
+    def test_apply_anyway_that_still_fails_halts_deployment(self):
+        pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]
+        outputs = [(0, pending)]
+        for number in range(1, 7):
+            outputs.append((1, [f"partial {number}"]))
+            if number != 6:
+                outputs.append((0, pending))
+        outputs.append((1, ["one action failed"]))
+        calls, patch = self.fake(outputs)
+        progress, _ = self.progress()
+        progress.ask_choice = mock.Mock(side_effect=["retry", "apply_anyway"])
         with patch, self.assertRaisesRegex(RuntimeError, "deployment is halted"):
             self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 13)
 
     def test_missing_plan_marker_cannot_be_treated_as_ready(self):
         calls, patch = self.fake([(0, ["unexpected tool output"])])

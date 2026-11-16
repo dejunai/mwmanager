@@ -798,20 +798,3 @@ def sha256_file(path):
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
-
-
-ASSET_REPAIR = False                                  # MWManager: --fix leaves asset files alone unless asked
-
-
-def asset_repair_enabled(args=None):
-    """--asset-repair, else mwmanager.ini [Repair] asset_repair, else ASSET_REPAIR (off)."""
-    flag = getattr(args, "asset_repair", None) if args is not None else None
-    if flag is not None:
-        return bool(flag)
-    import configparser
-    cfg = configparser.ConfigParser()
-    try:
-        cfg.read(os.path.join(MANAGER_DIR, "mwmanager.ini"), encoding="utf-8")
-        return cfg.getboolean("Repair", "asset_repair", fallback=ASSET_REPAIR)
-    except (configparser.Error, ValueError, OSError):
-        return ASSET_REPAIR

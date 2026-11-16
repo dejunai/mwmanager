@@ -26,9 +26,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_assets.py",
       "working": "mwdialog_assets.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14); MWManager behaviour in mwmanager_assets_ext.py",
-      "source_sha256": "4ea0cee1c8fabaa194b2088bde482e5c6fa00cb35e0f960b5647e7390b2024c2",
-      "snapshot_sha256": "4ea0cee1c8fabaa194b2088bde482e5c6fa00cb35e0f960b5647e7390b2024c2",
-      "working_sha256": "4ea0cee1c8fabaa194b2088bde482e5c6fa00cb35e0f960b5647e7390b2024c2",
+      "source_sha256": "770e6b371ac753a451581015bbae42cfa77ef8e690e464422b88d42794b5cabd",
+      "snapshot_sha256": "770e6b371ac753a451581015bbae42cfa77ef8e690e464422b88d42794b5cabd",
+      "working_sha256": "770e6b371ac753a451581015bbae42cfa77ef8e690e464422b88d42794b5cabd",
       "working_matches_upstream": true,
       "extension": [
         "mwmanager_assets_ext.py"
@@ -40,9 +40,9 @@
       "snapshot": "tools\\steam-upstream\\vortex_tidy.py",
       "working": "vortex_tidy.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14); MWManager behaviour in mwmanager_tidy_ext.py, mwmanager_install.py",
-      "source_sha256": "a168995fe36611990d393000911571dfee6f4260e4f44e05bb271a3ae0c0f6c0",
-      "snapshot_sha256": "a168995fe36611990d393000911571dfee6f4260e4f44e05bb271a3ae0c0f6c0",
-      "working_sha256": "a168995fe36611990d393000911571dfee6f4260e4f44e05bb271a3ae0c0f6c0",
+      "source_sha256": "ce5319cd6da8e24b1af8938f3f9742c01b001cc419862172d9a65132d9e2157e",
+      "snapshot_sha256": "ce5319cd6da8e24b1af8938f3f9742c01b001cc419862172d9a65132d9e2157e",
+      "working_sha256": "ce5319cd6da8e24b1af8938f3f9742c01b001cc419862172d9a65132d9e2157e",
       "working_matches_upstream": true,
       "extension": [
         "mwmanager_tidy_ext.py",
@@ -55,9 +55,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_luafix.py",
       "working": "mwdialog_luafix.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "c8c35c0eee78040d7627f34a092af3f74e377e2bcd808dbacd1f5b302087ff82",
-      "snapshot_sha256": "c8c35c0eee78040d7627f34a092af3f74e377e2bcd808dbacd1f5b302087ff82",
-      "working_sha256": "c8c35c0eee78040d7627f34a092af3f74e377e2bcd808dbacd1f5b302087ff82",
+      "source_sha256": "d8c75083be832a4090fe42fb9b1a1a1fc9c44acde6d428b2f3a6877c45f8c1e3",
+      "snapshot_sha256": "d8c75083be832a4090fe42fb9b1a1a1fc9c44acde6d428b2f3a6877c45f8c1e3",
+      "working_sha256": "d8c75083be832a4090fe42fb9b1a1a1fc9c44acde6d428b2f3a6877c45f8c1e3",
       "working_matches_upstream": true
     },
     {

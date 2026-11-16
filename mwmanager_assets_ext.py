@@ -14,6 +14,7 @@ import shutil
 import sys
 import tempfile
 import time
+import hashlib
 
 _scanner = sys.modules["mwdialog_check"]
 MANAGER_DIR = _scanner.MANAGER_DIR
@@ -349,7 +350,8 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                 if moved:
                     shutil.move(full, dest)
                 if change_log is not None:
-                    change_log.append({"file": rel, "action": "moved to Off/orphaned after checking global asset availability",
+                    change_log.append({"file": rel, "action": f"moved to Off ({job})" if isinstance(job, str) else
+                                       "moved to Off/orphaned after checking global asset availability",
                                        "backup": os.path.relpath(dest, root), "cross_plugin": True})
                 if journal_ops is not None and moved:
                     journal_ops.append({"src": full, "dst": dest})
@@ -380,6 +382,8 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                         continue
                     os.makedirs(tmp, exist_ok=True)
                     a = [texconv, "-nologo", "-y", "-dx9", "-o", tmp, "-m", "0"]
+                    if job.get("convert"):
+                        a += ["-ft", job["convert"][1:]] + (["-f", "BC3_UNORM"] if job["convert"] == ".dds" else [])
                     if job.get("dxt"):
                         a += ["-f", "BC3_UNORM" if job.get("alpha", True) else "BC1_UNORM"]
                     w, h = job.get("size") or (None, None)
@@ -392,7 +396,8 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                     if w:
                         a += ["-w", str(w), "-h", str(h)]
                     res = subprocess.run(a + [full], capture_output=True, text=True)
-                    out = os.path.join(tmp, os.path.basename(full))
+                    out = os.path.join(tmp, os.path.splitext(os.path.basename(full))[0] + job["convert"]
+                                       if job.get("convert") else os.path.basename(full))
                     if res.returncode or not os.path.exists(out):
                         skipped.append(f"{rel} (texconv: {(res.stdout + res.stderr).strip()[-100:]})")
                         continue
@@ -406,7 +411,8 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                         skipped.append(f"{rel} (ffmpeg not found)")
                         continue
                     os.makedirs(tmp, exist_ok=True)
-                    out = os.path.join(tmp, "x" + os.path.splitext(full)[1].lower())
+                    out = os.path.join(tmp, "x" + (".mp3" if job.get("mp3") else
+                                                    os.path.splitext(full)[1].lower()))
                     a = [ff, "-y", "-v", "error", "-i", full]
                     if job.get("mono"):
                         a += ["-ac", "1"]
@@ -422,10 +428,37 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                     os.remove(out)
             if not new:
                 continue
+            if kind == "snd" and job.get("mp3"):
+                replacement = os.path.splitext(full)[0] + ".mp3"
+                if os.path.exists(replacement):
+                    skipped.append(f"{rel} (MP3 replacement already exists)")
+                    continue
+            if kind == "tex" and job.get("convert"):
+                replacement = os.path.splitext(full)[0] + job["convert"]
             backup = _backup_in_mod(root, rel, full, plugin_name, m, FEATURE_OF.get(kind, "repair"))
-            m.replace_asset_in_place(full, new)
-            if journal_ops is not None:
-                journal_ops.append({"restore": full, "backup": backup})
+            if kind == "tex" and job.get("convert") and os.path.exists(replacement):
+                # the mod ships its own DDS/TGA of that name, which the game prefers: the PNG only goes to Off
+                os.remove(full)
+                if journal_ops is not None:
+                    journal_ops.append({"restore": full, "backup": backup})
+            elif (kind == "snd" and job.get("mp3")) or (kind == "tex" and job.get("convert")):
+                partial = replacement + ".mwmanager-tmp"
+                with open(partial, "wb") as output:
+                    output.write(new)
+                os.replace(partial, replacement)
+                try:
+                    os.remove(full)
+                except OSError:
+                    os.remove(replacement)
+                    raise
+                if journal_ops is not None:
+                    journal_ops.append({"restore": full, "backup": backup})
+                    journal_ops.append({"generated": replacement,
+                                        "sha256": hashlib.sha256(new).hexdigest()})
+            else:
+                m.replace_asset_in_place(full, new)
+                if journal_ops is not None:
+                    journal_ops.append({"restore": full, "backup": backup})
             if change_log is not None:
                 details = {"keys": "normalized NIF text-key line endings", "abs": "rewrote absolute texture paths"}.get(kind)
                 if kind == "keys":
@@ -437,7 +470,9 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                 elif kind == "tex":
                     details = "repaired or converted DDS texture (including requested size/format/mipmap changes)"
                 elif kind == "snd":
-                    details = "converted sound to Morrowind-compatible encoding" if not job.get("strip") else "removed leading sound header bytes"
+                    details = ("converted WAV to same-stem MP3" if job.get("mp3") else
+                               "converted sound to Morrowind-compatible encoding" if not job.get("strip") else
+                               "removed leading sound header bytes")
                 change_log.append({"file": rel, "action": details or f"repaired {kind} asset", "backup": os.path.relpath(backup, root)})
             done += 1
         except OSError as e:
@@ -585,12 +620,55 @@ def bug_report_path(data_dir, game_dir, plugin_name, m):
 _upstream_check_folder = check_folder
 
 
+def catalog_has_asset(m, relative_path):
+    """Whether the installed-game catalog already owns this Data Files path."""
+    import sqlite3
+    database = os.path.join(getattr(m, "MANAGER_DIR", os.path.dirname(os.path.abspath(__file__))),
+                            "game_catalog.sqlite3")
+    normalized = relative_path.replace("\\", "/").strip("/").casefold()
+    connection = None
+    try:
+        connection = sqlite3.connect(database)
+        return connection.execute(
+            "SELECT 1 FROM bsa_asset WHERE asset_path_norm = ? LIMIT 1", (normalized,)).fetchone() is not None
+    except (OSError, sqlite3.Error):
+        return False
+    finally:
+        if connection is not None:
+            connection.close()
+
+
+from core_addons import IMAGE_ASSET_DIRS, lua_texts, lua_used_images  # noqa: E402  (shared with the packers)
+
+
 def check_folder(root, m, data_dir=None, bsa_meshes=None, stats=None, progress_callback=None):
     """Upstream's check of a mod folder, plus a damaged Bink video (not BIK / KB2) under Video\\, which --fix
     replaces with MWManager's stand-in video (the original kept in the mod's Off\\ tree)."""
+    if progress_callback is None and os.environ.get("MWMANAGER_GUI") == "1":
+        progress_callback = lambda message: print(f"MWMANAGER-PROGRESS: {message}", flush=True)
+    original_walk, checked = _walk, 0
+
+    def reporting_walk(*args, **kwargs):
+        nonlocal checked
+        for entry in original_walk(*args, **kwargs):
+            checked += 1
+            if progress_callback and checked % 2000 == 0:
+                progress_callback(f"Checked {checked:,} asset files in {os.path.basename(root.rstrip(os.sep))}…")
+            yield entry
+
     if progress_callback:
         progress_callback(f"Checking assets in {os.path.basename(root.rstrip(os.sep))}")
-    issues, fixes = _upstream_check_folder(root, m, data_dir, bsa_meshes, stats)
+        globals()["_walk"] = reporting_walk
+    try:
+        issues, fixes = _upstream_check_folder(root, m, data_dir, bsa_meshes, stats)
+    finally:
+        globals()["_walk"] = original_walk
+    # an "orphaned" animation whose path the installed game's BSAs own still has its model there: keep it
+    owned = {rel for kind, _full, rel, why in fixes
+             if kind == "orphan" and why == "orphaned animation" and catalog_has_asset(m, rel)}
+    if owned:
+        fixes = [f for f in fixes if not (f[0] == "orphan" and f[2] in owned)]
+        issues = [i for i in issues if not (i[1] in owned and i[2].startswith("orphaned animation"))]
     video = os.path.join(root, "Video")
     for dp, _ds, fs in os.walk(video) if os.path.isdir(video) else ():
         for fn in fs:
@@ -607,6 +685,36 @@ def check_folder(root, m, data_dir=None, bsa_meshes=None, stats=None, progress_c
                 issues.append(("ERROR", rel, "not a recognized Bink video (damaged or wrong file) -> original kept in "
                                              "the mod Off/broken tree; stand-in video installed"))
                 fixes.append(("broken", full, rel, "damaged Bink video"))
+    # PNG/JPEG: neither the engine nor a BSA takes them. Converted like the other texture repairs, to DDS under
+    # Textures and TGA under BookArt, Icons and Splash. Only there: elsewhere (Extras, fomod images, docs) nothing
+    # would load them. One a Lua script names (MWSE and its MCM read PNG) stays as it is, loose, out of any BSA.
+    lua_text = None
+    for dp, ds, fs in os.walk(root):
+        rel_dir = os.path.relpath(dp, root)
+        if rel_dir == ".":
+            ds[:] = [d for d in ds if d.casefold() in IMAGE_ASSET_DIRS]
+            continue
+        dds_stems = {os.path.splitext(fn)[0].casefold() for fn in fs if fn.lower().endswith(".dds")}
+        for fn in fs:
+            stem, ext = os.path.splitext(fn)
+            if ext.lower() in (".tga", ".bmp") and stem.casefold() in dds_stems:
+                # the engine loads the .dds whenever a .tga/.bmp of that name is asked for: this file is never used
+                rel = os.path.relpath(os.path.join(dp, fn), root)
+                issues.append(("WARN", rel, f"unused: {stem}.dds beside it is loaded instead -> moved to Off"))
+                fixes.append(("orphan", os.path.join(dp, fn), rel, f"{stem}.dds of the same name is loaded instead"))
+            if not fn.lower().endswith((".png", ".jpg", ".jpeg")):
+                continue
+            full = os.path.join(dp, fn)
+            rel = os.path.relpath(full, root)
+            if lua_text is None:
+                lua_text = lua_texts(root)
+            if fn.casefold() in lua_text:
+                issues.append(("WARN", rel, "image named by a Lua script -> left as it is, kept out of the BSA"))
+                continue
+            target = ".dds" if rel.casefold().split(os.sep)[0] == "textures" else ".tga"
+            issues.append(("ERROR", rel, f"{os.path.splitext(fn)[1]} image: Morrowind and its BSAs cannot use it -> "
+                                         f"converted to {target} (original kept in Off)"))
+            fixes.append(("tex", full, rel, {"convert": target}))
     if progress_callback:
-        progress_callback("Asset scan complete")
+        progress_callback(f"Asset scan complete: {checked:,} files checked")
     return issues, fixes

@@ -1,6 +1,6 @@
 # Steam upstream changes required by MWManager
 
-Status: 2026-11-15
+Status: 2026-11-16
 
 MWManager runs against the selected GOG installation. The Steam installation is the development source for the
 reusable `mwdialog_*` and `vortex_tidy.py` utilities. Changes in this document belong in the Steam utilities first,
@@ -57,8 +57,8 @@ MWManager depends on these meanings from `vortex_tidy.py` and `mwdialog_luafix.p
 | Code | Meaning | MWManager action |
 | --- | --- | --- |
 | `0` | The requested operation completed, or there was nothing to do. | Continue. |
-| `1` | Some requested actions failed or remain pending. | Halt deployment and keep the plan for review. |
-| `2` | The reviewed plan is absent or changed, or invocation/preflight is invalid. Nothing from that plan was applied. | Halt and require a new review. |
+| `1` | Some requested actions failed or remain pending. | GUI Tidy starts a fresh plan-and-apply pass; after three in a row it asks (Try Again, then Apply Anyway or Stop). |
+| `2` | The reviewed plan is absent or changed, or invocation/preflight is invalid. Nothing from that plan was applied. | Same as `1`: a fresh pass, asking only after three in a row. |
 
 Preserve the `MWMANAGER-PLAN:` and `MWMANAGER-PROGRESS:` machine-readable lines. Add focused CLI tests for all three
 codes so a future refactor cannot turn a partial failure into apparent success.
@@ -84,6 +84,46 @@ The command must not fail because `mwdialog_check` came from `tools/steam-upstre
 the handle for garbage collection, emitted `ResourceWarning` during the combined suite, and could briefly prevent a
 Windows rewrite or rollback from replacing the record.
 
+### 6. `vortex_tidy`: plan asset repairs at the paths the moves will leave
+
+`assets_check()` checks a package before the plan's moves and names each repair by the file's current path
+(`Data Files\textures\x.dds`). `assets_apply()` checks a moved package again, and the same repairs now carry the new
+paths (`textures\x.dds`), so they are reported as "N repair(s) appeared after the moves - not in the plan you reviewed,
+so not made", and the old-path lines stay in the plan as "NOT applied" (exit `1`). Seen on OAAB_Data: 111 "new"
+repairs and 9 lines left, though nothing new was found.
+
+A file moved *into* a checked folder is missed the same way: Dr_Data shipped `sounds\dr\*.wav` (not a sound folder),
+Tidy moved them to `Sound\dr\`, and the WAV-to-MP3 conversion they then needed was dropped.
+
+**Done 2026-11-16 (Steam source, synced):** `assets_apply()` checks each moved package again after the moves. Reviewed
+repairs that still apply are made; reviewed lines whose file the moves took away count as settled; repairs that only
+appear after the moves are queued. When every package is done, the queue - and only the queue - is processed. Queued
+repairs that fail stay in the plan (exit `1`). Test: `test_repairs_found_after_the_moves_are_queued_and_made`.
+
+### 7. `mwdialog_assets.py`: MWManager's copy has drifted from upstream
+
+The project-root `mwdialog_assets.py` is no longer byte-identical to `tools/steam-upstream/`. Changes to take upstream
+(or move into `mwmanager_assets_ext.py`) before the next sync:
+
+- `catalog_has_asset()`: an orphaned animation is not moved to Off when the installed game's BSA catalog
+  (`game_catalog.sqlite3`) owns that path. MWManager-specific (the catalog is the manager's); move it to the extension.
+- `check_folder()`: every WAV under `sound`/`music` gets `job["mp3"] = True` (converted to a same-stem MP3; Morrowind
+  falls back from `.wav` to `.mp3`). Generic; take it upstream.
+- `package_bug_report_path()` and the changed `bug_report_path()`: bug reports named per package and per checker.
+  Take the helper upstream; the path choice may stay MWManager's.
+
+**Done 2026-11-16:** the WAV rule and `package_bug_report_path()` are in the Steam source (test:
+`test_check_folder_converts_every_wav_to_a_same_stem_mp3`); `catalog_has_asset()` moved to `mwmanager_assets_ext.py`,
+which drops those orphan findings after the upstream check. All shared files are byte-identical again and
+`COPY_MANIFEST.json` hashes are current.
+
+### 8. `mwdialog_luafix`: a status on every reported finding
+
+**Done 2026-11-16 (Steam source, synced):** `format_report(..., done=, refused=)` prefixes each finding with `PATCHED`,
+`NOT PATCHED`, `UNCONFIGURED` (should be fixed, no fix exists) or `REPORTED`, and ends each file with `=> PATCHED` or
+`=> NOT PATCHED: <why>`. Without `done` the plan text is unchanged. MWManager's `backup_relative_to` was taken upstream
+(keyword-only, so tests that set `apply_report.__defaults__` still work).
+
 ## MWManager-only behavior — do not put upstream
 
 These remain project extensions:
@@ -101,7 +141,8 @@ These remain project extensions:
 - GUI first-run activation of every shipped ESP and its standalone pre-`--full` sort.
 - Generated stand-ins being recorded in both the generated-files list and MWManager's rollback ledger.
 - Plugin and major-master archive installation workflows.
-- Asset repair being disabled unless the user explicitly enables it.
+- Asset repair always on (no switch since 2026-11-16), including PNG/JPEG conversion under the game image folders,
+  Lua-loaded images kept loose and out of BSAs, and TGA/BMP files shadowed by a same-named DDS moved to Off.
 
 Do not replace these with Steam-root defaults during a sync.
 

@@ -29,7 +29,17 @@ MANAGER_DIR = _scanner.MANAGER_DIR
 globals().update(_scanner.tidy_state_names(MANAGER_DIR))
 _TIDY_BACKUP_CACHE_DATA = None
 SUPPORT_DIRS = {"mwse", "mge3", "shaders", "grass", "mcpatch", "fomod"}
+# A game folder the author misnamed: renamed at the plugin root and reported as a packing error.
+MISNAMED_DIRS = {"sounds": "Sound", "splashes": "Splash", "texture": "Textures", "mesh": "Meshes",
+                 "icon": "Icons", "videos": "Video", "bookarts": "BookArt", "musics": "Music"}
+PACKING_MARK = "packing error: "
+
+
+def misnamed_reason(folder):
+    return f"{PACKING_MARK}the author packed '{folder}', which the game never reads; renamed to " \
+           f"'{MISNAMED_DIRS[folder.casefold()]}'"
 OUR_DIRS = {"docs", "extras", "off", "bugreports"}
+LINK_PREFIX = "link: "              # a planned 00 Core file: hard-linked into the root, the 00 folder kept in Extras
 STAGING_DIRS = OUR_DIRS | {"screenshots", "grass"}
 OPENMW_DIRS = {"openmw", "scripts", "l10n", "playlists", "animations"}
 CORE_OPTION = re.compile(r"^00(?:\s*-\s*|\s+).+$", re.I)
@@ -38,8 +48,22 @@ VORTEX_FILES = {"__folder_managed_by_vortex", ".mwmanager-stage.json"}
 
 
 def package_name(folder):
-    """Prefer Vortex's recorded mod name; fall back to the cleaned download-folder name."""
+    """Use the processing identity, staged primary master, Vortex name, then the download-folder name."""
     fallback = mod_name(os.path.basename(folder.rstrip("\\/")))
+    established = os.environ.get("MWMANAGER_PLUGIN_NAME", "").strip()
+    if established:
+        return BAD_CHARS.sub("_", established).rstrip(" .") or fallback
+    try:
+        with open(os.path.join(folder, ".mwmanager-stage.json"), encoding="utf-8") as marker_file:
+            marker = json.load(marker_file)
+        marker_name = str(marker.get("PLUGIN_NAME") or "").strip()
+        if marker_name:
+            return BAD_CHARS.sub("_", marker_name).rstrip(" .") or fallback
+        masters = marker.get("selected_masters", [])
+        if masters:
+            return BAD_CHARS.sub("_", os.path.splitext(os.path.basename(masters[0]))[0]).rstrip(" .") or fallback
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
     try:
         import mwdialog_assets
         value = mwdialog_assets.vortex_mod_metadata(folder).get("name", "").strip()
@@ -310,6 +334,21 @@ def plan_mod(mod_dir):
         dst = free_path(dst, taken)
         moves.append((src, dst, why))
 
+    # Archive tools preserve host-OS metadata that is never Morrowind content.
+    junk_dirs = {"__macos", "__macosx", ".appledouble", ".fseventsd", ".spotlight-v100", ".trashes",
+                 "$recycle.bin", "system volume information"}
+    junk_files = {".directory", ".ds_store", "desktop.ini", "ehthumbs.db", "ehthumbs_vista.db", "icon\r",
+                  "thumbs.db"}
+    packaging_junk = []
+    for base, dirs, files in os.walk(mod_dir):
+        dirs[:] = [directory for directory in dirs if directory.casefold() != "off"]
+        for directory in list(dirs):
+            if directory.casefold() in junk_dirs or directory.casefold().startswith(".trash-"):
+                packaging_junk.append(os.path.join(base, directory))
+                dirs.remove(directory)
+        packaging_junk.extend(os.path.join(base, filename) for filename in files
+                              if filename.casefold() in junk_files or filename.startswith("._"))
+
     # Consolidate legacy Off/<raw folder or plugin filename>/ trees under the
     # package's canonical Vortex display name, preserving their feature paths.
     off_root = os.path.join(mod_dir, existing(mod_dir, "Off"))
@@ -412,9 +451,11 @@ def plan_mod(mod_dir):
                 if not parts:
                     continue
                 first = parts[0].casefold()
-                if first == "sounds":
-                    parts[0] = "sound"
-                    first = "sound"
+                packing = ""
+                if len(parts) > 1 and first in MISNAMED_DIRS:
+                    packing = "; " + misnamed_reason(parts[0])
+                    parts[0] = MISNAMED_DIRS[first]
+                    first = parts[0].casefold()
                 ext = os.path.splitext(filename)[1].casefold()
                 recognized = GAME_DIRS | SUPPORT_DIRS | OPENMW_DIRS | OUR_DIRS | {
                     "data files", "docs", "screenshots", "grass"
@@ -442,8 +483,22 @@ def plan_mod(mod_dir):
                 else:
                     dest = os.path.join(mod_dir, *parts)
                     reason = "unpack required 00 Core content into the plugin root"
-                move(source, dest, reason)
-        moves.append((core_dir, None, "remove the emptied required 00 Core folder"))
+                link(source, dest, reason + packing)
+        core_name = os.path.basename(core_dir.rstrip(os.sep))
+        core_home = os.path.join(extras, core_name)
+        if os.path.normcase(os.path.abspath(core_dir)) != os.path.normcase(os.path.abspath(core_home)):
+            moves.append((core_dir, free_path(core_home, taken),
+                          "keep the 00 folder under Extras/<plugin> so the install can be repeated"))
+
+    def link(src, dst, why):
+        """A 00 Core file goes into the root as a hard link; its 00 folder stays whole under Extras. A file an option
+        already put at that path wins: the core copy is still in Extras, so nothing is renamed or lost."""
+        planned_sources.add(os.path.normcase(os.path.abspath(src)))
+        key = os.path.normcase(os.path.abspath(dst))
+        if os.path.exists(dst) or key in taken:
+            return
+        taken.add(key)
+        moves.append((src, dst, LINK_PREFIX + why))
 
     # Migrate the earlier LuaRepair layout and remove the source-tree wrappers
     # from backup paths. Preserve each original under the owning ESM's folder.
@@ -602,16 +657,15 @@ def plan_mod(mod_dir):
                     feature = "OpenMW"
                     move(child_src, os.path.join(mod_dir, "Off", off_owner, feature, "Data Files", child),
                          "OpenMW script/resource retained outside vanilla Data Files")
-                elif child.casefold() == "sounds" and os.path.isdir(child_src):
-                    if sounds_are_optional:
-                        move(child_src, os.path.join(extras, "01 - Optional Sounds"),
-                             "readme identifies Sounds as optional; expose it in the mock BAIN/FOMOD")
-                    else:
-                        for sound_file in files_under(child_src):
-                            rel = os.path.relpath(sound_file, child_src)
-                            move(sound_file, os.path.join(mod_dir, "Sound", rel),
-                                 "normalize pluralized Sounds folder to the game's Sound data folder")
-                        moves.append((child_src, None, "remove emptied pluralized Sounds folder"))
+                elif child.casefold() == "sounds" and os.path.isdir(child_src) and sounds_are_optional:
+                    move(child_src, os.path.join(extras, "01 - Optional Sounds"),
+                         "readme identifies Sounds as optional; expose it in the mock BAIN/FOMOD")
+                elif child.casefold() in MISNAMED_DIRS and os.path.isdir(child_src):
+                    for misnamed_file in files_under(child_src):
+                        move(misnamed_file, os.path.join(mod_dir, MISNAMED_DIRS[child.casefold()],
+                                                         os.path.relpath(misnamed_file, child_src)),
+                             misnamed_reason(child))
+                    moves.append((child_src, None, "remove the emptied misnamed folder"))
                 else:
                     move(child_src, os.path.join(mod_dir, child),
                          "flatten the mod's Data Files folder into its staging root")
@@ -619,6 +673,12 @@ def plan_mod(mod_dir):
             continue
         if os.path.isdir(src) and CORE_OPTION.match(e):
             unpack_core(src)
+            continue
+        if os.path.isdir(src) and el in MISNAMED_DIRS and not (el == "sounds" and sounds_are_optional):
+            for misnamed_file in files_under(src):
+                move(misnamed_file, os.path.join(mod_dir, MISNAMED_DIRS[el], os.path.relpath(misnamed_file, src)),
+                     misnamed_reason(e))
+            moves.append((src, None, "remove the emptied misnamed folder"))
             continue
         if el == "textures":
             # Normal maps are OpenMW-only; keep them under the package's Off/OpenMW tree.
@@ -766,6 +826,18 @@ def plan_mod(mod_dir):
         for base, dirs, files in os.walk(extras_root, topdown=False):
             if not dirs and not files:
                 moves.append((base, None, "remove empty Extras folder"))
+
+    # Remove earlier classifications of debris files inside a debris folder, then quarantine the parent once.
+    if packaging_junk:
+        junk_keys = [(os.path.normcase(os.path.abspath(path)), os.path.isdir(path)) for path in packaging_junk]
+        moves = [item for item in moves if not any(
+            os.path.normcase(os.path.abspath(item[0])) == key
+            or (is_dir and os.path.normcase(os.path.abspath(item[0])).startswith(key + os.sep))
+            for key, is_dir in junk_keys)]
+        for source in packaging_junk:
+            relative = os.path.relpath(source, mod_dir)
+            destination = free_path(os.path.join(mod_dir, "Off", off_owner, "Packaging Metadata", relative), taken)
+            moves.append((source, destination, "remove platform packaging metadata from installable content"))
     return moves
 CONVERTED_ADDONS = {}  # source .omwaddon filename -> destination .esp filename
 
@@ -1086,8 +1158,7 @@ def run_plan(args):
         print(f"... ({len(lines) - 200} more lines in {PLAN})")
     print(f"\nFull plan: {PLAN}")
     update_omwaddon_masters(args.staging, apply_changes=False)
-    game_data_files = args.game_data_files or os.environ.get(
-        "MWMANAGER_DATA_FILES", os.path.join(HERE, "staging", "Data Files"))
+    game_data_files = args.game_data_files or os.environ.get("MWMANAGER_DATA_FILES")
     align_master_versions(args.staging, game_data_files, apply_changes=False)
     return all_moves
 
@@ -1097,8 +1168,7 @@ def run_mock_options(args):
     print("MWMANAGER-PROGRESS: Reviewing required and optional BAIN/FOMOD components", flush=True)
     try:
         from mock_fomod import process_staging
-        data_files = args.game_data_files or os.environ.get(
-            "MWMANAGER_DATA_FILES", os.path.join(HERE, "staging", "Data Files"))
+        data_files = args.game_data_files or os.environ.get("MWMANAGER_DATA_FILES")
         args.post_option_mods = process_staging(
             args.staging, data_files, OUTPUT_DIR, only=args.only,
             reopen_existing=bool(getattr(args, "options_only", False))) or []
@@ -1109,9 +1179,60 @@ def run_mock_options(args):
     return 0
 
 
-def run_post_option_tidy(args):
+def clear_readonly_flags(staging, only=None):
+    """Archives can mark their files and folders read-only, which blocks moving and removing them on Windows.
+    Returns how many flags were cleared."""
+    import fnmatch
+    cleared = 0
+    for name in os.listdir(staging):
+        folder = os.path.join(staging, name)
+        if not os.path.isdir(folder) or (only and not any(
+                name.casefold() == pat.casefold() or fnmatch.fnmatch(name.casefold(), pat.casefold())
+                for pat in only)):
+            continue
+        for base, dirs, files in os.walk(folder):
+            for path in [base] + [os.path.join(base, f) for f in files]:
+                try:
+                    if not os.stat(path).st_mode & stat.S_IWRITE:
+                        os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+                        cleared += 1
+                except OSError:
+                    pass                          # the step that needs the path reports it
+    return cleared
+
+
+def unprocessed_bain_packages(staging, only=None):
+    """Staged packages still in their archive's layout: numbered folders at the root. A FOMOD package is tidied
+    first too: its fomod folder and declared sources move to Extras/<plugin> with their packed paths, which the
+    option window reads them from, and its 00 folder is already linked into the root (kept in Extras)."""
+    import fnmatch
+    from mock_fomod import OPTION_RE
+    found = []
+    for name in sorted(os.listdir(staging), key=str.casefold):
+        folder = os.path.join(staging, name)
+        if not os.path.isdir(folder):
+            continue
+        if only and not any(name.casefold() == pat.casefold() or fnmatch.fnmatch(name.casefold(), pat.casefold())
+                            for pat in only):
+            continue
+        if any(OPTION_RE.match(child) and os.path.isdir(os.path.join(folder, child)) for child in os.listdir(folder)):
+            found.append(name)
+    return found
+
+
+def run_pre_option_tidy(args):
+    """Tidy BAIN packages before their options are offered: 00 Core unpacks into the root, the numbered optional
+    folders move to Extras/<plugin> and the documentation to Docs/<plugin>, which is where the option window
+    looks for the choices and their descriptions."""
+    raw = unprocessed_bain_packages(args.staging, args.only)
+    if raw:
+        print("MWMANAGER-PROGRESS: Unpacking BAIN packages before their options", flush=True)
+        run_post_option_tidy(args, raw)
+
+
+def run_post_option_tidy(args, changed=None):
     """Re-tidy packages whose BAIN/FOMOD payloads changed, then check their assets."""
-    changed = set(getattr(args, "post_option_mods", []) or [])
+    changed = set(changed if changed is not None else getattr(args, "post_option_mods", []) or [])
     if not changed:
         removed = prune_empty_directories(args.staging)
         if removed:
@@ -1133,6 +1254,54 @@ def run_post_option_tidy(args):
         args.only = previous_only
 
 
+def lua_apply(args, lres):
+    """Patch each package's Lua files with its originals kept inside that package."""
+    if not lres or not lres["n_ok"]:
+        return
+    if lres["checker"] is None:
+        print("  not patching Lua: no syntax checker (LuaJIT / luac) found")
+        return
+    if not args.yes and input(f"\nPatch {lres['n_ok']} Lua file(s) in place? [y/N] ").strip().lower() not in \
+            ("y", "yes"):
+        print("  Lua files not changed.")
+        return
+    lf, written, refused = lres["lf"], 0, []
+    for package_name_raw, report in lres["reps"]:
+        package = os.path.join(args.staging, package_name_raw)
+        owner = package_name(package)
+        count, rejected = lf.apply_report(
+            report, journal=JOURNAL,
+            backup_root=os.path.join(package, "Off", owner, "LuaRepairs"),
+            backup_relative_to=package,
+            head_extra=dict({"staging": args.staging, "plugin": package_name_raw, "lua": True},
+                            **getattr(args, "_journal_extra", {})), done=lres["done"])
+        lines, _counts = lf.format_report(report, indent="  ", done=lres["done"], refused=dict(rejected))
+        ah = _scanner.asset_health_module()
+        plugin_file = next((name for name in sorted(os.listdir(package), key=str.casefold)
+                            if os.path.splitext(name)[1].casefold() in (".esp", ".esm")), None)
+        report_name = plugin_file or owner
+        bugreport = ah.package_bug_report_path(package, report_name, "mwse")
+        header = (ah.bug_report_header(os.path.join(package, plugin_file), _scanner, mod_folder=package)
+                  if plugin_file else [f"Bug report for {owner}", f"Mod: {owner} (no plugin)",
+                                       f"Generated {time.strftime('%Y-%m-%d %H:%M')} by MWManager Tidy.",
+                                       "Paths are relative to this staged package."])
+        ah.update_bug_report(bugreport, "vortex_tidy (MWSE Lua)", header, lines)
+        ah.update_bug_report(ah.package_bug_report_path(package, report_name),
+                             "vortex_tidy (MWSE Lua)", header, [])
+        legacy = os.path.join(package, "bugreports", owner + ".mwse.bugreport.txt")
+        if os.path.normcase(legacy) != os.path.normcase(bugreport):
+            try:
+                os.remove(legacy)
+            except OSError:
+                pass
+        written += count
+        refused.extend(rejected)
+    for path, why in refused:
+        print(f"    not patched: {os.path.relpath(path, args.staging)}: {why}")
+    print(f"  patched {written} Lua file(s) (originals kept in each package's Off tree; "
+          f"journal {JOURNAL}; --undo --only <package> puts one package's back)")
+
+
 def undo_lua_repairs():
     """Restore the last parser-based Lua repair run, if Tidy created one."""
     journal = os.path.join(OUTPUT_DIR, "mwmanager_luafix_journal.jsonl")
@@ -1149,6 +1318,27 @@ def undo_lua_repairs():
 _upstream_assets_apply = assets_apply
 
 
+def _write_package_asset_bug_reports(ares):
+    """Persist every staged package's asset findings beside that package, including unrepairable findings."""
+    ah, m = ares["ah"], ares["m"]
+    for package_name_raw, entry in ares["mods"].items():
+        issues, root = entry["issues"], entry["root"]
+        if not issues:
+            continue
+        plugin_file = next((name for name in sorted(os.listdir(root), key=str.casefold)
+                            if os.path.splitext(name)[1].casefold() in (".esp", ".esm")), None)
+        owner = package_name(root)
+        header = (ah.bug_report_header(os.path.join(root, plugin_file), m, mod_folder=root) if plugin_file else
+                  [f"Bug report for {owner}", f"Mod: {owner} (no plugin)",
+                   f"Generated {time.strftime('%Y-%m-%d %H:%M')} by MWManager Tidy.",
+                   "Paths are relative to this staged package."])
+        lines = [f"Problems in the mod's files: {len(issues)}"]
+        lines += [f"  - {severity} {relative}: {message}" for severity, relative, message in issues]
+        lines += ["", "Repairable files were fixed locally; their originals are retained in this package's Off tree."]
+        report_path = ah.package_bug_report_path(root, plugin_file or owner)
+        ah.update_bug_report(report_path, "vortex_tidy (files)", header, lines)
+
+
 def assets_apply(args, ares, moved_mods=()):
     """Run upstream asset repairs while adding exact per-package restores to Tidy's journal."""
     if not ares:
@@ -1161,7 +1351,7 @@ def assets_apply(args, ares, moved_mods=()):
     def folder(root, fixes, module, current_game_dir, plugin_name, *positional, **keywords):
         operations = []
         keywords["journal_ops"] = operations
-        result = original_folder(root, fixes, module, current_game_dir, plugin_name, *positional, **keywords)
+        result = original_folder(root, fixes, module, current_game_dir, package_name(root), *positional, **keywords)
         by_plugin.setdefault(_path_plugin(root, args.staging), []).extend(operations)
         return result
 
@@ -1189,7 +1379,9 @@ def assets_apply(args, ares, moved_mods=()):
 
     ah.apply_folder, lpm.apply_mod = folder, longpaths
     try:
-        return _upstream_assets_apply(args, ares, moved_mods)
+        result = _upstream_assets_apply(args, ares, moved_mods)
+        _write_package_asset_bug_reports(ares)
+        return result
     finally:
         ah.apply_folder, lpm.apply_mod = original_folder, original_longpaths
         for plugin, operations in by_plugin.items():
@@ -1247,7 +1439,7 @@ def prune_empty_directories(staging):
 def apply(moves, staging, progress=None, head_extra=None):
     """Make the moves, journaling each. progress (a list) gets the index of every move done, as it is done,
     so an interrupted run knows what is left. Returns the moves that failed."""
-    done, failed = 0, []
+    done, failed, packing = 0, [], {}
     plugins = sorted({_path_plugin(src, staging) for src, _dst, _why in moves if _path_plugin(src, staging)},
                      key=str.casefold)
     head = {"run": time.strftime("%Y-%m-%d %H:%M:%S"), "staging": staging, "plugins": plugins}
@@ -1296,9 +1488,26 @@ def apply(moves, staging, progress=None, head_extra=None):
                         progress.append(i)
                     continue
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
+                if why.startswith(LINK_PREFIX):
+                    # 00 Core content: the root gets a hard link (no extra space) and the 00 folder itself is kept
+                    # under Extras, so the install can be repeated from the package
+                    try:
+                        os.link(src, dst)
+                    except OSError:
+                        shutil.copy2(src, dst)
+                    j.write(json.dumps({"link": dst, "source": src, "plugin": _path_plugin(src, staging)}) + "\n")
+                    j.flush()
+                    if PACKING_MARK in why:
+                        packing.setdefault(_path_plugin(src, staging), []).append((src, dst, why))
+                    done += 1
+                    if progress is not None:
+                        progress.append(i)
+                    continue
                 os.rename(src, dst)          # staging stays on one drive, so moves are cheap
                 j.write(json.dumps({"src": src, "dst": dst, "plugin": _path_plugin(src, staging)}) + "\n")
                 j.flush()
+                if PACKING_MARK in why:
+                    packing.setdefault(_path_plugin(src, staging), []).append((src, dst, why))
                 done += 1
                 if progress is not None:
                     progress.append(i)
@@ -1310,8 +1519,33 @@ def apply(moves, staging, progress=None, head_extra=None):
         # Prune by checking the live directory contents: os.walk's bottom-up
         # dirs list still includes children removed earlier in the same walk.
         _prune_empty_directories(staging, j)
-    print(f"Moved {done} item(s). Journal: {JOURNAL} (--undo puts them back).")
+    _write_packing_reports(staging, packing)
+    print(f"Moved {done} item(s). Journal: {JOURNAL} (each entry names its package: --undo --only <package> "
+          f"puts back that package's changes from every run, --undo alone the whole last run).")
     return failed
+
+
+def _write_packing_reports(staging, packing):
+    """Each package whose author misnamed a game folder gets a "packing" section in its bug report: what was
+    renamed, and every file the rename moved."""
+    if not packing:
+        return
+    ah = _scanner.asset_health_module()
+    for package_dir_name, items in packing.items():
+        package = os.path.join(staging, package_dir_name)
+        owner = package_name(package)
+        plugin_file = next((name for name in sorted(os.listdir(package), key=str.casefold)
+                            if os.path.splitext(name)[1].casefold() in (".esp", ".esm")), None)
+        header = (ah.bug_report_header(os.path.join(package, plugin_file), _scanner, mod_folder=package)
+                  if plugin_file else [f"Bug report for {owner}", f"Mod: {owner} (no plugin)",
+                                       f"Generated {time.strftime('%Y-%m-%d %H:%M')} by MWManager Tidy.",
+                                       "Paths are relative to this staged package."])
+        problems = sorted({why[why.index(PACKING_MARK) + len(PACKING_MARK):] for _s, _d, why in items})
+        lines = [f"Packing errors: {len(problems)}"] + [f"  - ERROR {p}" for p in problems]
+        lines += ["", f"Files moved by the rename ({len(items)}):"]
+        lines += [f"  {os.path.relpath(src, package)} -> {os.path.relpath(dst, package)}" for src, dst, _w in items]
+        ah.update_bug_report(ah.package_bug_report_path(package, plugin_file or owner),
+                             "vortex_tidy (packing)", header, lines)
 
 
 def _path_plugin(path, staging):
@@ -1328,7 +1562,7 @@ def _path_plugin(path, staging):
 def _op_plugin(op, staging):
     if op.get("plugin"):
         return str(op["plugin"])
-    for name in ("src", "restore", "luafix", "rmdir", "dst"):
+    for name in ("src", "restore", "generated", "luafix", "rmdir", "dst"):
         if op.get(name):
             plugin = _path_plugin(op[name], staging)
             if plugin:
@@ -1426,6 +1660,21 @@ def undo(staging=STAGING, plugin=None):
                         back += 1
                     else:
                         failed.add(index)
+                elif "link" in op:                    # a 00 Core file linked into the root: only the link goes
+                    if os.path.isfile(op["link"]):
+                        os.remove(op["link"])
+                    back += 1
+                elif "generated" in op:
+                    generated = op["generated"]
+                    if not os.path.exists(generated):
+                        back += 1
+                    elif (op.get("sha256") and hashlib.sha256(Path(generated).read_bytes()).hexdigest()
+                          != op["sha256"]):
+                        print(f"  not removed (generated file changed): {generated}", file=sys.stderr)
+                        failed.add(index)
+                    else:
+                        os.remove(generated)
+                        back += 1
                 elif os.path.exists(op["dst"]):
                     if os.path.exists(op["src"]):
                         print(f"  not put back (something is at {op['src']} already): {op['dst']}", file=sys.stderr)
@@ -1641,7 +1890,7 @@ def run_initial_tidy(data_dir, *, apply_changes=True):
     rc = run_data_files_tidy(data_dir, apply_changes=apply_changes, dry_run=not apply_changes)
     if rc:
         return rc
-    command = [data_dir, "--fix", "--asset-check", "--asset-repair", "--no-interactive"]
+    command = [data_dir, "--fix", "--asset-check", "--no-interactive"]
     command += ["--yes"] if apply_changes else ["--dry-run"]
     print("\nInitial-install Tidy: checking official plugins and live Data Files assets.")
     try:
@@ -1698,6 +1947,21 @@ del _name
 
 # ---- command line ----------------------------------------------------------------------------------------------
 
+_upstream_apply_main = apply_main
+
+
+def apply_main(args):
+    """Allow the GUI's explicit post-retry override to enact the plan calculated by this pass."""
+    if not getattr(args, "force_plan", False):
+        return _upstream_apply_main(args)
+    compare = PF.compare
+    PF.compare = lambda _reviewed, _fresh, _parts: ([], [])
+    try:
+        print("WARNING: applying the freshly calculated plan by explicit user request.")
+        return _upstream_apply_main(args)
+    finally:
+        PF.compare = compare
+
 def bundled_luajit():
     exe = os.path.join(MANAGER_DIR, "tools", "luajit", "luajit.exe" if os.name == "nt" else "luajit")
     return exe if os.path.isfile(exe) else None
@@ -1714,8 +1978,8 @@ def mwmanager_parser():
     ap.add_argument("--dry-run", action="store_true", help="with --data-files: show the plan, change nothing")
     ap.add_argument("--staging", default=STAGING, help=f"per-mod staging folder (default {STAGING})")
     ap.add_argument("--game-data-files", metavar="PATH",
-                    help="the Data Files used to look up installed masters and textures (default: "
-                         "MWMANAGER_DATA_FILES, else MWManager's staging Data Files)")
+                    help="the real game Data Files used to look up installed masters, textures, and BSAs "
+                         "(or set MWMANAGER_DATA_FILES; required for staged Tidy)")
     ap.add_argument("--only", nargs="+", metavar="PATTERN", help="only these mod folders (wildcards allowed)")
     ap.add_argument("--skip", nargs="+", metavar="PATTERN",
                     help="leave these mod folders alone this time too (to always skip one, add it to "
@@ -1727,12 +1991,10 @@ def mwmanager_parser():
     ap.add_argument("--fomod-first", action="store_true", help=argparse.SUPPRESS)   # the order is always options first
     ap.add_argument("--apply", action="store_true",
                     help="step 3: enact the reviewed plan file (refused, exit 2, if the plan changed since)")
+    ap.add_argument("--force-plan", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--yes", action="store_true", help="with --apply: don't ask first")
     ap.add_argument("--undo", action="store_true",
                     help="put back the last --apply, or only the package named by --only")
-    ap.add_argument("--asset-repair", action="store_true", default=None,
-                    help="also plan and make asset repairs (off by default: the asset check is only reported; "
-                         "[Repair] asset_repair = true in mwmanager.ini turns it on)")
     ap.add_argument("--no-assets", action="store_true", help="skip the asset check entirely")
     ap.add_argument("--no-lua", action="store_true", help="skip the Lua check (mwdialog_luafix)")
     ap.add_argument("--lua-level", choices=("high", "medium"), default="high",
@@ -1756,6 +2018,8 @@ def mwmanager_main(argv=None):
     MT.install()
     ap = mwmanager_parser()
     args = ap.parse_args(argv)
+    if args.force_plan and not args.apply:
+        ap.error("--force-plan requires --apply")
     if args.init:
         if args.undo or args.options or args.options_only:
             ap.error("--init cannot be combined with --undo or --options")
@@ -1780,26 +2044,26 @@ def mwmanager_main(argv=None):
     if not os.path.isdir(args.staging):
         print(f"Staging folder not found: {args.staging}", file=sys.stderr)
         return 2
-    GAME_DATA_FILES = args.game_data_files or os.environ.get("MWMANAGER_DATA_FILES") or \
-        os.path.join(MANAGER_DIR, "staging", "Data Files")
+    GAME_DATA_FILES = args.game_data_files or os.environ.get("MWMANAGER_DATA_FILES")
+    if not GAME_DATA_FILES:
+        ap.error("staged Tidy requires --game-data-files or MWMANAGER_DATA_FILES")
+    if not os.path.isdir(GAME_DATA_FILES):
+        ap.error(f"game Data Files folder not found: {GAME_DATA_FILES}")
     args.game_data_files = GAME_DATA_FILES
     args.luajit = args.luajit or bundled_luajit()
     args.lua_only = False
-    repair = _scanner.asset_repair_enabled(args)
-    report_assets = not args.no_assets and not repair
-    args.no_assets = args.no_assets or not repair
+    cleared = clear_readonly_flags(args.staging, args.only)
+    if cleared:
+        print(f"Cleared the read-only flag on {cleared} staged path(s).")
     if options:
         print("MWMANAGER-PROGRESS: Reviewing staged BAIN/FOMOD choices", flush=True)
+        run_pre_option_tidy(args)
         if run_mock_options(args):
             return 1
         run_post_option_tidy(args)
     if not args.apply:
         print("MWMANAGER-PROGRESS: Organizing plugin folders and checking tidy rules", flush=True)
         rc = plan_main(args)
-        if report_assets:
-            print("\nAsset repairs are off: the asset check below is a report; --apply changes no asset file "
-                  "(--asset-repair, or [Repair] asset_repair = true in mwmanager.ini, plans the repairs).")
-            assets_check(args)
         _plan_state(args)
         return rc
     print("MWMANAGER-PROGRESS: Applying the reviewed tidy plan", flush=True)

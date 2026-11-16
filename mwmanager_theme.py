@@ -208,6 +208,9 @@ def apply_theme(root: tk.Misc) -> ttk.Style:
                     bordercolor=c["surface"], lightcolor=c["surface_alt"], darkcolor=c["surface_alt"],
                     gripcount=0, arrowsize=12)
     style.map("TScrollbar", background=[("active", c["raised"])], arrowcolor=[("active", c["gold"])])
+    style.configure("Job.Vertical.TScrollbar", background=c["gold"], troughcolor=c["field"],
+                    bordercolor=c["border"], lightcolor=c["gold"], darkcolor=c["gold"], gripcount=0)
+    style.map("Job.Vertical.TScrollbar", background=[("active", c["gold_hi"])])
     style.configure("TPanedwindow", background=c["canvas"])
 
     for option, value in {

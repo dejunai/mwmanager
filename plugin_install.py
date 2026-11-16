@@ -15,7 +15,7 @@ from datetime import datetime
 
 from core_addons import (ARCHIVE_EXTENSIONS, _members, _member_preflight,
                          _archive_rank, _archive_esm_masters,
-                         _quiet_subprocess_options, _seven_zip)
+                         _quiet_subprocess_options, _seven_zip, stamped_backup_path)
 
 SKIP_DIRS = {"off", "bugreports", "fomod", "extras", "docs", "screenshots"}
 BSA_FOLDERS = {"bookart", "icons", "meshes", "textures", "video"}
@@ -472,12 +472,12 @@ def apply_plugin_compatibility(package: Path) -> list[str]:
     return changed
 
 
-def pack_package_assets(package: Path, plugin_name: str, manager: Path) -> list[Path]:
+def pack_package_assets(package: Path, plugin_name: str, manager: Path, progress=None) -> list[Path]:
     from major_master_deploy import _pack_assets, find_bsapack
     tool = find_bsapack()
     if not tool:
         raise FileNotFoundError("bsapack.dej.exe was not found in MWManager's tools folder or on PATH.")
-    return _pack_assets(package, plugin_name, tool)
+    return _pack_assets(package, plugin_name, tool, progress)
 
 
 def extract_archive(item: dict, destination: Path, manager: Path) -> Path:
@@ -574,10 +574,8 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
             if target.exists():
                 if not target.is_file():
                     raise IsADirectoryError(f"A directory blocks deployment of {target}")
-                backup = off_root / rel
+                backup = stamped_backup_path(off_root / rel)
                 backup.parent.mkdir(parents=True, exist_ok=True)
-                if backup.exists():
-                    backup = backup.with_name(backup.name + ".previous")
                 os.replace(target, backup)
             copied = False
             try:
@@ -634,10 +632,7 @@ def check_deploy_path_lengths(package: Path, data_dir: Path, plugin_label: str) 
             target = data_dir / rel
             check(target)
             if target.exists() and source.suffix.casefold() != ".lua":
-                backup = off_root / rel
-                if backup.exists():
-                    backup = backup.with_name(backup.name + ".previous")
-                check(backup)
+                check(stamped_backup_path(off_root / rel))         # the name deploy_package will use
     if too_long:
         too_long.sort(reverse=True)
         shown = too_long[:12]

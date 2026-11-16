@@ -312,11 +312,22 @@ def _challenge_page(title: str, text: str) -> bool:
     return is_challenge(title, text)
 
 
-def capture_page(mod_id: str) -> dict:
-    """Request readable DOM text from the currently visible embedded browser."""
+def _capture_ready(page: dict, elapsed: float) -> bool:
+    if page.get("readyState") != "complete":
+        return False
+    text, url = str(page.get("text", "")), str(page.get("url", ""))
+    return (len(str(page.get("description", ""))) > 200
+            or ("tab=files" in url and "\nMain files\n" in text)
+            or elapsed > 15)
+
+
+def capture_page(mod_id: str, url: str | None = None) -> dict:
+    """Request readable DOM text, optionally navigating to the matching page atomically."""
     mod_id = str(mod_id).strip()
     if not mod_id.isdigit() or int(mod_id) <= 0:
         raise ValueError("A valid Nexus mod ID is required.")
+    if url is not None and not _valid_nexus_url(url):
+        raise ValueError("Only an approved Nexus HTTPS page can be captured.")
     root = _root()
     pid = _tracked_browser_pid()
     if not pid:
@@ -326,7 +337,10 @@ def capture_page(mod_id: str) -> dict:
         raise RuntimeError("The MWManager browser is closed. Click Open Nexus in MWManager browser first.")
 
     request_id = secrets.token_hex(16)
-    _write_json(root / "command.json", {"id": request_id, "action": "capture", "mod_id": mod_id})
+    command = {"id": request_id, "action": "capture", "mod_id": mod_id}
+    if url is not None:
+        command["url"] = url
+    _write_json(root / "command.json", command)
     response_file = root / "response.json"
     # The browser answers with {"state": "working"} heartbeats while it waits for
     # Nexus to render the description, then with the final page or an error.
@@ -501,9 +515,8 @@ def _run_embedded_browser() -> None:
                         "Nexus is still showing its security check. Complete it in the MWManager "
                         "browser, then click Read page from browser again."
                     )
-                # Some layouts render the description client-side: give it up to 15 s.
-                if page.get("readyState") == "complete" and (
-                        len(str(page.get("description", ""))) > 200 or time.monotonic() - started > 15):
+                # Files pages have no description body; their populated file list is the readiness signal.
+                if _capture_ready(page, time.monotonic() - started):
                     return page
             time.sleep(1.0)
         if page:
@@ -538,6 +551,11 @@ def _run_embedded_browser() -> None:
                         return
                     elif command.get("action") == "capture":
                         try:
+                            capture_url = str(command.get("url", ""))
+                            if capture_url:
+                                if not _valid_nexus_url(capture_url):
+                                    raise ValueError("Refused an invalid Nexus capture URL.")
+                                window.load_url(capture_url)
                             page = capture(command_id, str(command.get("mod_id", "")))
                             _write_json(root / "response.json", {"id": command_id, "page": page})
                         except Exception as exc:

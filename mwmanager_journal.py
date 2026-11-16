@@ -699,6 +699,18 @@ class Journal:
         os.replace(self.ledger, target)
         return target
 
+    def clear_staging(self) -> int:
+        """Remove MWManager's staging tree after a verified, explicitly requested rollback."""
+        manager = self.root.parent.resolve()
+        staging = manager / "staging"
+        if not staging.exists():
+            return 0
+        if staging.is_symlink() or not staging.is_dir() or staging.resolve().parent != manager:
+            raise ValueError(f"Refusing to clear an unexpected staging path: {staging}")
+        entries = len(list(staging.iterdir()))
+        shutil.rmtree(staging)
+        return entries
+
     # -------------------------------------------------------------------------------------- rollback
     def plan_rollback(self, game_dir, *, preserve_prerequisites: bool = True) -> dict:
         """Return to the prerequisite checkpoint by default; optionally add a store-only second stage."""
@@ -878,6 +890,8 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
         lines += [f"REFUSE: {r}" for r in plan["refuse"]]
         lines += [f"Not explained by the journal (left alone, review): {p}" for p in plan["unexplained"]]
         lines += [f"After a verified rollback, remove the used backup {c}" for c in plan["cleanup_after_verify"]]
+        if args.no_staging:
+            lines.append(f"After verification, clear MWManager staging: {journal.root.parent / 'staging'}")
         if args.dry_run:
             print_report(lines or ["The install already matches the baseline."],
                          "Rollback plan (dry run, nothing changed):")
@@ -892,6 +906,11 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
             problems = report["changed"] + report["missing"] + report["extra"] + \
                 report["journal_problems"] + report["original_problems"]
             print_report(problems, "Rollback files were applied, but verification failed; backups were retained:")
+            return 1
+        try:
+            cleared_staging = journal.clear_staging() if args.no_staging else 0
+        except (OSError, ValueError) as exc:
+            print_report([str(exc)], "Game rollback verified, but staging was not cleared:")
             return 1
         removed = journal.cleanup_used_backups(game_dir, plan, apply=True)
         archived = journal.archive_ledger()
@@ -912,9 +931,12 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
             # out the MWSE Lua suite and the moved add-on documents, which the preflight puts back
         except OSError:
             pass
-        print_report([f"Verified against {against} with full hashes.",
-                      f"Removed {len(removed)} used backup file(s).",
-                      f"Archived the completed ledger at {archived}."], "Rollback complete:")
+        summary = [f"Verified against {against} with full hashes."]
+        if args.no_staging:
+            summary.append(f"Cleared {cleared_staging} staging entr{'y' if cleared_staging == 1 else 'ies'}.")
+        summary += [f"Removed {len(removed)} used backup file(s).",
+                    f"Archived the completed ledger at {archived}."]
+        print_report(summary, "Rollback complete:")
         return 0
     return 2
 
@@ -932,6 +954,8 @@ def add_arguments(ap: argparse.ArgumentParser) -> None:
                     help="return to the prerequisite checkpoint; --dry-run reports the plan without changes")
     ap.add_argument("--gog-only", action="store_true",
                     help="with --rollback: add a second stage that removes prerequisites too")
+    ap.add_argument("--no-staging", action="store_true",
+                    help="with --rollback: clear MWManager staging after the rollback verifies")
     ap.add_argument("--mod-rollback", metavar="MOD_KEY", help="with --dry-run: check a mod can be re-extracted")
     ap.add_argument("--archive-dir", help="folder to look for a mod's archive in")
     ap.add_argument("--open-download", action="store_true",

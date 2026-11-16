@@ -1,0 +1,21 @@
+{
+  "about": "MWManager's own notes for option choices, shown in the option window after the FOMOD text, the packaged readmes and the mod page. A mod matches by its Nexus id or by a package-folder pattern; each option pattern is matched (case-insensitive, * and ? wildcards, / or \\) against the option's label, key, file name and path inside the package. '*' notes the whole package.",
+  "mods": [
+    {
+      "name": "AATL Data",
+      "nexus_id": 50647,
+      "packages": ["AATL Data *"],
+      "options": {
+        "*AATL_Data.esp": "Modder's resource: this plugin is for mod authors working in the Construction Set. Players do not need it; leave it unchecked."
+      }
+    },
+    {
+      "name": "Tamriel Rebuilt",
+      "nexus_id": 42145,
+      "packages": ["Tamriel Rebuilt *"],
+      "options": {
+        "*Firemoth Remover*": "Only enable this plugin if you would prefer the official add-on version of Siege at Firemoth. Tamriel Rebuilt includes an extensive overhaul of that add-on, and this plugin removes it."
+      }
+    }
+  ]
+}

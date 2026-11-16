@@ -187,10 +187,12 @@ class LedgerTests(Fixture):
         settings = self.manager / "mwmanager_gui_settings.json"
         settings.write_text(json.dumps({"first_run": 0, "init_complete": 1}), encoding="utf-8")
         generated = write(self.game / "Data Files/generated.esp", b"generated")
+        staged = write(self.manager / "staging/major_masters/Keep/.mwmanager-stage.json", b"{}")
         self.journal.record("run", "Data Files/generated.esp", "create", sha(generated), {"kind": "absent"})
         rc = mj.main(["--game-dir", str(self.game), "--journal-dir", str(self.journal.root), "--rollback", "--gog-only"])
         self.assertEqual(rc, 0)
         self.assertFalse(generated.exists())
+        self.assertTrue(staged.exists())
         self.assertFalse(self.journal.ledger.exists())
         self.assertTrue(list((self.journal.root / "history").glob("install-*.jsonl")))
         self.assertTrue(self.journal.verify(self.game, against="baseline", full_hash=True)["ok"])
@@ -199,6 +201,19 @@ class LedgerTests(Fixture):
         setup = json.loads((self.manager / "mwmanager_setup_state.json").read_text())
         self.assertTrue(setup["steps"]["paths_confirmed"]["completed_at"])
         self.assertIsNone(setup["steps"]["preflight_complete"]["completed_at"])
+
+    def test_no_staging_clears_staging_only_after_verified_rollback(self):
+        self.journal.capture_baseline(self.game)
+        staged = write(self.manager / "staging/major_masters/Incomplete/file.txt", b"partial")
+        generated = write(self.game / "Data Files/generated.esp", b"generated")
+        self.journal.record("run", "Data Files/generated.esp", "create", sha(generated), {"kind": "absent"})
+
+        rc = mj.main(["--game-dir", str(self.game), "--journal-dir", str(self.journal.root),
+                      "--rollback", "--no-staging"])
+
+        self.assertEqual(rc, 0)
+        self.assertFalse(staged.exists())
+        self.assertFalse((self.manager / "staging").exists())
 
     def test_chain_tamper_and_torn_line(self):
         for n in range(3):

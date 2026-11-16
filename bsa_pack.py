@@ -7,6 +7,7 @@ in the staging game's Morrowind.ini, and moves packed loose files into the mod's
 from __future__ import annotations
 
 import argparse
+import configparser
 import os
 import re
 import shutil
@@ -16,8 +17,20 @@ from pathlib import Path
 from datetime import datetime
 
 DEFAULT_THRESHOLD = 10_000
+MIN_THRESHOLD = 50
+BSA_OFFER_SETTING = "offer_bsa_when_assets_found"
 DEFAULT_UNSUPPORTED = {"sound", "fonts", "splash", "music"}
 PACKABLE_ROOTS = {"meshes", "textures", "icons"}
+
+
+def configured_threshold(manager_dir: Path) -> int:
+    parser = configparser.ConfigParser(interpolation=None)
+    try:
+        parser.read(manager_dir / "mwmanager.ini", encoding="utf-8")
+        value = parser.getint("Staging", BSA_OFFER_SETTING, fallback=DEFAULT_THRESHOLD)
+    except (OSError, ValueError, configparser.Error):
+        return DEFAULT_THRESHOLD
+    return value if value >= MIN_THRESHOLD else DEFAULT_THRESHOLD
 
 
 def read_unsupported(manager_dir: Path) -> set[str]:
@@ -32,6 +45,8 @@ def read_unsupported(manager_dir: Path) -> set[str]:
 
 def packable_files(mod_dir: Path, unsupported: set[str]) -> list[tuple[Path, Path]]:
     """Return (source, BSA-relative path), accepting either mod-root or nested Data Files layout."""
+    from core_addons import lua_used_images
+    keep_loose = {Path(rel).as_posix().casefold() for rel in lua_used_images(mod_dir)}   # images Lua loads
     out = []
     for path in mod_dir.rglob("*"):
         if not path.is_file():
@@ -39,6 +54,8 @@ def packable_files(mod_dir: Path, unsupported: set[str]) -> list[tuple[Path, Pat
         try:
             relative = path.relative_to(mod_dir)
         except ValueError:
+            continue
+        if relative.as_posix().casefold() in keep_loose:
             continue
         parts = relative.parts
         if parts and parts[0].casefold() == "data files":
@@ -234,11 +251,15 @@ def main(argv=None) -> int:
     parser.add_argument("data_files", help="MWManager staging Data Files folder")
     parser.add_argument("--ini", required=True, help="staging game's Morrowind.ini")
     parser.add_argument("--manager-dir", default=str(Path(__file__).resolve().parent))
-    parser.add_argument("--threshold", type=int, default=DEFAULT_THRESHOLD)
+    parser.add_argument("--threshold", type=int)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
-    return build_for_mod(Path(args.mod_dir), Path(args.data_files), Path(args.ini), Path(args.manager_dir),
-                         threshold=args.threshold, dry_run=args.dry_run)
+    manager_dir = Path(args.manager_dir)
+    threshold = configured_threshold(manager_dir) if args.threshold is None else args.threshold
+    if threshold < MIN_THRESHOLD:
+        parser.error(f"--threshold must be at least {MIN_THRESHOLD}")
+    return build_for_mod(Path(args.mod_dir), Path(args.data_files), Path(args.ini), manager_dir,
+                         threshold=threshold, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,63 @@
+{
+  "about": "Hand-checked option text for mock_fomod_corpus.py measure. 'expect' is a short piece of the readme line that must appear in the option's text; null means the readme has nothing about this option, so no text should be shown. 'baseline' records whether the matcher in use when the entry was written got it right: an entry that passes must keep passing.",
+  "packages": {
+    "Pherim's Fire Fern and Fire Petal-43568-1-2.7z": {
+      "00 Default Red": {"expect": "Einfach den Inhalt des \"00 Default Red\"-Ordners", "note": "German readme, cp1252", "baseline": true},
+      "01 Graphic Herbalism": {"expect": "mit dem \"01 Graphic Herbalism\"-Ordner machen", "baseline": true},
+      "02 Extra Fiery Textures": {"expect": "install the \"Extra Fiery\" or \"Vanilla Colors\" texture variants", "note": "English and German readmes; the English line is the better one", "baseline": true},
+      "03 Vanilla Colors": {"expect": "und \"Vanilla Colors\"", "baseline": true}
+    },
+    "Wares Ultimate-52013-2-1-3-1775985220.7z": {
+      "01 Wares Legacy": {"expect": "01 Wares Legacy - recommended", "baseline": true},
+      "02 Wares to vanilla lists": {"expect": "02 Wares to vanilla lists - requires TD and OAAB", "baseline": true},
+      "03 TD to Wares": {"expect": "03 TD to Wares - recommended - requires TAMRIEL DATA", "baseline": true},
+      "04 OAAB to Wares": {"expect": "04 OAAB to Wares - recommended - requires OAAB DATA", "baseline": true},
+      "05 Hold it to Wares": {"expect": "05 Hold it to Wares - adds hold", "baseline": true}
+    },
+    "GH Patches and Replacers-46599-1-02-1558643538.7z": {
+      "02 Pherim Reflection Mapped": {"expect": "install this on top of folder 01", "baseline": true},
+      "00 Correct UV Ore + README": {"expect": "fixed and cleaned versions of Correct UV Diverse Ore Replacer", "baseline": true}
+    },
+    "Pilgrimage of Storm and War-55969-2-3-1764802733.7z": {
+      "01 Patch Solstheim - Tomb of the Snow Prince": {"expect": "with the .esp from 01 Patch if you play with Solstheim", "note": "a numbered install step (2.) names this option", "baseline": true}
+    },
+    "MDMD - More Deadly Morrowind Denizens Patches-49232-1-1-1647014361.7z": {
+      "02 There Can Be Only One MDMD Creatures Patch": {"expect": "There Can Be Only One MDMD - Creatures Patch.esp", "baseline": true}
+    },
+    "Enhanced Detection-47480-1-3-1-1738593499.7z": {
+      "02 - Alternate VFX": {"expect": "02 - Alternate VFX", "baseline": true}
+    },
+    "BTB's Game Improvements - Necro Edit-47129-2-0-15-1647851241.7z": {
+      "01 Rational Names Addendum": {"expect": "Rational Names Addendum", "baseline": true}
+    },
+    "Swamp Rocks - Default-45673-1-1.zip": {
+      "Swamp Rocks 512x512": {"expect": null, "note": "resolution variants; the readme only says SWAMP ROCKS", "baseline": true}
+    },
+    "Lush Synthesis 3.0-52931-3-0-1747855102.zip": {
+      "LUSH_UNDERWATER": {"expect": null, "note": "the only mentions are command lines with paths", "baseline": true}
+    },
+    "Better Morrowind Armor ENG-42509-0-5-2RC (1).7z": {
+      "patch for Snow Prince Armor Redux": {"expect": "If you use Snow Prince Armor Redux", "baseline": true},
+      "Imperial Steel Cuirass with belt": {"expect": "patch returning the belt to Imperial Steell Cuirass", "baseline": true}
+    },
+    "Shabby Seyda Neen-53086-1-3-1687383401.zip": {
+      "01 Alternate - Dark wood": {"expect": "install either 01 Dark Wood or 01 Dark Wood with Plaster", "baseline": true}
+    },
+    "Fighters Guild Improved 3.0.4-51409-3-0-4-1709642341.zip": {
+      "02 Patch for Caeris' Camonna Tong": {"expect": "A compatibility patch for Caeris' Camonna Tong.", "baseline": true}
+    },
+    "Anthology Solstheim-43436-1-4-1591982451.7z": {
+      "04 Patch - Bare Necessities": {"expect": "makes both Skaal wells drinkable", "baseline": true},
+      "10 Addon - Vurt's Groundcover": {"expect": "Vurt's Ground Cover has an edited esp", "baseline": false}
+    },
+    "Witness Structure-53544-2-0-2-1775876795.7z": {
+      "03 Little Landscapes Vivec Islands Patch": {"expect": null, "baseline": true}
+    },
+    "Poison Crafting-45729-2-1-1634510224.7z": {
+      "01 Labelled Potions": {"expect": null, "baseline": true}
+    },
+    "True Lights and Darkness - Necro Edit-47133-3-1-1-1747626497.7z": {
+      "02 MWSE TLAD Lights": {"expect": "alongside the MWSE Lights mod", "baseline": true}
+    }
+  }
+}

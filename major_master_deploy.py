@@ -7,12 +7,15 @@ import os
 from pathlib import Path
 import shutil
 import sqlite3
+from contextlib import closing
 import subprocess
 import tempfile
+import threading
 import time
 
 BSA_FOLDERS = {"bookart", "icons", "meshes", "textures", "video"}
 SKIP_FOLDERS = {"off", "bugreports", "fomod", "extras"}
+GAME_ROOT_FOLDERS = {"mge3"}          # a package's top-level folders that belong beside Morrowind.exe, not in Data Files
 
 
 def sha256(path: Path) -> str:
@@ -91,8 +94,11 @@ def find_bsapack() -> Path | None:
     return Path(located) if located else None
 
 
-def _pack_assets(package: Path, plugin_name: str, tool: Path) -> list[Path]:
+def _pack_assets(package: Path, plugin_name: str, tool: Path, progress=None) -> list[Path]:
     """Pack supported asset folders. The tool handles automatic 2 GB splitting."""
+    from core_addons import lua_used_images
+    # images a Lua script loads stay loose: never packed, never moved to Off
+    keep_loose = {Path(rel).as_posix().casefold() for rel in lua_used_images(package)}
     with tempfile.TemporaryDirectory(prefix="mwmanager-bsa-") as temp_name:
         temp = Path(temp_name)
         count = 0
@@ -103,6 +109,8 @@ def _pack_assets(package: Path, plugin_name: str, tool: Path) -> list[Path]:
                 continue
             for name in files:
                 src = Path(base) / name
+                if (rel / name).as_posix().casefold() in keep_loose:
+                    continue
                 dst = temp / rel / name
                 dst.parent.mkdir(parents=True, exist_ok=True)
                 try:
@@ -110,14 +118,38 @@ def _pack_assets(package: Path, plugin_name: str, tool: Path) -> list[Path]:
                 except OSError:
                     shutil.copy2(src, dst)
                 count += 1
+                if progress and count % 2000 == 0:
+                    progress(f"Preparing BSA for {plugin_name}: {count:,} assets ready…")
         if not count:
             return []
         base_name = Path(plugin_name).stem + "_assets.bsa"
-        proc = subprocess.run([str(tool), "pack", base_name], cwd=temp, capture_output=True,
-                              text=True, errors="replace", timeout=7200,
-                              creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-        if proc.returncode:
-            raise RuntimeError(f"BSAPack failed for {plugin_name}: {(proc.stderr or proc.stdout)[-2000:]}")
+        if progress:
+            progress(f"Building BSA for {plugin_name} from {count:,} assets; please be patient…")
+        proc = subprocess.Popen([str(tool), "pack", base_name], cwd=temp, stdout=subprocess.PIPE,
+                                stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1,
+                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        output = []
+
+        def relay_output():
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line:
+                    output.append(line)
+                    if progress:
+                        progress(f"BSAPack: {line}")
+
+        reader = threading.Thread(target=relay_output, name="MWManager BSAPack output", daemon=True)
+        reader.start()
+        try:
+            returncode = proc.wait(timeout=7200)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            raise RuntimeError(f"BSAPack timed out after two hours for {plugin_name}.")
+        finally:
+            reader.join()
+        if returncode:
+            raise RuntimeError(f"BSAPack failed for {plugin_name}: {' | '.join(output)[-2000:]}")
         outputs = sorted(temp.glob(Path(base_name).stem + "*.bsa"), key=lambda p: p.name.casefold())
         if not outputs:
             raise RuntimeError(f"BSAPack reported success but created no archive for {plugin_name}.")
@@ -142,6 +174,11 @@ def _pack_assets(package: Path, plugin_name: str, tool: Path) -> list[Path]:
             if dest.exists():
                 shutil.rmtree(dest)
             shutil.move(str(folder), dest)
+            for packed in dest.rglob("*"):
+                inside = Path(folder.name) / packed.relative_to(dest)
+                if packed.is_file() and inside.as_posix().casefold() in keep_loose:
+                    (folder / inside.relative_to(folder.name)).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.move(str(packed), folder / inside.relative_to(folder.name))
         return moved
 
 
@@ -316,7 +353,8 @@ def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=N
             target = Path(operation.get("target", ""))
             backup_name = operation.get("backup")
             backup = Path(backup_name) if backup_name else None
-            if not target.is_absolute() or not target.is_relative_to(data_dir):
+            if not target.is_absolute() or not (target.is_relative_to(data_dir) or any(
+                    target.is_relative_to(data_dir.parent / name) for name in GAME_ROOT_FOLDERS)):
                 raise ValueError(f"Deployment state contains an unsafe target path: {target}")
             if source.is_absolute() and not source.is_relative_to(staging):
                 raise ValueError(f"Deployment state contains an unsafe source path: {source}")
@@ -358,7 +396,7 @@ def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=N
         registrations += unregister_archives(ini_path, deployment.get("registered_archives", []))
         catalog = manager_dir / "game_catalog.sqlite3"
         if catalog.is_file():
-            with sqlite3.connect(catalog) as db:
+            with closing(sqlite3.connect(catalog)) as db, db:
                 for name in deployment.get("masters", []):
                     db.execute("DELETE FROM esm_record WHERE lower(source_file)=lower(?)", (name,))
                 for name in deployment.get("archives", []):
@@ -395,7 +433,7 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
             if selected:
                 plugin = selected[0]
                 if progress: progress(f"Building BSA for {plugin} (BSAPack will split archives at 2 GB).")
-                _pack_assets(package, plugin, tool)
+                _pack_assets(package, plugin, tool, progress)
     data_dir.mkdir(parents=True, exist_ok=True)
     linked, backed_up, skipped = [], [], []
     operations = []
@@ -437,20 +475,21 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
                     if not rel.parts:
                         continue
                     # Plugins and archives must live at the Data Files root even if tidy left them nested.
-                    target = (data_dir / filename if source.suffix.casefold() in {".esm", ".esp", ".bsa"}
+                    target = (data_dir.parent / rel if rel.parts[0].casefold() in GAME_ROOT_FOLDERS
+                              else data_dir / filename if source.suffix.casefold() in {".esm", ".esp", ".bsa"}
                               else data_dir / rel)
                     target.parent.mkdir(parents=True, exist_ok=True)
                     backup_path = None
                     if target.exists():
                         if target.is_file() and target.stat().st_size == source.stat().st_size and sha256(target) == sha256(source):
-                            skipped.append(str(target.relative_to(data_dir)))
+                            skipped.append(str(rel))
                             continue
                         if not target.is_file():
                             raise IsADirectoryError(f"A directory blocks deployment of {target}")
-                        backup = package / "Off" / (plugins[0] if plugins else package.name) / "replaced" / rel
+                        from core_addons import stamped_backup_path
+                        backup = stamped_backup_path(
+                            package / "Off" / (plugins[0] if plugins else package.name) / "replaced" / rel)
                         backup.parent.mkdir(parents=True, exist_ok=True)
-                        if backup.exists():
-                            backup = backup.with_name(backup.name + ".previous")
                         os.replace(target, backup)
                         backup_path = backup
                         backed_up.append((target, backup))
@@ -475,7 +514,7 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
         sys.path.insert(0, str(catalog))
         import catalog as catalog_module
         db_path = manager_dir / "game_catalog.sqlite3"
-        with sqlite3.connect(db_path) as db:
+        with closing(sqlite3.connect(db_path)) as db, db:
             catalog_module.create_schema(db, catalog / "schema.sql")
             priority = {name.casefold(): index + 3 for index, name in enumerate(configured)}
             for plugin in ready:
@@ -512,7 +551,7 @@ def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[st
             except OSError:
                 pass
         try:
-            with sqlite3.connect(manager_dir / "game_catalog.sqlite3") as db:
+            with closing(sqlite3.connect(manager_dir / "game_catalog.sqlite3")) as db, db:
                 for plugin in ready:
                     db.execute("DELETE FROM esm_record WHERE lower(source_file)=lower(?)", (plugin,))
                 for archive in locals().get("archives", []):

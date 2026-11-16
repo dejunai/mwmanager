@@ -18,13 +18,15 @@ from pathlib import Path
 
 STEPS = ("paths_confirmed", "preflight_complete", "sort_complete", "tidy_complete",
          "initial_full_pass_complete", "initial_full_complete", "catalog_complete",
-         "major_masters_started", "initialization_complete")
+         "major_masters_started", "major_masters_staged", "major_masters_deployed", "initialization_complete")
 LABELS = {"paths_confirmed": "confirming the paths", "preflight_complete": "the preflight",
           "sort_complete": "sorting the shipped plugins", "tidy_complete": "the initial Tidy",
           "initial_full_pass_complete": "the initial --full pass",
           "initial_full_complete": "the initial --full cycle",
           "catalog_complete": "building the catalog database",
           "major_masters_started": "opening major-master staging",
+          "major_masters_staged": "staging the major masters",
+          "major_masters_deployed": "deploying the major masters",
           "initialization_complete": "the major-master step"}
 
 

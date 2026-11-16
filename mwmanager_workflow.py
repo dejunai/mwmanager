@@ -123,7 +123,7 @@ class JobView:
         self.log = tk.Text(logs, height=14, width=70, wrap="word", state="disabled",
                            background=COLORS["field"], foreground=COLORS["text"],
                            font=FONTS["mono"], relief="flat", padx=10, pady=8)
-        scroll = ttk.Scrollbar(logs, command=self.log.yview)
+        scroll = ttk.Scrollbar(logs, command=self.log.yview, style="Job.Vertical.TScrollbar")
         self.log.configure(yscrollcommand=scroll.set)
         self.log.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
@@ -180,13 +180,12 @@ class JobView:
             if not stopping and text.startswith(("Preflight:", "Staging master ", "Cataloguing", "Tidying", "Sorting",
                                                  "Opening", "Checking BSA", "Running tidy")):
                 self.stage.set(text.strip()[:180])
-            following = self.follow.get() and self.log.yview()[1] >= 0.995
             self.log.configure(state="normal")
             self.log.insert("end", text.rstrip() + "\n", log_tone(text))
             excess = int(self.log.index("end-1c").split(".")[0]) - 4000
             if excess > 0:
                 self.log.delete("1.0", f"{excess + 1}.0")
-            if following:
+            if self.follow.get():
                 self.log.see("end")
             self.log.configure(state="disabled")
         fraction = progress_fraction(text)

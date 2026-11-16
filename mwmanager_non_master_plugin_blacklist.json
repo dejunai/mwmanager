@@ -195,6 +195,27 @@
       "archives": [
         "GH for Tamriel Data 06-43829-06.7z"
       ]
+    },
+    "djangos dialogue - patch for purists.esp": {
+      "filename": "Djangos Dialogue - Patch for Purists.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Djangos Dialogue - Patch for Purists-48955-1-1-1649354499.7z"
+      ]
+    },
+    "fm - unique items v1.0 - pfp.esp": {
+      "filename": "FM - Unique Items v1.0 - PfP.ESP",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "FM Unique Items - Patch for Purists-48955-1-1-1-1634410738.7z"
+      ]
+    },
+    "raym's vampire rumors - patch for purists.esp": {
+      "filename": "Raym's Vampire Rumors - Patch for Purists.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Raym's Vampire Rumors - Patch for Purists-48955-1-0-1652282311.7z"
+      ]
     }
   },
   "archives": {
@@ -550,6 +571,42 @@
         "Graphic Herbalism Tamriel_Data Extra.esp",
         "Graphic Herbalism Tamriel_Data.esp"
       ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\django's dialogue patch for purists 60346 1 2026-10-28t07-34z yugruz3f.zip": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Django's Dialogue Patch for Purists 60346 1 2026-10-28T07-34Z YUgrUZ3f.zip",
+      "size_bytes": 33836133,
+      "mtime_ns": 1793369636626635300,
+      "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\djangos dialogue - patch for purists-48955-1-1-1649354499.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Djangos Dialogue - Patch for Purists-48955-1-1-1649354499.7z",
+      "size_bytes": 76606,
+      "mtime_ns": 1793109714692684300,
+      "plugins": [
+        "Djangos Dialogue - Patch for Purists.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\fm unique items - patch for purists-48955-1-1-1-1634410738.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\FM Unique Items - Patch for Purists-48955-1-1-1-1634410738.7z",
+      "size_bytes": 20200,
+      "mtime_ns": 1793901491627406100,
+      "plugins": [
+        "FM - Unique Items v1.0 - PfP.ESP"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\raym's vampire rumors - patch for purists-48955-1-0-1652282311.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Raym's Vampire Rumors - Patch for Purists-48955-1-0-1652282311.7z",
+      "size_bytes": 2004,
+      "mtime_ns": 1793109702021895400,
+      "plugins": [
+        "Raym's Vampire Rumors - Patch for Purists.esp"
+      ]
+    },
+    "k:\\downloads\\vortex\\morrowind\\oaab_data (hd) 49042 2.7.0 2026-09-25t18-23z aboyby57.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\OAAB_Data (HD) 49042 2.7.0 2026-09-25T18-23Z AbOYby57.7z",
+      "size_bytes": 180115935,
+      "mtime_ns": 1794826876008051700,
+      "plugins": []
     }
   }
 }

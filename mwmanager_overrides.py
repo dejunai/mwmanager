@@ -474,17 +474,6 @@ def run_fix(args, plugins, bsas, data_dirs, report, world, only, hidden=frozense
     keyfix = list(getattr(world, "text_key_fixes", [])) if only is None else []
     health = list(getattr(world, "asset_health", [])) if only is None else []
     lp_held = getattr(world, "longpath_plan", None)
-    if not asset_repair_enabled(args):
-        repair_generated = bool(getattr(args, "generate_missing_assets", False))
-        held = (0 if repair_generated else len(generated)) + len(shrink) + len(keyfix) + len(health) + len(lp_held or [])
-        if not repair_generated:
-            generated = []
-        shrink, keyfix, health = [], [], []
-        if lp_held:
-            world.longpath_plan, world.longpath_nifs = [], []
-        if held:
-            print(f"  Asset repairs are off: {held:,} asset file change(s) left out of this fix (turn them on with "
-                  f"--asset-repair, or [Repair] asset_repair = true in mwmanager.ini).")
     if not esp_plans and not esm_plans and not placeholders and not placements and not early and not early_placed \
             and not item_esp and not item_esm and not generated and not shrink and not keyfix and not health \
             and not (only is None and getattr(world, "longpath_plan", None)):
@@ -1176,6 +1165,11 @@ def run_cell_conflicts(args, plugins, collect=False):
             write_collide_data(args, order, new_objs, labels, pos, name_of, deps, cells_of)
         except (OSError, ValueError) as e:
             print(f"  (could not write {COLLIDE_DATA}: {e})", file=sys.stderr)
+        try:                                       # MGE XE never sees those hides: keep them out of distant land
+            import mge_ghosts
+            mge_ghosts.write(os.path.dirname(os.path.abspath(args.data_dir)), args.data_dir, plugins)
+        except (OSError, ValueError, FormatError) as e:
+            print(f"  (could not write the distant land overrides: {e})", file=sys.stderr)
     doors_at, arrivals = defaultdict(list), defaultdict(list)
     for bk, (_pi, ckey, at, dest, to, dele) in door_final.items():
         if dele:
@@ -3078,8 +3072,6 @@ def run_full(args):
               f"{CONFLICT_ANSWERS_FILE} (--fresh-answers to start without them)")
     common = ["--fix-log", args.fix_log, "--encoding", args.encoding, "--no-interactive", "--yes",
               "--generate-missing-assets"]
-    if asset_repair_enabled(args):
-        common.append("--asset-repair")
     if getattr(args, "init_scope", False):
         # Keep every internal full-pass subprocess scoped to the --init plugin list and base-game archive.
         common += ["--init-scope", "--plugins", *args.plugins]
@@ -3258,10 +3250,6 @@ def _main(argv=None):
                          "in place, masters (.esm) through the patch plugin '" + PATCH_NAME + "'")
     fx.add_argument("--dry-run", action="store_true", help="show planned actions without changing files (including --init and --full)")
     fx.add_argument("--yes", action="store_true", help="with --fix: apply without asking")
-    fx.add_argument("--asset-repair", action="store_true", default=None,
-                    help="with --fix: also change asset files in Data Files (stand-ins, texture reduction, text "
-                         "keys, asset health, short paths). Off by default; [Repair] asset_repair = true in "
-                         "mwmanager.ini turns it on for every run")
     fx.add_argument("--generate-missing-assets", action="store_true", help=argparse.SUPPRESS)
     fx.add_argument("--patch-esm", action="store_true",
                     help="same as --fix (kept for older batch notes)")

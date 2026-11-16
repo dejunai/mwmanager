@@ -26,6 +26,15 @@ def plugin(path, masters):
 
 
 class PriorityList(unittest.TestCase):
+    def test_large_archive_extraction_status_warns_that_it_will_take_time(self):
+        archive = mock.Mock()
+        archive.name = "Tamriel Data HD.7z"
+        archive.stat.return_value.st_size = 6 * 1024 ** 3
+        status = core_addons.extraction_status(archive, 2, 4)
+        self.assertIn("6.0 GB", status)
+        self.assertIn("please be patient", status)
+        self.assertIn("still working", status)
+
     def test_patch_for_purists_is_the_first_major_master(self):
         self.assertEqual(next(iter(core_addons.BUILTIN_MASTERS)), PFP.lower())
         shipped = json.loads((ROOT / "mwmanager_core_addons.json").read_text(encoding="utf-8"))
@@ -42,14 +51,119 @@ class PriorityList(unittest.TestCase):
         plan = {"archives": [{"archive": "Patch-for-Purists-45096-5-0-6-1760000000.7z",
                               "core_masters": [PFP]}]}
         responses = [{"game": {"id": "100"}},
-                     {"m0": [{"name": "Patch for Purists", "version": "5.0.7",
+                     {"v0": {"version": "5.0.7"},
+                      "m0": [{"name": "Patch for Purists", "version": "5.0.6",
                                "date": 1760000100, "primary": True, "category": "MAIN"}]}]
-        with mock.patch.object(core_addons, "_nexus_query", side_effect=responses):
+        with mock.patch.object(core_addons, "_scrape_nexus_versions", return_value={}) as scrape, \
+                mock.patch.object(core_addons, "_nexus_query", side_effect=responses):
             core_addons.verify_nexus_versions(plan)
+        scrape.assert_not_called()
         status = plan["archives"][0]["nexus"][PFP.casefold()]
         self.assertEqual(status["status"], "outdated")
         self.assertEqual(status["latest"], "5.0.7")
         self.assertEqual(status["page"], "https://www.nexusmods.com/morrowind/mods/45096?tab=files")
+
+    def test_files_page_supplies_version_missing_from_api(self):
+        plan = {"archives": [{"archive": "Patch-for-Purists-45096-5-0-6-1760000000.7z",
+                              "core_masters": [PFP]}]}
+        responses = [{"game": {"id": "100"}}, {"m0": []}]
+        with mock.patch.object(core_addons, "_scrape_nexus_versions",
+                               return_value={PFP.casefold(): "5.0.7"}), \
+                mock.patch.object(core_addons, "_nexus_query", side_effect=responses):
+            core_addons.verify_nexus_versions(plan)
+        status = plan["archives"][0]["nexus"][PFP.casefold()]
+        self.assertEqual((status["status"], status["latest"]), ("outdated", "5.0.7"))
+
+    def test_mod_header_version_overrides_stale_file_version(self):
+        plan = {"archives": [{"archive": "OAAB_Data-49042-2-7-5-1760000000.7z",
+                              "core_masters": ["OAAB_Data.esm"]}]}
+        responses = [{"game": {"id": "100"}},
+                     {"v0": {"version": "2.7.5"},
+                      "m0": [{"name": "OAAB Data", "version": "2.7.1", "date": 1760000000,
+                               "primary": True, "category": "MAIN"}]}]
+        with mock.patch.object(core_addons, "_scrape_nexus_versions") as scrape, \
+                mock.patch.object(core_addons, "_nexus_query", side_effect=responses):
+            core_addons.verify_nexus_versions(plan)
+        scrape.assert_not_called()
+        status = plan["archives"][0]["nexus"]["oaab_data.esm"]
+        self.assertEqual((status["status"], status["latest"]), ("current", "2.7.5"))
+
+    def test_files_page_version_parser_uses_header(self):
+        page = "Patch for Purists\nVersion\n5.0.7\nMain files\nPatch archive\nVersion 5.0.6\n"
+        self.assertEqual(core_addons._files_page_version(page), "5.0.7")
+
+    def test_browser_fallback_reports_success_and_each_page(self):
+        import mwnexus_browser
+
+        class Progress(list):
+            def __call__(self, message):
+                self.append(message)
+
+            def ask_yes_no(self, title, message):
+                self.prompt = (title, message)
+                return True
+
+        progress = Progress()
+        page = {"text": "Patch for Purists\nVersion\n5.0.7\nMain files\nPatch archive"}
+        with mock.patch.object(core_addons.urllib.request, "urlopen", side_effect=OSError("blocked")), \
+                mock.patch.object(mwnexus_browser, "open_page"), \
+                mock.patch.object(mwnexus_browser, "capture_page", return_value=page), \
+                mock.patch.object(mwnexus_browser, "close_browser"):
+            versions = core_addons._scrape_nexus_versions({PFP.casefold()}, progress, 1)
+        self.assertEqual(versions[PFP.casefold()], "5.0.7")
+        self.assertIn("opened successfully", progress.prompt[1])
+        self.assertTrue(any("Reading Nexus Files page 1 of 1" in line for line in progress))
+
+    def test_nexus_upload_timestamp_beats_broken_vortex_version(self):
+        plan = {"archives": [{"archive": "Patch-for-Purists-45096-1-0-1760000100 (2).7z",
+                              "core_masters": [PFP]}]}
+        responses = [{"game": {"id": "100"}},
+                     {"m0": [{"name": "Patch for Purists", "version": "5.0.7",
+                               "date": 1760000100, "primary": True, "category": "MAIN"}]}]
+        with mock.patch.object(core_addons, "_scrape_nexus_versions",
+                               return_value={PFP.casefold(): "5.0.7"}), \
+                mock.patch.object(core_addons, "_nexus_query", side_effect=responses):
+            core_addons.verify_nexus_versions(plan)
+        self.assertEqual(plan["archives"][0]["nexus"][PFP.casefold()]["status"], "current")
+
+    def test_staged_master_keeps_the_verified_archive_version(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = Path(tmp)
+            staged = manager / "staging" / "Patch for Purists" / PFP
+            staged.parent.mkdir(parents=True)
+            plugin(staged, ["Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm"])
+            plan = {"archives": [{"archive": str(manager / "Patch-for-Purists-45096-5-0-7.7z"),
+                                   "core_masters": [PFP],
+                                   "nexus": {PFP.casefold(): {"status": "current", "latest": "5.0.7"}}}]}
+
+            prepared = core_addons.prepare_core_master_review(manager, manager / "game", plan)
+            row = next(row for row in prepared["rows"] if row["name"].casefold() == PFP.casefold())
+
+            self.assertEqual(row["nexus"], {"status": "current", "latest": "5.0.7"})
+
+    def test_stage_marker_identity_uses_the_verified_current_version(self):
+        item = {"archive": "Patch-for-Purists-45096-5-0-7.7z", "filename_version": "5.0.7",
+                "nexus": {PFP.casefold(): {"status": "current", "latest": "5.0.7",
+                                            "verified_at": "2026-11-16T04:00:00-08:00",
+                                            "page": "https://www.nexusmods.com/morrowind/mods/45096?tab=files"}}}
+        identity = core_addons._stage_plugin_identity(item, [PFP])
+        self.assertEqual(list(identity),
+                         ["PLUGIN_NAME", "PLUGIN_VERSION", "NEXUS_VERSION", "NEXUS_VERSION_LAST_VERIFIED",
+                          "NEXUS_MOD_PAGE"])
+        self.assertEqual(identity, {
+            "PLUGIN_NAME": "Patch for Purists",
+            "PLUGIN_VERSION": "5.0.7",
+            "NEXUS_VERSION": "5.0.7",
+            "NEXUS_VERSION_LAST_VERIFIED": "2026-11-16T04:00:00-08:00",
+            "NEXUS_MOD_PAGE": "https://www.nexusmods.com/morrowind/mods/45096?tab=files",
+        })
+
+    def test_outdated_stage_marker_keeps_its_local_version(self):
+        item = {"archive": "Patch-for-Purists-45096-5-0-6.7z", "filename_version": "5.0.6",
+                "nexus": {PFP.casefold(): {"status": "outdated", "latest": "5.0.7",
+                                            "verified_at": "2026-11-16T04:00:00-08:00"}}}
+        identity = core_addons._stage_plugin_identity(item, [PFP])
+        self.assertEqual((identity["PLUGIN_VERSION"], identity["NEXUS_VERSION"]), ("5.0.6", "5.0.7"))
 
 
 class SortPlacesIt(unittest.TestCase):

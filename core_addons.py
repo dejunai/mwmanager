@@ -42,6 +42,16 @@ ARCHIVE_EXTENSIONS = {".zip", ".7z", ".rar"}
 PLUGIN_EXTENSIONS = {".esm", ".esp"}
 PLUGIN_OVERRIDE_CONFIG = "mwmanager_plugin_overrides.json"
 NON_MASTER_PLUGIN_BLACKLIST = "mwmanager_non_master_plugin_blacklist.json"
+LARGE_ARCHIVE_BYTES = 512 * 1024 * 1024
+
+
+def extraction_status(archive: Path, index: int, total: int) -> str:
+    size = archive.stat().st_size
+    prefix = f"Extracting archive {index} of {total} to staging: {archive.name}"
+    if size >= LARGE_ARCHIVE_BYTES:
+        return (f"{prefix} ({size / (1024 ** 3):.1f} GB). Large archives can take several minutes to unpack; "
+                "please be patient—MWManager is still working.")
+    return prefix
 
 
 def _quiet_subprocess_options() -> dict:
@@ -190,6 +200,7 @@ def prepare_core_master_review(manager_dir: str | Path, game_dir: str | Path,
         if progress:
             progress(f"Inspecting master {index + 1} of {len(masters)}: {master}")
         existing = installed.get(master.casefold())
+        item = archive_by_master.get(master.casefold())
         if existing:
             # Existing game and staging copies are both inspected before any selected install proceeds.
             try:
@@ -219,13 +230,13 @@ def prepare_core_master_review(manager_dir: str | Path, game_dir: str | Path,
                 already_installed = data_dir in existing.parents
                 rows.append({"name": master, "deps": deps, "error": None, "installed": already_installed,
                              "selected": not already_installed, "path": str(existing),
-                             "nexus": {}, "page": nexus_page(master)})
+                             "nexus": (item or {}).get("nexus", {}).get(master.casefold(), {}),
+                             "page": nexus_page(master)})
             except (OSError, ValueError, struct.error) as exc:
                 rows.append({"name": master, "deps": [], "error": f"staged plugin cannot be checked: {exc}",
                              "installed": False, "selected": False, "path": str(existing)})
             continue
 
-        item = archive_by_master.get(master.casefold())
         if not item:
             rows.append({"name": master, "deps": [], "error": "no downloaded archive contains this ESM",
                          "installed": False, "selected": False, "path": None,
@@ -369,8 +380,11 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         outer.pack(fill="both", expand=True)
         ttk.Label(outer, text="Every configured major master was checked before installation.",
                   font=FONTS["h2"]).pack(anchor="w")
-        ttk.Label(outer, text="Double-click a ready row or select it and press Space to skip it. Missing dependencies and unavailable archives are shown in red. "
-                  "A master cannot be disabled while an enabled master depends on it. This review makes no file changes.",
+        ttk.Label(outer, text="Masters are installed in the order shown. Selecting a master automatically selects "
+                  "its configured prerequisite masters above it; those blue rows stay enabled until every dependent "
+                  "master below them is disabled. Double-click a ready row or press Space to include or skip it. "
+                  "Nexus versions are shown as Current or Outdated; missing or unavailable dependencies are red. "
+                  "This review makes no file changes.",
                   wraplength=810).pack(anchor="w", pady=(4, 10))
         list_frame = ttk.Frame(outer)
         list_frame.pack(fill="both", expand=True)
@@ -381,7 +395,7 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         tree.heading("requires", text="Missing / required masters")
         tree.column("#0", width=245, stretch=False)
         tree.column("use", width=75, anchor="center", stretch=False)
-        tree.column("status", width=145, stretch=False)
+        tree.column("status", width=175, stretch=False)
         tree.column("requires", width=360)
         tree.tag_configure("ready", foreground=COLORS["green"])
         tree.tag_configure("missing", foreground=COLORS["red"])
@@ -395,22 +409,26 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         tree.configure(yscrollcommand=scrollbar.set)
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
+        ttk.Label(outer,
+                  text="Blue — prerequisite master required by a later selected master; disable its dependents first.",
+                  foreground=COLORS["blue"], wraplength=810).pack(anchor="w", pady=(6, 0))
         item_ids = [tree.insert("", "end", text=row["name"]) for row in rows]
 
         def refresh():
             readiness()
             required_indices = required_by_selection()
             for i, row in enumerate(rows):
+                nexus_status = row.get("nexus", {}).get("status")
+                version_status = "Outdated" if nexus_status == "outdated" else \
+                                 "Current" if nexus_status == "current" else "Version unknown"
                 if row["installed"]:
                     status, tag, use = "Installed; inspected", "installed", "—"
                 elif not row["ready"]:
                     status, tag, use = "Missing master", "missing", "—"
                 elif i in required_indices:
-                    status, tag, use = "Required", "required", "☑"
+                    status, tag, use = f"Required — {version_status}", "required", "☑"
                 elif row["selected"]:
-                    nexus_status = row.get("nexus", {}).get("status")
-                    status = "Ready — Update" if nexus_status == "outdated" else \
-                             "Ready — Current" if nexus_status == "current" else "Ready — Version unknown"
+                    status = f"Ready — {version_status}"
                     tag, use = ("outdated" if nexus_status == "outdated" else "ready"), "☑"
                 else:
                     status, tag, use = "Ready (disabled)", "disabled", "☐"
@@ -648,7 +666,7 @@ def _archive_version(path: Path) -> tuple[int, ...] | None:
         return None
     tail = stem[mod_id.end():].lstrip(" _-")
     # Nexus names commonly end in an upload epoch; Vortex's newer names use an ISO upload time.
-    tail = re.sub(r"(?:^|[-_ ])\d{10,}$", "", tail)
+    tail = re.sub(r"(?:^|[-_ ])\d{10,}(?:\s*\(\d+\))?$", "", tail)
     tail = re.sub(r"(?:^|\s)\d{4}-\d{2}-\d{2}T\d{2}-\d{2}Z(?:\s.*)?$", "", tail)
     match = re.match(r"v?(\d+(?:[._-]\d+)*(?:[a-zA-Z]\d*)?)", tail, re.I)
     if not match:
@@ -692,6 +710,76 @@ def _nexus_query(document: str, variables: dict, timeout: float = 8) -> dict:
     return payload.get("data") or {}
 
 
+def _files_page_version(text: str) -> str | None:
+    """Read the displayed mod version from the Files page header, before file-card versions and changelogs."""
+    lines = [re.sub(r"\s+", " ", line).strip() for line in str(text).splitlines()]
+    for index, line in enumerate(lines[:-1]):
+        if line.casefold() == "version":
+            match = re.fullmatch(r"v?(\d+(?:[._-]\d+)+(?:[a-z]\d*)?)", lines[index + 1], re.I)
+            if match:
+                return match.group(1)
+    match = re.search(r"(?:^|\n)\s*Version\s+v?(\d+(?:[._-]\d+)+(?:[a-z]\d*)?)\s*(?:\n|$)",
+                      str(text), re.I)
+    return match.group(1) if match else None
+
+
+def _scrape_nexus_versions(found: set[str], progress_callback, timeout: float) -> dict[str, str]:
+    """Best-effort Files-page versions; use the visible browser only when Nexus blocks ordinary requests."""
+    from mwnexus_parse import html_to_text, is_challenge
+    versions, blocked = {}, []
+    for master in sorted(found):
+        mod_id = NEXUS_MOD_IDS[master]
+        url = f"https://www.nexusmods.com/morrowind/mods/{mod_id}?tab=files"
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": "MWManager/0.1", "Accept": "text/html"})
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                markup = response.read(4 * 1024 * 1024).decode("utf-8", "replace")
+            text = html_to_text(markup)
+            if is_challenge("", text):
+                raise RuntimeError("Nexus security check")
+            version = _files_page_version(text)
+            if not version:
+                raise RuntimeError("displayed version not found")
+            versions[master] = version
+            progress_callback(f"Nexus Files page: {master} version {version}")
+        except Exception as exc:
+            blocked.append((master, mod_id, url, str(exc)))
+
+    ask = getattr(progress_callback, "ask_yes_no", None)
+    if not blocked or not ask:
+        return versions
+    import mwnexus_browser
+    first_url = blocked[0][2]
+    try:
+        mwnexus_browser.open_page(first_url)
+    except (OSError, RuntimeError, ValueError) as exc:
+        progress_callback(f"Nexus browser unavailable; using API fallback ({exc})")
+        return versions
+    try:
+        if not ask(
+                "Continue the Nexus version check",
+                "The Nexus page opened successfully. Nexus did not return readable version data to MWManager's "
+                "background checker, so the signed-in browser session is needed instead.\n\n"
+                "Complete any security check and wait for the Files page to load, then choose Yes. Keep the browser "
+                "open: MWManager will inspect each relevant Files page, show progress, and close it when finished.\n\n"
+                "Choose No to skip the browser check and use the Nexus API result instead."):
+            return versions
+        total = len(blocked)
+        for index, (master, mod_id, url, _error) in enumerate(blocked, 1):
+            try:
+                progress_callback(f"Reading Nexus Files page {index} of {total}: {master}")
+                page = mwnexus_browser.capture_page(str(mod_id), url=url)
+                version = _files_page_version(page.get("text", ""))
+                if version:
+                    versions[master] = version
+                    progress_callback(f"Nexus Files page: {master} version {version}")
+            except (OSError, RuntimeError, ValueError) as exc:
+                progress_callback(f"Could not read {master}'s Nexus Files page; using API fallback ({exc})")
+    finally:
+        mwnexus_browser.close_browser()
+    return versions
+
+
 def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8) -> dict:
     """Annotate found major-master archives with latest Nexus primary-file status."""
     progress_callback = progress_callback or (lambda _message: None)
@@ -699,11 +787,15 @@ def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8
              for master in item.get("core_masters", []) if master.casefold() in NEXUS_MOD_IDS}
     if not found:
         return plan
+    page_versions = {}
+    verified_at = _stage_time()
+    query_error = None
     try:
         progress_callback(f"Checking {len(found)} found major-master archive(s) against Nexus…")
         game = _nexus_query('query { game(domainName: "morrowind") { id } }', {}, timeout)
         game_id = str(game["game"]["id"])
         aliases = " ".join(
+            f'v{i}: mod(modId: "{NEXUS_MOD_IDS[name]}", gameId: $gameId) {{ version }} '
             f'm{i}: modFiles(modId: "{NEXUS_MOD_IDS[name]}", gameId: $gameId) '
             '{ name version date primary category }'
             for i, name in enumerate(sorted(found)))
@@ -711,44 +803,68 @@ def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8
         latest_by_master = {}
         for i, master in enumerate(sorted(found)):
             files = data.get(f"m{i}") or []
+            mod_version = str((data.get(f"v{i}") or {}).get("version") or "").strip()
             candidates = [item for item in files if item.get("primary")]
             if not candidates:
                 candidates = [item for item in files if str(item.get("category", "")).upper() == "MAIN"]
-            if files:
-                latest_by_master[master] = max(candidates or files, key=lambda item: int(item.get("date") or 0))
+            if files or mod_version:
+                latest = dict(max(candidates or files, key=lambda item: int(item.get("date") or 0))) if files else {}
+                latest["version"] = mod_version or latest.get("version")
+                latest_by_master[master] = latest
     except Exception as exc:
-        detail = f"Nexus check unavailable ({exc.__class__.__name__}: {exc})"
-        for item in plan.get("archives", []):
-            item["nexus"] = {name.casefold(): {"status": "unknown", "detail": detail,
-                                                "page": nexus_page(name)}
-                              for name in item.get("core_masters", []) if nexus_page(name)}
-        return plan
+        latest_by_master = {}
+        query_error = f"Nexus API unavailable ({exc.__class__.__name__}: {exc})"
+
+    missing = {master for master in found if master not in latest_by_master}
+    if missing:
+        progress_callback(f"Nexus API did not return {len(missing)} version(s); checking Files-page HTML…")
+        page_versions = _scrape_nexus_versions(missing, progress_callback, timeout)
 
     for item in plan.get("archives", []):
         archive = Path(item["archive"])
         local_version = _archive_version(archive)
-        epoch = re.search(r"(?:^|[-_ ])(\d{10,})$", archive.stem)
+        epoch = re.search(r"(?:^|[-_ ])(\d{10,})(?:\s*\(\d+\))?$", archive.stem)
         statuses = {}
         for master in item.get("core_masters", []):
             latest = latest_by_master.get(master.casefold())
-            if not latest:
+            page_version = page_versions.get(master.casefold())
+            if not latest and not page_version:
+                statuses[master.casefold()] = {"status": "unknown", "detail": query_error or
+                                                "Nexus Files page did not expose a version",
+                                                "page": nexus_page(master)}
                 continue
-            latest_text = str(latest.get("version") or latest.get("name") or "unknown")
-            latest_version = tuple(int(value) for value in re.findall(r"\d+", str(latest.get("version") or "")))
-            latest_date = int(latest.get("date") or 0)
-            if local_version and latest_version:
-                status = "current" if local_version >= latest_version else "outdated"
-            elif epoch and latest_date:
+            latest_text = page_version or str(latest.get("version") or latest.get("name") or "unknown")
+            latest_version = tuple(int(value) for value in re.findall(r"\d+", latest_text))
+            api_version = tuple(int(value) for value in re.findall(
+                r"\d+", str((latest or {}).get("version") or "")))
+            latest_date = int((latest or {}).get("date") or 0)
+            if epoch and latest_date and (not page_version or not api_version or latest_version == api_version):
                 status = "current" if int(epoch.group(1)) >= latest_date else "outdated"
+            elif local_version and latest_version:
+                status = "current" if local_version >= latest_version else "outdated"
             else:
                 status = "unknown"
             detail = (f"Nexus latest: {latest_text}"
                       + (f"; archive version: {'.'.join(map(str, local_version))}" if local_version
                          else "; archive filename has no comparable version"))
             statuses[master.casefold()] = {"status": status, "latest": latest_text,
-                                           "detail": detail, "page": nexus_page(master)}
+                                           "detail": detail, "page": nexus_page(master),
+                                           "verified_at": verified_at}
         item["nexus"] = statuses
     return plan
+
+
+def _stage_plugin_identity(item: dict, selected_masters: list[str]) -> dict:
+    primary = selected_masters[0] if selected_masters else ""
+    nexus = item.get("nexus", {}).get(primary.casefold(), {}) if primary else {}
+    exact_current = nexus.get("latest") if nexus.get("status") == "current" else None
+    return {
+        "PLUGIN_NAME": Path(primary).stem if primary else Path(item["archive"]).stem,
+        "PLUGIN_VERSION": str(exact_current or item.get("filename_version") or "unknown"),
+        "NEXUS_VERSION": str(nexus.get("latest") or "unknown"),
+        "NEXUS_VERSION_LAST_VERIFIED": nexus.get("verified_at"),
+        "NEXUS_MOD_PAGE": nexus.get("page"),
+    }
 
 
 def _config_masters(manager_dir: Path) -> dict[str, tuple[str, ...]]:
@@ -1123,14 +1239,32 @@ def stage_core_master_archives(plan: dict, selected_masters: list[str], manager_
 
         safe_stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .") or "major-master"
         destination = staging / safe_stem
-        marker = destination / ".mwmanager-stage.json"
-        if destination.exists():
-            raise FileExistsError(f"Fresh staging destination unexpectedly exists: {destination}")
-
+        prior = package_steps(destination) if destination.exists() else None
+        if prior and prior["extracted"]["completed_at"]:
+            # extracted by an earlier, interrupted run: the caller finishes its remaining steps
+            staged.append(destination)
+            if progress_callback:
+                progress_callback(f"Archive {index} of {len(ordered_archives)} is already extracted: {archive.name}")
+            continue
+        if destination.exists():                      # an extraction that was cut off part-way starts over
+            shutil.rmtree(destination, onerror=_rmtree_clear_readonly)
         destination.mkdir(parents=True)
+        # the marker is written first, so an extraction that is interrupted is on record and counted
+        steps = {step: _step_blank() for step in PACKAGE_STEPS}
+        if prior:
+            steps["extracted"]["attempts"] = prior["extracted"]["attempts"]
+        package_masters = [name for name in selected_masters
+                           if name.casefold() in {m.casefold() for m in item.get("core_masters", [])}]
+        base_marker = {
+            **_stage_plugin_identity(item, package_masters),
+            "archive": archive.name, "sha256": item.get("sha256"),
+            "selected_masters": package_masters,
+        }
+        _write_stage_marker(destination, {**base_marker, "steps": steps})
+        begin_package_step(destination, "extracted")
         try:
             if progress_callback:
-                progress_callback(f"Extracting archive {index} of {len(ordered_archives)} to staging: {archive.name}")
+                progress_callback(extraction_status(archive, index, len(ordered_archives)))
             if archive.suffix.casefold() == ".zip":
                 with zipfile.ZipFile(archive) as zf:
                     for info in zf.infolist():
@@ -1155,18 +1289,179 @@ def stage_core_master_archives(plan: dict, selected_masters: list[str], manager_
                 if result.returncode:
                     raise RuntimeError((result.stderr or result.stdout or
                                          f"7-Zip exited with code {result.returncode}")[-2000:])
-            marker.write_text(json.dumps({
-                "archive": str(archive), "sha256": item.get("sha256"),
-                "selected_masters": [name for name in selected_masters
-                                      if name.casefold() in {m.casefold() for m in item.get("core_masters", [])}],
-            }, indent=2) + "\n", encoding="utf-8")
+            complete_package_step(destination, "extracted")
             staged.append(destination)
             if progress_callback:
                 progress_callback(f"Staged archive {index} of {len(ordered_archives)}: {archive.name}")
-        except Exception:
+        except Exception as exc:
+            # nothing half-extracted is left behind; only the marker stays, with the attempt and its error
+            failed = (package_steps(destination) or steps)["extracted"]
+            failed.update(completed_at=None, last_error=str(exc)[:2000])
             shutil.rmtree(destination, ignore_errors=True)
+            try:
+                destination.mkdir(parents=True, exist_ok=True)
+                _write_stage_marker(destination, {**base_marker, "steps": {**steps, "extracted": failed}})
+            except OSError:
+                pass
             raise
     return staged
+
+
+# What a staged package goes through, in order. Its marker (.mwmanager-stage.json) records each step the way the
+# setup step file does - when it started, when it completed, how many attempts, the last error - so an interrupted
+# Stage run is picked up at the package and step where it stopped.
+PACKAGE_STEPS = ("extracted", "tidied", "bsa_checked")
+PACKAGE_STEP_LABELS = {"extracted": "extracting the archive", "tidied": "Tidy and the option installer",
+                       "bsa_checked": "the BSA check"}
+
+
+def _stage_time() -> str:
+    from datetime import datetime
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _step_blank() -> dict:
+    return {"started_at": None, "completed_at": None, "attempts": 0, "last_error": None}
+
+
+def _write_stage_marker(package: Path, data: dict) -> None:
+    marker = Path(package) / ".mwmanager-stage.json"
+    partial = marker.with_name(marker.name + ".tmp")
+    partial.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(partial, marker)
+
+
+def package_steps(package: str | Path) -> dict | None:
+    """{step: its record} for a staged package, or None when the folder has no marker at all.
+
+    A marker from before steps were recorded was only written once extraction had finished, so it counts as
+    extracted and nothing else."""
+    package = Path(package)
+    data = _read_staged_archive_marker(package)
+    if not data:
+        return None
+    raw = data.get("steps")
+    steps = {step: _step_blank() for step in PACKAGE_STEPS}
+    if isinstance(raw, dict):
+        for step in PACKAGE_STEPS:
+            if isinstance(raw.get(step), dict):
+                steps[step].update({key: raw[step].get(key, value) for key, value in _step_blank().items()})
+    else:
+        try:
+            from datetime import datetime
+            when = datetime.fromtimestamp((package / ".mwmanager-stage.json").stat().st_mtime).astimezone() \
+                .isoformat(timespec="seconds")
+        except OSError:
+            when = "before step records"
+        steps["extracted"].update(started_at=when, completed_at=when, attempts=1)
+    return steps
+
+
+def _update_package_step(package: str | Path, step: str, change) -> dict:
+    if step not in PACKAGE_STEPS:
+        raise ValueError(f"Unknown package step: {step}")
+    package = Path(package)
+    data = _read_staged_archive_marker(package)
+    steps = package_steps(package)
+    if not data or steps is None:
+        raise ValueError(f"Not a staged package (no marker): {package}")
+    change(steps[step])
+    data["steps"] = steps
+    _write_stage_marker(package, data)
+    return steps[step]
+
+
+def begin_package_step(package: str | Path, step: str) -> dict:
+    return _update_package_step(package, step, lambda entry: entry.update(
+        started_at=_stage_time(), completed_at=None, attempts=int(entry.get("attempts") or 0) + 1, last_error=None))
+
+
+def complete_package_step(package: str | Path, step: str) -> dict:
+    def change(entry):
+        entry.update(completed_at=_stage_time(), last_error=None)
+        entry["started_at"] = entry.get("started_at") or entry["completed_at"]
+        entry["attempts"] = max(int(entry.get("attempts") or 0), 1)
+    return _update_package_step(package, step, change)
+
+
+def fail_package_step(package: str | Path, step: str, error) -> dict:
+    return _update_package_step(package, step, lambda entry: entry.update(last_error=str(error)[:2000]))
+
+
+IMAGE_ASSET_DIRS = {"textures", "bookart", "icons", "splash"}     # where the game looks for images
+
+
+def lua_texts(root):
+    """Every Lua file of a package, lowercased and joined: enough to ask whether a script names a file."""
+    chunks = []
+    for dp, ds, fs in os.walk(root):
+        ds[:] = [d for d in ds if d.casefold() not in {"off", "bugreports"}]
+        for fn in fs:
+            if fn.lower().endswith(".lua"):
+                try:
+                    with open(os.path.join(dp, fn), encoding="utf-8", errors="replace") as handle:
+                        chunks.append(handle.read().casefold())
+                except OSError:
+                    pass
+    return "\n".join(chunks)
+
+
+def lua_used_images(root):
+    """The PNG/JPEG files under the image folders that a Lua script names: they stay loose, so a BSA packer must
+    leave them out. Paths relative to the package."""
+    text, used = None, []
+    for top in os.listdir(root) if os.path.isdir(root) else ():
+        if top.casefold() not in IMAGE_ASSET_DIRS or not os.path.isdir(os.path.join(root, top)):
+            continue
+        for dp, _ds, fs in os.walk(os.path.join(root, top)):
+            for fn in fs:
+                if fn.lower().endswith((".png", ".jpg", ".jpeg")):
+                    text = lua_texts(root) if text is None else text
+                    if fn.casefold() in text:
+                        used.append(os.path.relpath(os.path.join(dp, fn), root))
+    return sorted(used, key=str.casefold)
+
+
+def stamped_backup_path(path: str | Path, when: float | None = None) -> Path:
+    """Where to keep a file that is about to be replaced: its name with the time appended
+    (rock.dds -> rock.dds.20261116-101500), so a later backup never overwrites an earlier one.
+    The caller records the returned path; nothing looks backups up by name."""
+    import time
+    path = Path(path)
+    stamp = time.strftime("%Y%m%d-%H%M%S", time.localtime(when))
+    candidate = path.with_name(f"{path.name}.{stamp}")
+    n = 2
+    while candidate.exists():                                   # two backups in the same second
+        candidate = path.with_name(f"{path.name}.{stamp}-{n}")
+        n += 1
+    return candidate
+
+
+def reset_partial_package(package: str | Path) -> None:
+    """Empty a package whose extraction never finished. Its marker stays, so the attempt count carries over to
+    the next extraction; a folder that never had a marker is removed."""
+    package = Path(package)
+    data, steps = _read_staged_archive_marker(package), package_steps(package)
+    shutil.rmtree(package, onerror=_rmtree_clear_readonly)
+    if data and steps is not None:
+        package.mkdir(parents=True, exist_ok=True)
+        _write_stage_marker(package, {**data, "steps": steps})
+
+
+def unfinished_packages(staging: str | Path) -> list[tuple[Path, list[str]]]:
+    """(package, the steps it still needs, in order) for every staged package that is not finished.
+    A folder with no marker needs every step."""
+    staging = Path(staging)
+    found = []
+    if not staging.is_dir():
+        return found
+    for package in sorted((p for p in staging.iterdir() if p.is_dir() and not p.is_symlink()),
+                          key=lambda p: p.name.casefold()):
+        steps = package_steps(package)
+        missing = [step for step in PACKAGE_STEPS if steps is None or not steps[step]["completed_at"]]
+        if missing:
+            found.append((package, missing))
+    return found
 
 
 def _preserve_only_major_master_fomod_selections(manager: Path, staging: Path) -> None:
@@ -1202,6 +1497,29 @@ def _preserve_only_major_master_fomod_selections(manager: Path, staging: Path) -
     temp = journal.with_suffix(journal.suffix + ".tmp")
     temp.write_text(json.dumps(cleaned, indent=2) + "\n", encoding="utf-8")
     os.replace(temp, journal)
+
+
+def staged_source_archive(package: str | Path) -> Path | None:
+    """The archive a staged package came from: its marker keeps the file name, the folder is mwmanager.ini's
+    [Paths] archive_downloads_dir (an absolute name in an older marker is used as it is). None when it is gone."""
+    import configparser
+    name = str(_read_staged_archive_marker(Path(package)).get("archive") or "").strip()
+    if not name:
+        return None
+    candidate = Path(name)
+    if not candidate.is_absolute():
+        ini = configparser.ConfigParser(interpolation=None)
+        try:
+            ini.read(Path(__file__).resolve().with_name("mwmanager.ini"), encoding="utf-8")
+        except (OSError, configparser.Error):
+            return None
+        paths = ini["Paths"] if ini.has_section("Paths") else {}
+        folder = next((str(paths.get(key, "")).strip() for key in ("archive_downloads_dir", "downloads_dir")
+                       if str(paths.get(key, "")).strip()), "")
+        if not folder:
+            return None
+        candidate = Path(folder) / candidate.name
+    return candidate if candidate.is_file() else None
 
 
 def _read_staged_archive_marker(destination: Path) -> dict:
