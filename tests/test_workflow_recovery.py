@@ -340,6 +340,16 @@ class GuiProbes(unittest.TestCase):
         self.app.stage_major_masters()
         self.assertEqual(self.job[0], "Reopen major-master options")
 
+    def test_orphan_hidden_extraction_does_not_count_as_a_finished_stage(self):
+        staging = self.g.APP_DIR / "staging/major_masters"
+        (staging / ".extract-interrupted").mkdir(parents=True)
+        downloads = self.g.APP_DIR / "downloads"
+        downloads.mkdir()
+        self.app.settings["archive_downloads_dir"] = str(downloads)
+        self.app._run_progress_job = self.capture_worker
+        self.app.stage_major_masters()
+        self.assertEqual(self.job[0], "Scanning major-master downloads")
+
     def test_cache_detects_new_nested_master(self):
         self.app.major_masters = ["Nested.esm"]
         package = self.g.APP_DIR / "staging/major_masters/Package"

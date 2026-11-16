@@ -204,7 +204,7 @@ class SoundsFolderTests(unittest.TestCase):
     def test_a_misnamed_sounds_folder_is_renamed_and_reported(self):
         tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
-        staging = Path(tmp.name) / "staging"
+        staging = Path(tmp.name).resolve() / "staging"
         mod = staging / "Dr_Data-51776"
         for rel in ("Data Files/Dr_Data.esm", "Data Files/Sounds/dr/a.wav"):
             (mod / rel).parent.mkdir(parents=True, exist_ok=True)

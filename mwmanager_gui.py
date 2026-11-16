@@ -4461,7 +4461,9 @@ class ManagerGUI(tk.Tk):
             pending = self._pending_stage_masters()
             return [name for name in pending if name.casefold() not in have]
 
-        if staging.is_dir() and any(staging.iterdir()) and not force_scan:
+        has_packages = staging.is_dir() and any(p.is_dir() and not p.name.startswith(".")
+                                                for p in staging.iterdir())
+        if has_packages and not force_scan:
             py = console_python()
             if py is None:
                 messagebox.showerror("Cannot reopen staged options",

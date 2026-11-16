@@ -69,7 +69,7 @@ package ownership, cancellation, cache invalidation, wrapped assets, and recover
 Live Nexus challenges, antivirus locks, real BSAPack archives, MGE regeneration,
 and Windows reparse/permission behavior still require supported-platform testing.
 
-Local verification for this change: Python 3.14.8 on Linux/Xvfb, **327 passed,
+Local verification for this change: Python 3.14.8 on Linux/Xvfb, **328 passed,
 7 skipped**. Undefined-name/syntax checks also pass for the changed standalone
 modules. The skipped and mocked cases do not establish real Windows, real
 BSAPack, live Nexus, or game-runtime compatibility; the Windows CI jobs provide
