@@ -475,8 +475,11 @@ def run_fix(args, plugins, bsas, data_dirs, report, world, only, hidden=frozense
     health = list(getattr(world, "asset_health", [])) if only is None else []
     lp_held = getattr(world, "longpath_plan", None)
     if not asset_repair_enabled(args):
-        held = len(generated) + len(shrink) + len(keyfix) + len(health) + len(lp_held or [])
-        generated, shrink, keyfix, health = [], [], [], []
+        repair_generated = bool(getattr(args, "generate_missing_assets", False))
+        held = (0 if repair_generated else len(generated)) + len(shrink) + len(keyfix) + len(health) + len(lp_held or [])
+        if not repair_generated:
+            generated = []
+        shrink, keyfix, health = [], [], []
         if lp_held:
             world.longpath_plan, world.longpath_nifs = [], []
         if held:
@@ -3048,7 +3051,8 @@ def run_full(args):
         args.use_answers = True
         print(f"--full: replaying your {len(read_conflict_answers(game_dir))} remembered conflict answer(s) from "
               f"{CONFLICT_ANSWERS_FILE} (--fresh-answers to start without them)")
-    common = ["--fix-log", args.fix_log, "--encoding", args.encoding, "--no-interactive", "--yes"]
+    common = ["--fix-log", args.fix_log, "--encoding", args.encoding, "--no-interactive", "--yes",
+              "--generate-missing-assets"]
     if asset_repair_enabled(args):
         common.append("--asset-repair")
     if getattr(args, "init_scope", False):
@@ -3233,6 +3237,7 @@ def _main(argv=None):
                     help="with --fix: also change asset files in Data Files (stand-ins, texture reduction, text "
                          "keys, asset health, short paths). Off by default; [Repair] asset_repair = true in "
                          "mwmanager.ini turns it on for every run")
+    fx.add_argument("--generate-missing-assets", action="store_true", help=argparse.SUPPRESS)
     fx.add_argument("--patch-esm", action="store_true",
                     help="same as --fix (kept for older batch notes)")
     fx.add_argument("--restore", nargs="+", metavar="FILE", help="undo: put each plugin's newest MWManager backup back (keeps the file date) and exit")

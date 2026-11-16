@@ -83,6 +83,11 @@ class AssetRepairSwitch(unittest.TestCase):
         src = (ROOT / "mwmanager_overrides.py").read_text(encoding="utf-8")
         self.assertIn('if asset_repair_enabled(args):\n        common.append("--asset-repair")', src)
 
+    def test_full_pass_always_regenerates_missing_assets(self):
+        src = (ROOT / "mwmanager_overrides.py").read_text(encoding="utf-8")
+        self.assertIn('"--generate-missing-assets"]', src)
+        self.assertIn('repair_generated = bool(getattr(args, "generate_missing_assets", False))', src)
+
 
 class TidySteps(unittest.TestCase):
     """options -> plan -> --apply, the refusal (exit 2) and --undo, in a temporary staging folder."""
