@@ -50,15 +50,30 @@ def _prompt(title, message, tone, buttons, default, cancel, parent=None, entry=N
         window = tk.Toplevel(owner)
         window.withdraw()                                   # placed before it is shown: no jump
         window.title(title or "MWManager")
-        window.resizable(False, False)
+        window.resizable(True, True)
         result = {"value": cancel}
 
         frame = ttk.Frame(window, padding=SPACE["xl"])
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text=title or "", style=f"{_TONES.get(tone, 'gold').title()}.TLabel",
                   font="TkHeadingFont", wraplength=WRAP, justify="left").pack(anchor="w")
-        ttk.Label(frame, text=message or "", wraplength=WRAP, justify="left").pack(
-            anchor="w", pady=(SPACE["sm"], SPACE["lg"]))
+        # Keep decisions and their buttons reachable on small displays. A label
+        # grows without a bound when preflight lists many blockers or file paths.
+        if len(message or "") > 650 or len((message or "").splitlines()) > 10:
+            details_box = ttk.Frame(frame)
+            details_box.pack(fill="both", expand=True, pady=(SPACE["sm"], SPACE["lg"]))
+            details = tk.Text(details_box, wrap="word", width=68,
+                              height=min(16, max(7, window.winfo_screenheight() // 55)),
+                              relief="flat", padx=8, pady=8)
+            details.insert("1.0", message or "")
+            details.configure(state="disabled")
+            scroll = ttk.Scrollbar(details_box, command=details.yview)
+            details.configure(yscrollcommand=scroll.set)
+            details.pack(side="left", fill="both", expand=True)
+            scroll.pack(side="right", fill="y")
+        else:
+            ttk.Label(frame, text=message or "", wraplength=WRAP, justify="left").pack(
+                anchor="w", pady=(SPACE["sm"], SPACE["lg"]))
         field = None
         if entry is not None:
             text = tk.StringVar(value=entry.get("initialvalue") or "")
@@ -72,10 +87,16 @@ def _prompt(title, message, tone, buttons, default, cancel, parent=None, entry=N
         row = ttk.Frame(frame)
         row.pack(fill="x")
         focus = None
-        for label, value in reversed(buttons):              # packed from the right: first button ends up leftmost
+        for index, (label, value) in enumerate(buttons):
             button = ttk.Button(row, text=label, command=lambda v=value: choose(v),
                                 style="Primary.TButton" if value == default else "TButton")
-            button.pack(side="right", padx=(SPACE["sm"], 0))
+            # Conflict choices can have long plugin names. Stack them instead of
+            # forcing an enormous, off-screen single button row.
+            if len(buttons) > 3 or any(len(label) > 35 for label, _value in buttons):
+                button.grid(row=index, column=0, sticky="ew", pady=3)
+                row.columnconfigure(0, weight=1)
+            else:
+                button.pack(side="left", padx=(0, SPACE["sm"]))
             if value == default:
                 focus = button
         window.protocol("WM_DELETE_WINDOW", lambda: choose(cancel))

@@ -28,6 +28,7 @@ MWManager's own behaviour is in extension modules that `mwmanager_upstream.py` l
 | `mwmanager_tidy_ext.py` | Tidy rules for the per-mod staging folders, the BAIN/FOMOD option step |
 | `mwmanager_install.py` | Tidy command line: `--options` → plan → `--apply` (exit 2 = refused, nothing changed) |
 | `mwmanager_gui.py` | the GUI (`python mwmanager_gui.py`) |
+| `mwmanager_workflow.py` | persistent setup window, progress presentation, safe-stop controls and native conflict picker |
 
 Other modules: `plugin_install.py`, `core_addons.py`, `major_master_deploy.py`, `mock_fomod.py`, `preinstall.py`,
 `mwmanager_detect.py`, `mwmanager_journal.py`, `mwse_lint.py`, `nexus_updates.py`, `mwnexus_*.py`,
@@ -42,6 +43,34 @@ yourself: LuaJIT in `tools/luajit/` (used by the Lua check), `texconv.exe` (Dire
 
 `mwmanager_core_hashes.json` is shipped as immutable verification data; first-run code reads it but never
 regenerates or clears it.
+
+## GUI setup and staging
+
+First-run setup keeps one progress window through prerequisite checks, sort/Tidy, patch generation, the
+catalog, and major-master staging. Its checklist follows the saved setup checkpoints. Use **File > Resume
+setup** after a pause; optional community masters can also be explicitly skipped and added later.
+
+- **Automatic Tidy:** installer choices remain interactive, but the GUI builds and applies the plan with
+  `--apply --yes` without asking for approval of individual moves or repairs. Output scrolls in the shared log.
+  Existing asset-repair settings still apply. A changed/refused plan or partial apply stops deployment.
+- **Readable progress:** the window is resizable; explicit stage/archive counts use determinate progress.
+  Scrolling up pauses automatic following. The Follow output checkbox jumps back to the latest output.
+- **Safe stopping:** Stop after current operation requests a cooperative stop. File operations and running
+  utilities finish their current unit before stopping at a checkpoint; this is not an instant thread kill
+  or a rollback of completed work. Long scans check between reported operations. A partially processed
+  master stays marked as needing processing, not ready for deployment.
+- **Major masters:** Find / stage downloads scans new archives; Reopen staged options processes existing
+  staging without extracting again. Staging and deployment are separate. Deployment lists the selected
+  masters and asks about loose assets before running preflight, then deploys only that selection in the
+  configured priority order. Shared-package assets may serve more than one selected master.
+- **Legacy staging:** stages created before processing-complete records existed must pass Reopen staged
+  options once before deployment. This prevents an interrupted extraction from being mistaken for a
+  fully processed package just because its ESM exists.
+- **Preflight reuse:** a successful preflight may be reused within the current session while the observed
+  core/prerequisite file metadata is unchanged. Changed files, unreadable metadata, or a new session
+  require preflight again. This is a performance cache, not a content-integrity guarantee.
+- **Conflict decisions:** GUI patch generation uses a native picker instead of opening a console.
+  Skip leaves a pair unchanged; Finish review saves choices already made and returns to patch generation.
 
 ## Tests
 

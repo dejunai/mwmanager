@@ -317,6 +317,8 @@ class GuiTidySteps(unittest.TestCase):
         self.assertIn("--options", calls[0])
         self.assertNotIn("--apply", calls[0])
         self.assertIn("--apply", calls[1])
+        self.assertIn("--yes", calls[1])
+        self.assertIn("done", messages)
         calls, patch = self.fake([(0, pending), (2, ["REFUSED: the plan ..."])])
         with patch, self.assertRaises(RuntimeError):
             self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
@@ -328,6 +330,21 @@ class GuiTidySteps(unittest.TestCase):
         with patch, self.assertRaisesRegex(RuntimeError, "deployment is halted"):
             self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
         self.assertEqual(len(calls), 2)
+
+    def test_missing_plan_marker_cannot_be_treated_as_ready(self):
+        calls, patch = self.fake([(0, ["unexpected tool output"])])
+        progress, _messages = self.progress()
+        with patch, self.assertRaisesRegex(RuntimeError, "valid plan state"):
+            self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
+        self.assertEqual(len(calls), 1)
+
+    def test_empty_plan_needs_no_apply(self):
+        calls, patch = self.fake([(0, ["MWMANAGER-PLAN: empty plan.txt"])])
+        progress, messages = self.progress()
+        with patch:
+            self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(any("nothing to tidy" in line for line in messages))
 
     def test_load_order_write_failure_restores_moved_plugins_and_state(self):
         with tempfile.TemporaryDirectory() as tmp:

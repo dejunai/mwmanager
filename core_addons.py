@@ -163,12 +163,9 @@ def _archive_esm_masters(archive: Path, plugin_name: str, manager_dir: Path,
     return masters, None
 
 
-def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
-                               plan: dict, parent=None) -> list[str] | str | None:
-    """Inspect all configured masters, then let the user select ready ones or abort.
-
-    Returns selected ESM names, ``"rescan"`` after a download, or None on abort/display failure.
-    """
+def prepare_core_master_review(manager_dir: str | Path, game_dir: str | Path,
+                               plan: dict, progress=None) -> dict:
+    """Read and validate archives off the Tk thread before presenting choices."""
     manager_dir, game_dir = Path(manager_dir), Path(game_dir)
     data_dir = game_dir / "Data Files"
     staging_dir = manager_dir / "staging"
@@ -188,7 +185,10 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
 
     rows = []
     seven_zip = _seven_zip(manager_dir)
+    archive_hashes, archive_members = {}, {}
     for index, master in enumerate(masters):
+        if progress:
+            progress(f"Inspecting master {index + 1} of {len(masters)}: {master}")
         existing = installed.get(master.casefold())
         if existing:
             # Existing game and staging copies are both inspected before any selected install proceeds.
@@ -198,6 +198,8 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                     if len(record) < 16 or record[:4] != b"TES3":
                         raise ValueError("invalid TES3 header")
                     size = struct.unpack_from("<I", record, 4)[0]
+                    if size > 16 * 1024 * 1024:
+                        raise ValueError("oversized TES3 header")
                     body = stream.read(size)
                 if size > 16 * 1024 * 1024 or len(body) != size:
                     raise ValueError("truncated or oversized TES3 header")
@@ -240,12 +242,17 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                          "installed": False, "selected": False, "path": str(archive),
                          "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
             continue
-        if item.get("sha256") and _sha256(archive) != item["sha256"]:
+        archive_key = str(archive.resolve())
+        if item.get("sha256") and archive_key not in archive_hashes:
+            archive_hashes[archive_key] = _sha256(archive)
+        if item.get("sha256") and archive_hashes[archive_key] != item["sha256"]:
             rows.append({"name": master, "deps": [], "error": "download changed since the archive scan; rescan required",
                          "installed": False, "selected": False, "path": str(archive),
                          "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
             continue
-        member_names, error = _members(archive, seven_zip)
+        if archive_key not in archive_members:
+            archive_members[archive_key] = _members(archive, seven_zip)
+        member_names, error = archive_members[archive_key]
         if error:
             rows.append({"name": master, "deps": [], "error": f"archive listing failed: {error}",
                          "installed": False, "selected": False, "path": str(archive),
@@ -332,6 +339,19 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                 row["selected"] = False
 
     readiness()
+    return {"rows": rows, "index_by_name": index_by_name, "readiness": readiness,
+            "select_dependencies": select_dependencies, "required_by_selection": required_by_selection}
+
+
+def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
+                               plan: dict, parent=None, *, prepared=None) -> list[str] | str | None:
+    """Present already-inspected masters. Standalone callers may prepare inline."""
+    prepared = prepared if prepared is not None else prepare_core_master_review(manager_dir, game_dir, plan)
+    rows = prepared["rows"]
+    index_by_name = prepared["index_by_name"]
+    readiness = prepared["readiness"]
+    select_dependencies = prepared["select_dependencies"]
+    required_by_selection = prepared["required_by_selection"]
     try:
         import tkinter as tk
         from tkinter import ttk
