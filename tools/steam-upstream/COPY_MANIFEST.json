@@ -455,8 +455,8 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 490738,
-      "SHA256": "ee3b6e7e52a1d4f5ab6ed81087de1b2b95b954b8b0a2777a04ecc4810542754a",
+      "Bytes": 490761,
+      "SHA256": "6c48b551eb3012a45d05e6ff859564c6aba62530d3426eaa26190d6fbd7ba0be",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
       "SourceModified": "2026-11-15T06:55:58"
     },
@@ -560,8 +560,8 @@
     },
     {
       "RelativePath": "mwdialog_mastercheck.py",
-      "Bytes": 40125,
-      "SHA256": "8b29ac9520d32334209ca431254128a538b83b75df4ded0507472bca774779d9",
+      "Bytes": 43330,
+      "SHA256": "8e5fb139c64f0328c48d118a306c9c7bcd11f84a060adbe90de9c23eb3f1d2a6",
       "Source": "<Steam Morrowind>\\mwdialog_mastercheck.py",
       "SourceModified": "2026-11-14T10:39:48"
     },
@@ -922,8 +922,8 @@
     },
     {
       "RelativePath": "tests\\test_mastercheck.py",
-      "Bytes": 17167,
-      "SHA256": "f3a7a244ed525e3bf2e1812dd78301cd75eae0461a3b2bc94435e65413e3e97b",
+      "Bytes": 18423,
+      "SHA256": "a3f79bfb992819d7fdc155d195cd9312230ce04c2a0fdb25966881aefb15cd98",
       "Source": "<Steam Morrowind>\\tests\\test_mastercheck.py",
       "SourceModified": "2026-11-14T08:25:28"
     },
