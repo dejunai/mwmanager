@@ -131,8 +131,8 @@
     {
       "Path": "mods/mwfloatfix/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwfloatfix\\main.lua",
-      "SHA256": "fc2691f1f8dce7ca920005d89d06aea7c8385e116c7fe154ad7d6e60ab42ca07",
-      "Length": 26976,
+      "SHA256": "a2ae5f5cff0c0594216c600ae82bf8d38712a1f7f853ef189beb11a060b28cff",
+      "Length": 27579,
       "SourceModified": "2026-11-15T02:18:22"
     },
     {
@@ -187,8 +187,8 @@
     {
       "Path": "mods/mwperformers/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwperformers\\main.lua",
-      "SHA256": "9f02e416e544315e346d3bd5bcf7ba2104da989064853e676346b3cc67b56952",
-      "Length": 8910,
+      "SHA256": "e7b4d5ae89a196a5ab7d10b4ee6d4c35ab0d31bed875256fbedc5cfdc0c95c11",
+      "Length": 9647,
       "SourceModified": "2026-11-14T07:38:58"
     },
     {
@@ -229,8 +229,8 @@
     {
       "Path": "mods/mwpluginpatches/patches/lostHeirDelay.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\lostHeirDelay.lua",
-      "SHA256": "5db77c559a86babb3e598048a4d81af353e9d5352c649f2863e9774402f0081c",
-      "Length": 1258,
+      "SHA256": "7364ab36b2103bd1dfc81fadac8db44474077d6f535486b3114aac09da2472a6",
+      "Length": 1524,
       "SourceModified": "2026-11-14T10:02:46"
     },
     {
@@ -271,15 +271,15 @@
     {
       "Path": "mods/mwsaveguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsaveguard\\main.lua",
-      "SHA256": "e751ea77a5206f2664bbbb024da05fa99575860a869af4755c966c83b5c1dc97",
-      "Length": 15204,
+      "SHA256": "863a91aedb34b25fdac6958215fd6aefc6dfc5de9a60d0870918b25c6b36a524",
+      "Length": 15393,
       "SourceModified": "2026-11-15T05:18:08"
     },
     {
       "Path": "mods/mwsaveguard/validator.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsaveguard\\validator.lua",
-      "SHA256": "d453b77b8031fdaee826141650e07cd1c574dc71ffb8ee3f1a51cee3179ff4ed",
-      "Length": 4709,
+      "SHA256": "80f26c77bbfb1a8d19eda9b622b1bca843595d7d259319fc5f98c5905eb45be7",
+      "Length": 4958,
       "SourceModified": "2026-11-14T08:58:27"
     },
     {
@@ -306,8 +306,8 @@
     {
       "Path": "mods/mwteleportguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwteleportguard\\main.lua",
-      "SHA256": "ace116fa4ac23dfd54ebd7989b36786904b2c0c6d882db701dc8c00254eee20e",
-      "Length": 5755,
+      "SHA256": "9e66f4544859ab1d6cd933d00cbb6a0927a5d4df0ffd0a6622f3142448c183fc",
+      "Length": 6142,
       "SourceModified": "2026-11-14T11:04:02"
     },
     {
