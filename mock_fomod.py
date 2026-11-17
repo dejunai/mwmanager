@@ -2239,6 +2239,61 @@ def _load_answer_file(output_dir: Path, identity: str) -> dict | None:
     return answer if answer.get("identity") == identity and isinstance(answer.get("selected"), list) else None
 
 
+PENDING_FILE = "mwmanager_pending_options.json"
+
+
+def record_pending_options(output_dir: Path, mod_dir: Path, records: list[dict], chosen: set[str],
+                           installed: set[str]) -> dict:
+    """The chosen options of one package that need a plugin that is neither installed nor staged (an option
+    plugin's master), kept in PENDING_FILE as {package: {option key: {"label", "needs", "status"}}} for the
+    batch to fetch first; a package with none is dropped from it. Returns this package's entries."""
+    have = {name.casefold() for name in installed}
+    waiting = {}
+    for item in records:
+        needs = sorted(m for m in (item.get("missing_masters") or []) if m.casefold() not in have)
+        if needs:
+            # not chosen: kept so that when the mod arrives the user is offered the option again
+            waiting[item["key"]] = {"label": item.get("label") or item["key"], "needs": needs,
+                                    "status": "waiting" if item["key"] in chosen else "not chosen"}
+    path = Path(output_dir) / PENDING_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    if waiting:
+        data[mod_dir.name] = waiting
+    else:
+        data.pop(mod_dir.name, None)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, path)
+    for item in waiting.values():
+        if item["status"] == "waiting":
+            print(f"  {mod_dir.name}: option '{item['label']}' waits on {', '.join(item['needs'])} (not installed)")
+    return waiting
+
+
+def ask_see_options(package: str, arrived: list[str], labels: list[str]) -> bool:
+    """A mod that an option the user didn't choose works with has just been installed: offer to show it."""
+    text = (f"You just installed {', '.join(arrived)}.\n\n{package} has an optional component you didn't choose "
+            f"before that works with it: {', '.join(labels)}.\n\nSee it now?")
+    try:
+        import tkinter as tk
+        import mwmanager_dialogs as messagebox
+        root = tk.Tk()
+    except Exception:                       # no display: the option window couldn't open either
+        print(text.replace("\n\n", " "))
+        return False
+    root.withdraw()
+    try:
+        return bool(messagebox.askyesno("Optional component now available", text, parent=root))
+    finally:
+        root.destroy()
+
+
 def _save_answer_file(output_dir: Path, identity: str, selected: set[str], records: list[dict],
                       previous_answer: dict | None = None) -> None:
     path = _answer_file_path(output_dir, identity)
@@ -2312,6 +2367,15 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         if pending:
             print(f"\nCompatibility option(s) may now apply to {entry.get('plugin')}: "
                   f"{', '.join(sorted(newly_relevant))}")
+            real = {p.name.casefold(): p.name for p in data_files.iterdir()
+                    if p.suffix.casefold() in PLUGIN_EXTS} if data_files.is_dir() else {}
+            if not ask_see_options(entry.get("plugin") or mod_dir.name,
+                                   sorted(real.get(n, n) for n in newly_relevant),
+                                   [r.get("label") or r["key"] for r in pending]):
+                entry["reviewed_targets"] = sorted(reviewed | newly_relevant)   # No: not asked again for these
+                _save_journal(journal_path, state)
+                compatibility_reviewed.add(key)
+                continue
             identity = _selection_identity(mod_dir)
             answer = _load_answer_file(output_dir, identity)
             answered = set(answer.get("answered_groups", [])) if answer else _legacy_answer_groups(records)
@@ -2326,6 +2390,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
                 entry["reviewed_targets"] = sorted(reviewed | newly_relevant)
                 saved_selections[identity] = applied["selected"]
                 _save_answer_file(output_dir, identity, set(applied["selected"]), records, answer)
+                record_pending_options(output_dir, mod_dir, records, set(applied["selected"]), installed)
                 changed_mods.add(mod_dir.name)
                 _save_journal(journal_path, state)
                 compatibility_reviewed.add(key)
@@ -2404,6 +2469,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
                      "reviewed_targets": sorted(reviewed)}
         saved_selections[selection_identity] = applied["selected"]
         _save_answer_file(output_dir, selection_identity, set(applied["selected"]), records, answer)
+        record_pending_options(output_dir, mod_dir, records, set(applied["selected"]), installed)
         changed_mods.add(mod_dir.name)
         _save_journal(journal_path, state)
         print(f"  {mod_dir.name}: selected {len(applied['selected'])} option(s); "

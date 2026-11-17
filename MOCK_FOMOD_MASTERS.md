@@ -65,3 +65,29 @@ still removes it.
 - Staging the master turns it `ready`; activating the option turns it `installed`.
 - A texture-only option whose name matches a staged package is recorded as a hint.
 - `never` entries are not prompted again.
+
+## Batch install plan (2026-11-16)
+
+Major masters and plugins install in batches (15 at a time). Options that need a mod that isn't installed
+must not block the batch: the mod is found, staged and deployed first, then the option goes on top of it.
+
+1. **Record choices and what they wait on** - done. After each option window, every chosen option whose
+   plugins need a master that is neither installed nor staged (`missing_masters`) is kept in
+   `outputs\mwmanager_pending_options.json` as `{package: {option key: {label, needs, status: "waiting"}}}`;
+   a package with none left is dropped from it. Choices themselves are already kept in each package's answer
+   file. Options not chosen that need a missing master are kept too (status "not chosen"); when that mod
+   is installed later, the user is asked "You just installed X. <package> has an optional component you
+   didn't choose before that works with it: ... See it now?" - Yes opens the option window, No marks it
+   reviewed (not asked again). Name-only matches (texture/mesh options) are not recorded yet.
+2. **Split each package in the batch** - its core and the options whose needs are met deploy now; waiting
+   options are held, and each needed mod goes into the batch ahead of the option that needs it (so the
+   option's files overwrite it).
+3. **Find the needed mod** - first the archive downloads folder (archive listings already exist in the master
+   check); for a user who doesn't have it, the embedded Nexus browser opens on a search for it, and the
+   download is tidied and staged like any other mod. Not found: the batch goes on; the option stays waiting,
+   with a Never button.
+4. **Finish held options** - once the needed mod is deployed, the option step runs again for that package
+   with the recorded choices preselected (the existing "newly relevant targets" reopen), then deploys.
+5. **Clear status in the GUI** - one list for the batch, one plain line per package ("OAAB_Data - core
+   installed; 3 options waiting", "Epic Plants - needed by OAAB_Data's 'Epic Plants' option; found in your
+   downloads; staging"), and one current step at the top.
