@@ -1,6 +1,6 @@
 # Removing the near-duplicate functions between the Steam tools and MWManager
 
-Status: plan, 2026-11-16. Nothing changed yet.
+Status: completed, 2026-11-17.
 
 ## What is duplicated
 
@@ -116,3 +116,18 @@ automatically, and nothing MWManager-specific in the Steam tools beyond hook nam
 - MWManager-only behaviour stays in MWManager (`STEAM_UPSTREAM.md`, "MWManager-only behavior"): the hooks carry
   Steam defaults only.
 - The game can't be run from a session: say what was not tested in game.
+
+## Execution result (2026-11-17)
+
+- Upstream now owns the seven shared workflows through value hooks and small step hooks. MWManager overrides only
+  those hooks; its copied `run_fix`, `run_cell_conflicts`, `fix_cell_winners`, `compute_order`, `run_sort`,
+  `run_repair_sounds`, `fix_doubled`, and `sort_rule_sources` implementations were removed.
+- MWManager-specific tail ordering, report/header names, repair locations, mlox preparation, distant-land writing,
+  conflict GUI/pending state, major-master conflict records, and generated-patch activation remain in
+  `mwmanager_state.py` and `mwmanager_overrides.py`.
+- The three `mwdialog_check.py` copies are byte-identical, and both source manifests were refreshed.
+- Review also fixed archive extraction cleanup, linked deployment/removal containment, transactional removal
+  rollback, Tidy-output cancellation, and cancellation-aware GUI prompt waits.
+- Verification: MWManager 361 tests passed / 4 skipped; Steam upstream 387 passed / 21 skipped; vendored upstream
+  384 passed / 24 skipped. The Steam `--dry-run` report matched the saved pre-change report exactly.
+- Not tested in-game.

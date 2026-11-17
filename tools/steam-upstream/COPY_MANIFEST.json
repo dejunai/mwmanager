@@ -455,10 +455,10 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 490761,
-      "SHA256": "6c48b551eb3012a45d05e6ff859564c6aba62530d3426eaa26190d6fbd7ba0be",
+      "Bytes": 484501,
+      "SHA256": "b5185d11bc8669d973726fb2c2e8df6aaeb1bc485189e11fa6aad62a051d83d5",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
-      "SourceModified": "2026-11-15T06:55:58"
+      "SourceModified": "2026-11-17T13:45:35-08:00"
     },
     {
       "RelativePath": "mwdialog_check.rules.txt",

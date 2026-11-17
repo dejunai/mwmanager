@@ -8,9 +8,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_check.py",
       "working": "mwdialog_check.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14); MWManager behaviour in mwmanager.py, mwmanager_upstream.py, mwmanager_state.py, mwmanager_overrides.py, mwmanager_init.py",
-      "source_sha256": "fa86eb1cce2fbdd518f4222717ccadae4c169921b79d54df9745287e166ca739",
-      "snapshot_sha256": "fa86eb1cce2fbdd518f4222717ccadae4c169921b79d54df9745287e166ca739",
-      "working_sha256": "fa86eb1cce2fbdd518f4222717ccadae4c169921b79d54df9745287e166ca739",
+      "source_sha256": "b5185d11bc8669d973726fb2c2e8df6aaeb1bc485189e11fa6aad62a051d83d5",
+      "snapshot_sha256": "b5185d11bc8669d973726fb2c2e8df6aaeb1bc485189e11fa6aad62a051d83d5",
+      "working_sha256": "b5185d11bc8669d973726fb2c2e8df6aaeb1bc485189e11fa6aad62a051d83d5",
       "working_matches_upstream": true,
       "extension": [
         "mwmanager.py",

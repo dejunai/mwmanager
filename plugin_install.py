@@ -91,6 +91,84 @@ def _safe_name(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9._ -]+", "_", value).strip(" .") or "plugin-archive"
 
 
+def _path_is_link(path: Path) -> bool:
+    if path.is_symlink():
+        return True
+    is_junction = getattr(path, "is_junction", None)
+    try:
+        return bool(is_junction and is_junction())
+    except OSError:
+        return True
+
+
+def _safe_child(root: Path, relative: Path, *, label: str) -> Path:
+    """Return a contained path whose existing components below root are not links or junctions."""
+    relative = Path(relative)
+    if not relative.parts or relative.is_absolute() or ".." in relative.parts:
+        raise ValueError(f"{label} is not a safe relative path: {relative}")
+    root = Path(root).resolve()
+    target = root / relative
+    cursor = root
+    for part in relative.parts:
+        cursor = cursor / part
+        if _path_is_link(cursor):
+            raise ValueError(f"{label} crosses a symbolic link or junction: {cursor}")
+        if cursor.exists() or cursor.is_symlink():
+            try:
+                cursor.resolve().relative_to(root)
+            except ValueError as exc:
+                raise ValueError(f"{label} escapes its root: {cursor}") from exc
+    return target
+
+
+def _assert_no_links(root: Path) -> None:
+    for base, dirs, files in os.walk(root):
+        here = Path(base)
+        for name in dirs + files:
+            path = here / name
+            if _path_is_link(path):
+                raise ValueError(f"Archive contains a symbolic link or junction: "
+                                 f"{path.relative_to(root)}")
+
+
+def _seven_zip_link_members(seven_zip: str, archive: Path) -> list[str]:
+    result = subprocess.run([seven_zip, "l", "-slt", "-ba", "--", str(archive)],
+                            capture_output=True, text=True, errors="replace", timeout=180,
+                            **_quiet_subprocess_options())
+    if result.returncode:
+        raise RuntimeError((result.stderr or result.stdout or
+                            f"7-Zip exited {result.returncode}")[-3000:])
+    linked, current, fields = [], None, {}
+
+    def finish():
+        nonlocal current, fields
+        attributes = str(fields.get("attributes", "")).lower()
+        mode = str(fields.get("mode", "")).lower()
+        if current and (
+                fields.get("symbolic link") or fields.get("hard link") or
+                "symbolic link" in attributes or "reparse" in attributes or
+                "reparse point" in attributes or mode.startswith(("l", "j"))):
+            linked.append(current)
+        current, fields = None, {}
+
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            finish()
+            continue
+        key, separator, value = line.partition(" = ")
+        if not separator:
+            continue
+        key, value = key.strip().casefold(), value.strip()
+        fields[key] = value
+        if key == "path":
+            if current:
+                finish()
+            current = value
+            fields["path"] = value
+    finish()
+    return linked
+
+
 def _archive_metadata(archive: Path) -> dict:
     """Read adjacent Vortex metadata when available; tolerate its absence or schema changes."""
     candidates = [archive.with_suffix(archive.suffix + ".meta"), archive.with_suffix(".meta"),
@@ -490,29 +568,44 @@ def extract_archive(item: dict, destination: Path, manager: Path) -> Path:
     unsafe, collisions = _member_preflight(names)
     if unsafe or collisions:
         raise ValueError(f"Archive paths are unsafe: {archive.name}: " + "; ".join(unsafe + collisions))
-    destination.mkdir(parents=True, exist_ok=False)
-    if archive.suffix.casefold() == ".zip":
-        with zipfile.ZipFile(archive) as zf:
-            for entry in zf.infolist():
-                if entry.is_dir():
-                    continue
-                if (entry.external_attr >> 16) & 0o170000 == 0o120000:
-                    raise ValueError(f"Archive contains a symbolic link: {entry.filename}")
-                target = (destination / Path(entry.filename.replace("\\", "/"))).resolve()
-                if destination.resolve() not in target.parents:
-                    raise ValueError(f"Archive path escapes the temporary install: {entry.filename}")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                with zf.open(entry) as src, target.open("wb") as dst:
-                    shutil.copyfileobj(src, dst, 1024 * 1024)
-    else:
-        seven_zip = _seven_zip(manager)
-        if not seven_zip:
-            raise FileNotFoundError("7-Zip is required to install this archive format.")
-        result = subprocess.run([seven_zip, "x", str(archive), f"-o{destination}", "-y"],
-                                capture_output=True, text=True, errors="replace", timeout=7200,
-                                **_quiet_subprocess_options())
-        if result.returncode:
-            raise RuntimeError((result.stderr or result.stdout or f"7-Zip exited {result.returncode}")[-3000:])
+    destination = destination.resolve()
+    if destination.exists():
+        raise FileExistsError(f"Staging destination already exists: {destination}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.parent / f".{destination.name}.{uuid.uuid4().hex}.extracting"
+    temporary.mkdir()
+    try:
+        if archive.suffix.casefold() == ".zip":
+            with zipfile.ZipFile(archive) as zf:
+                for entry in zf.infolist():
+                    if entry.is_dir():
+                        continue
+                    if (entry.external_attr >> 16) & 0o170000 == 0o120000:
+                        raise ValueError(f"Archive contains a symbolic link: {entry.filename}")
+                    target = _safe_child(temporary, Path(entry.filename.replace("\\", "/")),
+                                         label="Archive member")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(entry) as src, target.open("wb") as dst:
+                        shutil.copyfileobj(src, dst, 1024 * 1024)
+        else:
+            seven_zip = _seven_zip(manager)
+            if not seven_zip:
+                raise FileNotFoundError("7-Zip is required to install this archive format.")
+            linked = _seven_zip_link_members(seven_zip, archive)
+            if linked:
+                raise ValueError(f"Archive contains symbolic links or junctions: "
+                                 + ", ".join(linked[:10]))
+            result = subprocess.run([seven_zip, "x", str(archive), f"-o{temporary}", "-y"],
+                                    capture_output=True, text=True, errors="replace", timeout=7200,
+                                    **_quiet_subprocess_options())
+            if result.returncode:
+                raise RuntimeError((result.stderr or result.stdout or
+                                    f"7-Zip exited {result.returncode}")[-3000:])
+        _assert_no_links(temporary)
+        os.replace(temporary, destination)
+    except BaseException:
+        shutil.rmtree(temporary, ignore_errors=True)
+        raise
     return destination
 
 
@@ -526,7 +619,15 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
     texture_paths = set()
     meshes_present = False
     for base, dirs, files in os.walk(package):
-        dirs[:] = [name for name in dirs if name.casefold() not in SKIP_DIRS]
+        kept = []
+        for name in dirs:
+            child = Path(base) / name
+            if _path_is_link(child):
+                raise ValueError(f"Staged package contains a symbolic link or junction: "
+                                 f"{child.relative_to(package)}")
+            if name.casefold() not in SKIP_DIRS:
+                kept.append(name)
+        dirs[:] = kept
         for name in files:
             suffix = Path(name).suffix.casefold()
             rel = (Path(base) / name).relative_to(package)
@@ -544,15 +645,29 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
             pass
     protect_this_package = meshes_present and bool(texture_paths)
     for base, dirs, files in os.walk(package):
-        dirs[:] = [name for name in dirs if name.casefold() not in SKIP_DIRS]
+        kept = []
+        for name in dirs:
+            child = Path(base) / name
+            if _path_is_link(child):
+                raise ValueError(f"Staged package contains a symbolic link or junction: "
+                                 f"{child.relative_to(package)}")
+            if name.casefold() not in SKIP_DIRS:
+                kept.append(name)
+        dirs[:] = kept
         for name in files:
             source = Path(base) / name
             rel = source.relative_to(package)
+            if _path_is_link(source):
+                raise ValueError(f"Staged package contains a symbolic link or junction: {rel}")
+            try:
+                source.resolve().relative_to(package.resolve())
+            except ValueError as exc:
+                raise ValueError(f"Staged package file escapes its package: {rel}") from exc
             if not rel.parts or name.startswith("."):
                 continue
             if source.suffix.casefold() in {".esp", ".esm", ".bsa"}:
                 rel = Path(name)
-            target = data_dir / rel
+            target = _safe_child(data_dir, rel, label="Deployment target")
             target.parent.mkdir(parents=True, exist_ok=True)
             rel_key = str(rel).replace("\\", "/").casefold()
             is_texture = source.suffix.casefold() in {".dds", ".tga", ".bmp", ".png", ".jpg", ".jpeg"}
@@ -818,81 +933,161 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
     kept, removed, restored, pending, tidy_packages = [], 0, 0, [], []
     ini_path = data_dir.parent / "Morrowind.ini"
     catalog_path = manager / "game_catalog.sqlite3"
+    state_path = _deployment_state_path(manager)
     touched_plugins = set()
     touched_archives = set()
-    for deployment in reversed(state["deployments"]):
-        if deployment.get("id") not in deployment_ids:
-            kept.append(deployment)
-            continue
-        operations_pending = []
-        for operation in reversed(deployment.get("operations", [])):
-            source = Path(operation.get("source", ""))
-            target = Path(operation.get("target", ""))
-            backup = Path(operation["backup"]) if operation.get("backup") else None
-            package = Path(deployment.get("staging_package", ""))
-            if not target.is_absolute() or not target.is_relative_to(data_dir):
-                raise ValueError(f"Deployment state contains an unsafe target path: {target}")
-            if not source.is_absolute() or not source.is_relative_to(package):
-                raise ValueError(f"Deployment state contains an unsafe source path: {source}")
-            source_matches = False
-            if source.is_file() and target.is_file():
-                try:
-                    source_matches = os.path.samefile(source, target)
-                except OSError:
-                    pass
-            if not source_matches and target.is_file() and operation.get("sha256"):
-                try:
-                    source_matches = (target.stat().st_size == int(operation.get("size", -1))
-                                      and _sha256_file(target) == operation["sha256"])
-                except OSError:
-                    pass
-            if source_matches:
-                target.unlink()
-                removed += 1
-            elif target.exists():
-                operations_pending.append(operation)
+    recoveries = []
+    original_ini = ini_path.read_bytes() if ini_path.is_file() else None
+    original_state = state_path.read_bytes() if state_path.is_file() else None
+    catalog_backup = None
+    if catalog_path.is_file():
+        catalog_backup = manager / f".{catalog_path.name}.{uuid.uuid4().hex}.rollback"
+        with sqlite3.connect(catalog_path) as source, sqlite3.connect(catalog_backup) as destination:
+            source.backup(destination)
+
+    try:
+        for deployment in reversed(state["deployments"]):
+            if deployment.get("id") not in deployment_ids:
+                kept.append(deployment)
                 continue
-            if backup and backup.is_file() and not target.exists():
-                if not backup.is_relative_to(package):
-                    raise ValueError(f"Deployment state contains an unsafe backup path: {backup}")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(backup, target)
-                restored += 1
-        if operations_pending:
-            pending.append({**deployment, "operations": list(reversed(operations_pending))})
-            continue
-        touched_plugins.update(deployment.get("plugins", []))
-        touched_archives.update(deployment.get("archives", []))
-        if deployment.get("staging_package"):
-            tidy_packages.append(deployment["staging_package"])
-        unregister_archives(ini_path, deployment.get("registered_archives", []))
-        if catalog_path.is_file():
+            package = Path(deployment.get("staging_package", "")).resolve()
+            operations_pending = []
+            planned = []
+            for operation in reversed(deployment.get("operations", [])):
+                source_raw = Path(operation.get("source", ""))
+                target_raw = Path(operation.get("target", ""))
+                backup_raw = Path(operation["backup"]) if operation.get("backup") else None
+                if not target_raw.is_absolute():
+                    raise ValueError(f"Deployment state contains a non-absolute target path: {target_raw}")
+                try:
+                    target_rel = target_raw.relative_to(data_dir)
+                except ValueError as exc:
+                    raise ValueError(f"Deployment state contains an unsafe target path: {target_raw}") from exc
+                target = _safe_child(data_dir, target_rel, label="Deployment removal target")
+                if not source_raw.is_absolute():
+                    raise ValueError(f"Deployment state contains a non-absolute source path: {source_raw}")
+                try:
+                    source_rel = source_raw.relative_to(package)
+                except ValueError as exc:
+                    raise ValueError(f"Deployment state contains an unsafe source path: {source_raw}") from exc
+                source = _safe_child(package, source_rel, label="Deployment source")
+                backup = None
+                if backup_raw:
+                    if not backup_raw.is_absolute():
+                        raise ValueError(f"Deployment state contains a non-absolute backup path: {backup_raw}")
+                    try:
+                        backup_rel = backup_raw.relative_to(package)
+                    except ValueError as exc:
+                        raise ValueError(f"Deployment state contains an unsafe backup path: {backup_raw}") from exc
+                    backup = _safe_child(package, backup_rel, label="Deployment backup")
+                source_matches = False
+                if source.is_file() and target.is_file():
+                    try:
+                        source_matches = os.path.samefile(source, target)
+                    except OSError:
+                        pass
+                if not source_matches and target.is_file() and operation.get("sha256"):
+                    try:
+                        source_matches = (target.stat().st_size == int(operation.get("size", -1))
+                                          and _sha256_file(target) == operation["sha256"])
+                    except (OSError, ValueError):
+                        pass
+                if not source_matches and target.exists():
+                    operations_pending.append(operation)
+                else:
+                    planned.append((target, backup, source_matches))
+            for target, backup, source_matches in planned:
+                recovery = None
+                if source_matches:
+                    recovery = target.with_name(f".{target.name}.{uuid.uuid4().hex}.mwmanager-remove")
+                    os.replace(target, recovery)
+                    recoveries.append((recovery, target, backup))
+                    removed += 1
+                if backup and backup.is_file() and not target.exists():
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(backup, target)
+                    restored += 1
+                    if recovery is None:
+                        recoveries.append((None, target, backup))
+            if operations_pending:
+                pending.append({**deployment, "operations": list(reversed(operations_pending))})
+                continue
+            touched_plugins.update(deployment.get("plugins", []))
+            touched_archives.update(deployment.get("archives", []))
+            if deployment.get("staging_package"):
+                tidy_packages.append(deployment["staging_package"])
+            unregister_archives(ini_path, deployment.get("registered_archives", []))
+            if catalog_path.is_file():
+                with sqlite3.connect(catalog_path) as db:
+                    for plugin in deployment.get("plugins", []):
+                        db.execute("DELETE FROM esm_record WHERE lower(source_file)=lower(?)", (plugin,))
+                    for archive in deployment.get("archives", []):
+                        db.execute("DELETE FROM bsa_asset WHERE lower(archive_file)=lower(?)", (archive,))
+                    db.commit()
+        restored_plugins = [plugin for plugin in touched_plugins if (data_dir / plugin).is_file()]
+        if touched_plugins and catalog_path.is_file():
+            absent_plugins = [plugin for plugin in touched_plugins if not (data_dir / plugin).is_file()]
             with sqlite3.connect(catalog_path) as db:
-                for plugin in deployment.get("plugins", []):
+                for plugin in absent_plugins:
                     db.execute("DELETE FROM esm_record WHERE lower(source_file)=lower(?)", (plugin,))
-                for archive in deployment.get("archives", []):
+                db.commit()
+        restored_archives = [name for name in touched_archives if (data_dir / name).is_file()]
+        absent_archives = [name for name in touched_archives if not (data_dir / name).is_file()]
+        if catalog_path.is_file() and absent_archives:
+            with sqlite3.connect(catalog_path) as db:
+                for archive in absent_archives:
                     db.execute("DELETE FROM bsa_asset WHERE lower(archive_file)=lower(?)", (archive,))
                 db.commit()
-    restored_plugins = [plugin for plugin in touched_plugins if (data_dir / plugin).is_file()]
-    if touched_plugins and catalog_path.is_file():
-        absent_plugins = [plugin for plugin in touched_plugins if not (data_dir / plugin).is_file()]
-        with sqlite3.connect(catalog_path) as db:
-            for plugin in absent_plugins:
-                db.execute("DELETE FROM esm_record WHERE lower(source_file)=lower(?)", (plugin,))
-            db.commit()
-    restored_archives = [name for name in touched_archives if (data_dir / name).is_file()]
-    absent_archives = [name for name in touched_archives if not (data_dir / name).is_file()]
-    if catalog_path.is_file() and absent_archives:
-        with sqlite3.connect(catalog_path) as db:
-            for archive in absent_archives:
-                db.execute("DELETE FROM bsa_asset WHERE lower(archive_file)=lower(?)", (archive,))
-            db.commit()
-    if catalog_path.is_file() and (restored_plugins or restored_archives):
-        index_deployment(manager, data_dir, restored_plugins, [data_dir / name for name in restored_archives])
-    remaining_ids = {entry.get("id") for entry in kept + pending}
-    state["deployments"] = [entry for entry in state["deployments"]
-                            if entry.get("id") in remaining_ids]
-    _write_deployment_state(manager, state)
+        if catalog_path.is_file() and (restored_plugins or restored_archives):
+            index_deployment(manager, data_dir, restored_plugins,
+                             [data_dir / name for name in restored_archives])
+        pending_by_id = {entry.get("id"): entry for entry in pending}
+        remaining_ids = {entry.get("id") for entry in kept + pending}
+        state["deployments"] = [
+            pending_by_id.get(entry.get("id"), entry)
+            for entry in state["deployments"] if entry.get("id") in remaining_ids
+        ]
+        _write_deployment_state(manager, state)
+    except BaseException:
+        rollback_errors = []
+        for recovery, target, backup in reversed(recoveries):
+            try:
+                if target.exists() and backup and not backup.exists():
+                    backup.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(target, backup)
+                if recovery and recovery.exists():
+                    os.replace(recovery, target)
+            except OSError as exc:
+                rollback_errors.append(str(exc))
+        try:
+            if original_ini is None:
+                ini_path.unlink(missing_ok=True)
+            else:
+                ini_path.write_bytes(original_ini)
+        except OSError as exc:
+            rollback_errors.append(str(exc))
+        try:
+            if catalog_backup and catalog_backup.is_file():
+                os.replace(catalog_backup, catalog_path)
+        except OSError as exc:
+            rollback_errors.append(str(exc))
+        try:
+            if original_state is None:
+                state_path.unlink(missing_ok=True)
+            else:
+                state_path.write_bytes(original_state)
+        except OSError as exc:
+            rollback_errors.append(str(exc))
+        if rollback_errors:
+            raise RuntimeError("Deployment removal failed and rollback was incomplete: "
+                               + "; ".join(rollback_errors)) from None
+        raise
+    finally:
+        if catalog_backup:
+            catalog_backup.unlink(missing_ok=True)
+    for recovery, _target, _backup in recoveries:
+        if recovery:
+            recovery.unlink(missing_ok=True)
     return {"removed": removed, "restored": restored,
             "pending": sum(len(item["operations"]) for item in pending),
             "tidy_packages": sorted(set(tidy_packages), key=str.casefold)}

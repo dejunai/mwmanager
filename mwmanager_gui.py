@@ -148,26 +148,47 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
         process = _popen(base + extra, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                    stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                                    bufsize=1, env=env, **(quiet or {}))
+        output = queue.Queue()
+
+        def read_output():
+            try:
+                for line in process.stdout:
+                    output.put(line)
+            finally:
+                output.put(None)
+
+        threading.Thread(target=read_output, name=f"MWManager {label} output", daemon=True).start()
         recent, mods, plan = [], None, (None, None)
-        for line in process.stdout:
-            clean = " ".join(line.strip().split())
-            if not clean:
-                continue
-            recent.append(clean)
-            del recent[:-80]
-            match = re.search(r"vortex_tidy plan,.*:\s*(\d+)\s+mod\(s\)", clean, re.I)
-            if match:
-                mods = int(match.group(1))
-            if clean.startswith("MWMANAGER-PLAN:"):
-                state, _, path = clean.split(":", 1)[1].strip().partition(" ")
-                plan = (state, Path(path) if path else None)
-            elif clean.startswith("MWMANAGER-PROGRESS:"):
-                progress(f"{label}: " + clean.split(":", 1)[1].strip())
-            else:
-                progress(_display_line(line))
-                if on_line:
-                    on_line(clean)
-        code = process.wait()
+        try:
+            while True:
+                checkpoint(progress)
+                try:
+                    line = output.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                if line is None:
+                    break
+                clean = " ".join(line.strip().split())
+                if not clean:
+                    continue
+                recent.append(clean)
+                del recent[:-80]
+                match = re.search(r"vortex_tidy plan,.*:\s*(\d+)\s+mod\(s\)", clean, re.I)
+                if match:
+                    mods = int(match.group(1))
+                if clean.startswith("MWMANAGER-PLAN:"):
+                    state, _, path = clean.split(":", 1)[1].strip().partition(" ")
+                    plan = (state, Path(path) if path else None)
+                elif clean.startswith("MWMANAGER-PROGRESS:"):
+                    progress(f"{label}: " + clean.split(":", 1)[1].strip())
+                else:
+                    progress(_display_line(line))
+                    if on_line:
+                        on_line(clean)
+            code = process.wait()
+        except BaseException:
+            managed_processes.terminate(process)
+            raise
         if log:
             log(f"{'DONE' if code == 0 else 'FAIL'} {label}: {what}: exit code {code}")
         return code, recent, mods, plan
@@ -3904,7 +3925,9 @@ class ManagerGUI(tk.Tk):
             response = {}
             answered = threading.Event()
             events.put(("question", question_title, question_text, response, answered))
-            answered.wait()
+            while not answered.wait(0.2):
+                control.check()
+            control.check()
             return bool(response.get("answer"))
 
         def ask_choice(question_title, question_text, choices, cancel_value=None):
@@ -3912,28 +3935,36 @@ class ManagerGUI(tk.Tk):
             response = {"choice": cancel_value}
             answered = threading.Event()
             events.put(("choice", question_title, question_text, choices, response, answered))
-            answered.wait()
+            while not answered.wait(0.2):
+                control.check()
+            control.check()
             return response.get("choice")
 
         def launch_vortex():
             response = {"opened": False}
             answered = threading.Event()
             events.put(("launch_vortex", response, answered))
-            answered.wait()
+            while not answered.wait(0.2):
+                control.check()
+            control.check()
             return bool(response.get("opened"))
 
         def wait_for_vortex_purge():
             response = {"choice": "cancel"}
             answered = threading.Event()
             events.put(("wait_vortex_purge", response, answered))
-            answered.wait()
+            while not answered.wait(0.2):
+                control.check()
+            control.check()
             return response.get("choice")
 
         def run_program_with_reference(path, reference_title, reference_text):
             response = {"returncode": None, "error": None}
             answered = threading.Event()
             events.put(("run_program", str(path), reference_title, reference_text, response, answered))
-            answered.wait()
+            while not answered.wait(0.2):
+                control.check()
+            control.check()
             return response["returncode"], response["error"]
 
         report.ask_yes_no = ask_yes_no
