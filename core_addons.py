@@ -85,7 +85,7 @@ def _members(path: Path, seven_zip: str | None) -> tuple[list[str], str | None]:
     if not seven_zip:
         return [], "7-Zip is required to inspect this archive format"
     try:
-        result = subprocess.run([seven_zip, "l", "-slt", "-ba", str(path)],
+        result = subprocess.run([seven_zip, "l", "-slt", "-ba", "--", str(path)],
                                 capture_output=True, text=True, errors="replace", timeout=180,
                                 **_quiet_subprocess_options())
         if result.returncode:
@@ -142,7 +142,7 @@ def _archive_esm_masters(archive: Path, plugin_name: str, manager_dir: Path,
             seven_zip = _seven_zip(manager_dir)
             if not seven_zip:
                 return [], "7-Zip is required to inspect ESM masters in 7z/RAR archives"
-            result = subprocess.run([seven_zip, "x", "-so", str(archive), member],
+            result = subprocess.run([seven_zip, "x", "-so", "--", str(archive), member],
                                     capture_output=True, timeout=180, **_quiet_subprocess_options())
             if result.returncode:
                 detail = result.stderr.decode("utf-8", "replace")[:500]
@@ -1316,7 +1316,7 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
                 if not seven_zip:
                     raise ValueError("7-Zip is required to extract this archive.")
                 import managed_processes
-                result = managed_processes.run([seven_zip, "x", str(archive), f"-o{destination}", "-y"],
+                result = managed_processes.run([seven_zip, "x", f"-o{destination}", "-y", "--", str(archive)],
                                         progress=progress_callback, text=True, errors="replace", timeout=7200,
                                         **_quiet_subprocess_options())
                 if result.returncode:

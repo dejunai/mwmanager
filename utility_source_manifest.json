@@ -40,9 +40,9 @@
       "snapshot": "tools\\steam-upstream\\vortex_tidy.py",
       "working": "vortex_tidy.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14); MWManager behaviour in mwmanager_tidy_ext.py, mwmanager_install.py",
-      "source_sha256": "e7122d5e6e9250f145f7c1d8e9eae2675b66363fe45762e15f2cbf2f54000c54",
-      "snapshot_sha256": "e7122d5e6e9250f145f7c1d8e9eae2675b66363fe45762e15f2cbf2f54000c54",
-      "working_sha256": "e7122d5e6e9250f145f7c1d8e9eae2675b66363fe45762e15f2cbf2f54000c54",
+      "source_sha256": "816cda7d89c4987155c79656f280bc6591537ca02ac13e68f80e4e06f48380b2",
+      "snapshot_sha256": "816cda7d89c4987155c79656f280bc6591537ca02ac13e68f80e4e06f48380b2",
+      "working_sha256": "816cda7d89c4987155c79656f280bc6591537ca02ac13e68f80e4e06f48380b2",
       "working_matches_upstream": true,
       "extension": [
         "mwmanager_tidy_ext.py",
@@ -121,9 +121,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_mastercheck.py",
       "working": "mwdialog_mastercheck.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "bc123d71c8d3e56e761dacf9486e3eee93a94a1865c9f031fc65b2a32295f004",
-      "snapshot_sha256": "bc123d71c8d3e56e761dacf9486e3eee93a94a1865c9f031fc65b2a32295f004",
-      "working_sha256": "bc123d71c8d3e56e761dacf9486e3eee93a94a1865c9f031fc65b2a32295f004",
+      "source_sha256": "c46f95a59f7b5c1bff28a81743817a45f9f5713e04a46ac145e8b6494dadc1bc",
+      "snapshot_sha256": "c46f95a59f7b5c1bff28a81743817a45f9f5713e04a46ac145e8b6494dadc1bc",
+      "working_sha256": "c46f95a59f7b5c1bff28a81743817a45f9f5713e04a46ac145e8b6494dadc1bc",
       "working_matches_upstream": true
     },
     {

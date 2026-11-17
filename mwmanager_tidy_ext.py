@@ -1513,9 +1513,11 @@ def apply(moves, staging, progress=None, head_extra=None):
                     if progress is not None:
                         progress.append(i)
                     continue
-                os.rename(src, dst)          # staging stays on one drive, so moves are cheap
+                # journaled (on disk) before the move: a crash between the two never leaves a move --undo can't see
                 j.write(json.dumps({"src": src, "dst": dst, "plugin": _path_plugin(src, staging)}) + "\n")
                 j.flush()
+                os.fsync(j.fileno())
+                os.rename(src, dst)          # staging stays on one drive, so moves are cheap
                 if PACKING_MARK in why:
                     packing.setdefault(_path_plugin(src, staging), []).append((src, dst, why))
                 done += 1
@@ -1693,6 +1695,8 @@ def undo(staging=STAGING, plugin=None):
                     os.makedirs(os.path.dirname(op["src"]), exist_ok=True)
                     os.rename(op["dst"], op["src"])
                     back += 1
+                elif os.path.exists(op["src"]):
+                    back += 1                         # journaled, but the move itself never happened
                 else:
                     print(f"  not put back (no longer there): {op['dst']}", file=sys.stderr)
                     failed.add(index)
