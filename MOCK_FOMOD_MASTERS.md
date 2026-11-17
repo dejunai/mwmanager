@@ -89,12 +89,20 @@ must not block the batch: the mod is found, staged and deployed first, then the 
    once in `outputs\mwmanager_archive_plugins.json` (by size and mtime; 1,532 archives in 97 s, then instant), and
    a needed plugin resolves to the archive holding it (its own mod preferred over a patch bundle); not there:
    `search_on_nexus` opens the embedded browser on a Nexus search that downloads into the archive folder.
-   Still to do: wiring it into the batch. Originally: first the archive downloads folder (archive listings already exist in the master
+   Wired into the plugin batch (`plan_needed_archives` in mwmanager_gui): before a package joins the batch, the
+   archives its held options need are inserted right after it, followed by the package again; they stage first
+   (staging one makes the option step install the held option into the package), and the package joins the
+   batch after them, so its option files overwrite theirs. A needed major master is left to the Major masters
+   install (said in the status); a need not in the downloads opens a Nexus search and the batch goes on.
+   Originally: first the archive downloads folder (archive listings already exist in the master
    check); for a user who doesn't have it, the embedded Nexus browser opens on a search for it, and the
    download is tidied and staged like any other mod. Not found: the batch goes on; the option stays waiting,
    with a Never button.
 4. **Finish held options** - once the needed mod is deployed, the option step runs again for that package
    with the recorded choices preselected (the existing "newly relevant targets" reopen), then deploys.
-5. **Clear status in the GUI** - one list for the batch, one plain line per package ("OAAB_Data - core
+5. **Clear status in the GUI** - partly: each step is a plain line in the job window ("OAAB_Data: option
+   'Epic Plants' needs Epic Plants.esp; installing Epic Plants-1-0.zip first", "... isn't in your downloads;
+   opening a Nexus search", "installing option 'Epic Plants' now that what it needs is installed"). A separate
+   per-package list is not built yet. Originally: one list for the batch, one plain line per package ("OAAB_Data - core
    installed; 3 options waiting", "Epic Plants - needed by OAAB_Data's 'Epic Plants' option; found in your
    downloads; staging"), and one current step at the top.

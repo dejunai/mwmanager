@@ -54,5 +54,36 @@ class NexusFallbackTests(unittest.TestCase):
         self.assertTrue(opened.call_args.args[0].startswith("https://www.nexusmods.com/"))
 
 
+class BatchPlanTests(unittest.TestCase):
+    def test_held_needs_become_batch_items_ahead_of_the_package(self):
+        import mwmanager_gui
+        import mock_fomod
+        with tempfile.TemporaryDirectory() as tmp:
+            out, dl = Path(tmp) / "outputs", Path(tmp) / "downloads"
+            out.mkdir()
+            dl.mkdir()
+            make_zip(dl / "Epic Plants-1-0.zip", ["Epic Plants.esp"])
+            (out / mock_fomod.PENDING_FILE).write_text(json.dumps({"OAAB_Data": {
+                "01 Epic": {"label": "Epic Plants", "needs": ["Epic Plants.esp"], "status": "waiting"},
+                "02 Ears": {"label": "Knife Ears", "needs": ["Knife Ears.esp"], "status": "waiting"},
+                "03 TD": {"label": "TD Patch", "needs": ["Tamriel_Data.esm"], "status": "waiting"},
+                "04 Skip": {"label": "Unchosen", "needs": ["Other.esp"], "status": "not chosen"}}}), encoding="utf-8")
+            lines = []
+            with mock.patch.object(needed_mods, "search_on_nexus") as searched:
+                items = mwmanager_gui.plan_needed_archives("OAAB_Data", out, dl, Path(tmp), set(),
+                                                           ["Tamriel_Data.esm"], lines.append)
+            self.assertEqual([(Path(i["archive"]).name, i["plugins"], i["needed_by"]) for i in items],
+                             [("Epic Plants-1-0.zip", ["Epic Plants.esp"], "OAAB_Data")])
+            self.assertEqual([c.args[0] for c in searched.call_args_list], ["Knife Ears.esp"])
+            text = " ".join(lines)
+            self.assertIn("needs Epic Plants.esp; installing Epic Plants-1-0.zip first", text)
+            self.assertIn("needs the major master Tamriel_Data.esm; install it from Major masters", text)
+            self.assertNotIn("Other.esp", text)                                  # not chosen: not fetched
+            queued = {str((dl / "Epic Plants-1-0.zip").resolve()).casefold()}
+            with mock.patch.object(needed_mods, "search_on_nexus"):
+                self.assertEqual(mwmanager_gui.plan_needed_archives("OAAB_Data", out, dl, Path(tmp), queued,
+                                                                    ["Tamriel_Data.esm"], lines.append), [])
+
+
 if __name__ == "__main__":
     unittest.main()

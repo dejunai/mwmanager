@@ -80,6 +80,50 @@ def _atomic_write(path: Path, data: bytes) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def plan_needed_archives(package_name: str, outputs: Path, downloads, manager_dir: Path, queued: set[str],
+                         major_masters=(), progress=print) -> list[dict]:
+    """Batch step 3: batch items for the download archives that hold what this package's held options need
+    (the "waiting" entries of mock_fomod's pending file), not already queued. A need that isn't in the
+    downloads opens a Nexus search; one that is a major master is left to the major-master install."""
+    import mock_fomod
+    import needed_mods
+    try:
+        pending = json.loads((Path(outputs) / mock_fomod.PENDING_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    held = {k: v for k, v in (pending.get(package_name) or {}).items()
+            if isinstance(v, dict) and v.get("status") == "waiting"}
+    needs = sorted({n for v in held.values() for n in v.get("needs", [])})
+    if not needs or not downloads:
+        return []
+    index_path = Path(outputs) / "mwmanager_archive_plugins.json"
+    found = needed_mods.find_needed(needs, Path(downloads), index_path, Path(manager_dir), progress)
+    index = needed_mods.archive_index(Path(downloads), index_path, None)
+    majors = {m.casefold() for m in major_masters}
+    items = []
+    for need in needs:
+        users = ", ".join(f"'{v['label']}'" for v in held.values() if need in v.get("needs", []))
+        archive = found.get(need)
+        if need.casefold() in majors:
+            progress(f"{package_name}: option {users} needs the major master {need}; install it from Major masters")
+            continue
+        if archive is None:
+            progress(f"{package_name}: option {users} needs {need}, which isn't in your downloads; "
+                     f"opening a Nexus search for it")
+            try:
+                needed_mods.search_on_nexus(need, Path(downloads))
+            except Exception as exc:              # the batch goes on; the option stays held
+                progress(f"  (could not open the Nexus search: {exc})")
+            continue
+        key = str(Path(archive).resolve()).casefold()
+        if key in queued:
+            continue
+        queued.add(key)
+        progress(f"{package_name}: option {users} needs {need}; installing {Path(archive).name} first")
+        items.append({"archive": str(archive), "plugins": index.get(Path(archive).name, []), "needed_by": package_name})
+    return items
+
+
 def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *, only: str | None = None,
                    reopen: bool = False, env=None, quiet=None, on_line=None, log=None) -> int | None:
     """Run GUI Tidy options, build its plan, then apply it without prompting.
@@ -2269,6 +2313,17 @@ class ManagerGUI(tk.Tk):
                         mark_ready(item, package, install_plugins)
                         log_install_phase(f"READY {archive.name}: {len(install_plugins)} plugin(s), "
                                           f"{eligible} BSA-compatible assets")
+                if not item.get("needs_checked"):
+                    # options held for a mod that isn't installed: that mod's archive goes first, then this
+                    # package again (already staged; its held options go in once the mod is staged)
+                    item["needs_checked"] = True
+                    queued = {str(Path(i["archive"]).resolve()).casefold() for i in items}
+                    first = plan_needed_archives(package.name, APP_DIR / "outputs",
+                                                 self.settings.get("archive_downloads_dir"), APP_DIR, queued,
+                                                 self.major_masters, progress)
+                    if first:
+                        items[index:index] = first + [item]
+                        continue
                 install_label = (Path(install_plugins[0]).stem if install_plugins else archive.stem)
                 pending.append((package, install_label))
                 pending_items[str(package)] = item
