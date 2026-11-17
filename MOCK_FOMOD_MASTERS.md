@@ -85,7 +85,11 @@ must not block the batch: the mod is found, staged and deployed first, then the 
    with step 3: putting the needed mod ahead in the batch. Originally: its core and the options whose needs are met deploy now; waiting
    options are held, and each needed mod goes into the batch ahead of the option that needs it (so the
    option's files overwrite it).
-3. **Find the needed mod** - first the archive downloads folder (archive listings already exist in the master
+3. **Find the needed mod** - lookup done (`needed_mods.py`): every download archive's plugin names are indexed
+   once in `outputs\mwmanager_archive_plugins.json` (by size and mtime; 1,532 archives in 97 s, then instant), and
+   a needed plugin resolves to the archive holding it (its own mod preferred over a patch bundle); not there:
+   `search_on_nexus` opens the embedded browser on a Nexus search that downloads into the archive folder.
+   Still to do: wiring it into the batch. Originally: first the archive downloads folder (archive listings already exist in the master
    check); for a user who doesn't have it, the embedded Nexus browser opens on a search for it, and the
    download is tidied and staged like any other mod. Not found: the batch goes on; the option stays waiting,
    with a Never button.
