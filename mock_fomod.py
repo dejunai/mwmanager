@@ -2276,6 +2276,13 @@ def record_pending_options(output_dir: Path, mod_dir: Path, records: list[dict],
     return waiting
 
 
+def held_options(records: list[dict], chosen: set[str], installed: set[str]) -> set[str]:
+    """Chosen options held back: one of their plugins needs a master that is neither installed nor staged."""
+    have = {name.casefold() for name in installed}
+    return {item["key"] for item in records if item["key"] in chosen
+            and any(m.casefold() not in have for m in (item.get("missing_masters") or []))}
+
+
 def ask_see_options(package: str, arrived: list[str], labels: list[str]) -> bool:
     """A mod that an option the user didn't choose works with has just been installed: offer to show it."""
     text = (f"You just installed {', '.join(arrived)}.\n\n{package} has an optional component you didn't choose "
@@ -2363,34 +2370,46 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         records = (_discover_fomod(mod_dir, installed) if _has_fomod(mod_dir)
                    else _discover(mod_dir, installed))
         records.extend(_discover_plugin_choices(mod_dir, installed, _represented_option_sources(records)))
+        held = set(entry.get("held", []))
         pending = [r for r in records if set(r["targets"]) & newly_relevant and r["key"] not in selected]
+        ready = {r["key"] for r in pending if r["key"] in held} - held_options(records, held, installed)
         if pending:
-            print(f"\nCompatibility option(s) may now apply to {entry.get('plugin')}: "
-                  f"{', '.join(sorted(newly_relevant))}")
-            real = {p.name.casefold(): p.name for p in data_files.iterdir()
-                    if p.suffix.casefold() in PLUGIN_EXTS} if data_files.is_dir() else {}
-            if not ask_see_options(entry.get("plugin") or mod_dir.name,
-                                   sorted(real.get(n, n) for n in newly_relevant),
-                                   [r.get("label") or r["key"] for r in pending]):
-                entry["reviewed_targets"] = sorted(reviewed | newly_relevant)   # No: not asked again for these
-                _save_journal(journal_path, state)
-                compatibility_reviewed.add(key)
-                continue
             identity = _selection_identity(mod_dir)
             answer = _load_answer_file(output_dir, identity)
-            answered = set(answer.get("answered_groups", [])) if answer else _legacy_answer_groups(records)
-            chosen = _show_selector(mod_dir.name, records, selected, newly_relevant, answered)
+            if ready:
+                # chosen before, held for a mod that is here now: installed without asking again
+                chosen = selected | held
+                for r in pending:
+                    if r["key"] in ready:
+                        print(f"  {entry.get('plugin') or mod_dir.name}: installing option '{r.get('label') or r['key']}'"
+                              f" now that what it needs is installed")
+            else:
+                print(f"\nCompatibility option(s) may now apply to {entry.get('plugin')}: "
+                      f"{', '.join(sorted(newly_relevant))}")
+                real = {p.name.casefold(): p.name for p in data_files.iterdir()
+                        if p.suffix.casefold() in PLUGIN_EXTS} if data_files.is_dir() else {}
+                if not ask_see_options(entry.get("plugin") or mod_dir.name,
+                                       sorted(real.get(n, n) for n in newly_relevant),
+                                       [r.get("label") or r["key"] for r in pending if r["key"] not in held]):
+                    entry["reviewed_targets"] = sorted(reviewed | newly_relevant)   # No: not asked again
+                    _save_journal(journal_path, state)
+                    compatibility_reviewed.add(key)
+                    continue
+                answered = set(answer.get("answered_groups", [])) if answer else _legacy_answer_groups(records)
+                chosen = _show_selector(mod_dir.name, records, selected | held, newly_relevant, answered)
             if chosen is not None:
+                still = held_options(records, chosen, installed)
                 backup_root = _option_backup_root(output_dir, identity)
-                applied = _activate(mod_dir, entry.get("plugin", mod_dir.name), records, chosen,
+                applied = _activate(mod_dir, entry.get("plugin", mod_dir.name), records, chosen - still,
                                     entry.get("activation", {}), backup_root)
-                _apply_plugin_choices(mod_dir, records, chosen)
+                _apply_plugin_choices(mod_dir, records, chosen - still)
                 entry["activation"] = applied
                 entry["selected"] = applied["selected"]
+                entry["held"] = sorted(still)
                 entry["reviewed_targets"] = sorted(reviewed | newly_relevant)
                 saved_selections[identity] = applied["selected"]
-                _save_answer_file(output_dir, identity, set(applied["selected"]), records, answer)
-                record_pending_options(output_dir, mod_dir, records, set(applied["selected"]), installed)
+                _save_answer_file(output_dir, identity, set(applied["selected"]) | still, records, answer)
+                record_pending_options(output_dir, mod_dir, records, set(applied["selected"]) | still, installed)
                 changed_mods.add(mod_dir.name)
                 _save_journal(journal_path, state)
                 compatibility_reviewed.add(key)
@@ -2457,19 +2476,21 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         prior_activation = (entry.get("activation", {}) if reopen_existing
                             and entry.get("selection_identity") == selection_identity else {})
         backup_root = _option_backup_root(output_dir, selection_identity)
-        applied = _activate(mod_dir, plugin, records, chosen, prior_activation, backup_root)
-        changed_plugins = _apply_plugin_choices(mod_dir, records, chosen)
+        held = held_options(records, set(chosen), installed)      # chosen, but what it needs isn't here yet
+        applied = _activate(mod_dir, plugin, records, set(chosen) - held, prior_activation, backup_root)
+        changed_plugins = _apply_plugin_choices(mod_dir, records, set(chosen) - held)
         targets = sorted({target for item in records for target in item["targets"]})
         reviewed = set(entry.get("reviewed_targets", []))
         # Anything already installed was considered in the selector's defaults.
         reviewed.update(set(targets) & installed)
         mods[key] = {"mod_dir": str(mod_dir.resolve()), "plugin": plugin, "targets": targets,
                      "selection_identity": selection_identity,
-                     "selected": applied["selected"], "activation": applied,
-                     "reviewed_targets": sorted(reviewed)}
+                     "selected": applied["selected"], "activation": applied, "held": sorted(held),
+                     "reviewed_targets": sorted(reviewed - {m.casefold() for r in records if r["key"] in held
+                                                            for m in (r.get("missing_masters") or [])})}
         saved_selections[selection_identity] = applied["selected"]
-        _save_answer_file(output_dir, selection_identity, set(applied["selected"]), records, answer)
-        record_pending_options(output_dir, mod_dir, records, set(applied["selected"]), installed)
+        _save_answer_file(output_dir, selection_identity, set(applied["selected"]) | held, records, answer)
+        record_pending_options(output_dir, mod_dir, records, set(applied["selected"]) | held, installed)
         changed_mods.add(mod_dir.name)
         _save_journal(journal_path, state)
         print(f"  {mod_dir.name}: selected {len(applied['selected'])} option(s); "

@@ -79,7 +79,10 @@ must not block the batch: the mod is found, staged and deployed first, then the 
    is installed later, the user is asked "You just installed X. <package> has an optional component you
    didn't choose before that works with it: ... See it now?" - Yes opens the option window, No marks it
    reviewed (not asked again). Name-only matches (texture/mesh options) are not recorded yet.
-2. **Split each package in the batch** - its core and the options whose needs are met deploy now; waiting
+2. **Split each package in the batch** - done for holding: a chosen option whose needed master isn't installed
+   is held (not activated; kept as "held" in the journal and as chosen in the answer file); when that master
+   arrives, held options go in without asking (only unchosen ones get the "See it now?" question). Still to do
+   with step 3: putting the needed mod ahead in the batch. Originally: its core and the options whose needs are met deploy now; waiting
    options are held, and each needed mod goes into the batch ahead of the option that needs it (so the
    option's files overwrite it).
 3. **Find the needed mod** - first the archive downloads folder (archive listings already exist in the master

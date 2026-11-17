@@ -92,5 +92,57 @@ class ArrivedModOfferTests(unittest.TestCase):
         self.assertTrue(shown)
 
 
+class HeldOptionTests(unittest.TestCase):
+    def setup(self, tmp, journal=None, data_plugins=()):
+        root = Path(tmp)
+        package = root / "stage" / "OAAB_Data"
+        put(package / "Extras/01 Epic Plants/Textures/a.dds", b"optional")
+        data = root / "game" / "Data Files"
+        data.mkdir(parents=True)
+        for name in data_plugins:
+            put(data / name)
+        out = root / "outputs"
+        out.mkdir()
+        if journal is not None:
+            journal["mods"]["oaab"]["mod_dir"] = str(package)
+            (out / "mwmanager_compatibility_journal.json").write_text(json.dumps(journal), encoding="utf-8")
+        record = {"key": "01 Epic Plants", "path": package / "Extras/01 Epic Plants", "label": "Epic Plants",
+                  "targets": ["epic plants.esp"], "number": 1, "missing_masters": ["Epic Plants.esp"]}
+        return package, data, out, record
+
+    def patches(self, record, ask=None):
+        return [mock.patch("nexus_updates.check_and_offer_update", return_value=False),
+                mock.patch.object(mock_fomod, "_has_fomod", return_value=False),
+                mock.patch.object(mock_fomod, "_discover", return_value=[record]),
+                mock.patch.object(mock_fomod, "_discover_plugin_choices", return_value=[]),
+                mock.patch.object(mock_fomod, "_show_selector", return_value={"01 Epic Plants"}),
+                mock.patch.object(mock_fomod, "ask_see_options", side_effect=ask or AssertionError("asked"))]
+
+    def test_a_chosen_option_whose_mod_is_missing_is_held_but_remembered(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            package, data, out, record = self.setup(tmp)
+            ps = self.patches(record)
+            with ps[0], ps[1], ps[2], ps[3], ps[4], ps[5],                     mock.patch.object(mock_fomod, "_activate", wraps=mock_fomod._activate) as act:
+                mock_fomod.process_staging(package.parent, data, out)
+            self.assertEqual(act.call_args.args[3], set())                 # nothing activated yet
+            journal = json.loads((out / "mwmanager_compatibility_journal.json").read_text(encoding="utf-8"))
+            entry = next(iter(journal["mods"].values()))
+            self.assertEqual(entry["held"], ["01 Epic Plants"])
+
+    def test_a_held_option_goes_in_without_asking_once_its_mod_is_installed(self):
+        journal = {"version": 1, "known_installed_plugins": [], "mods": {"oaab": {
+            "plugin": "OAAB_Data.esm", "targets": ["epic plants.esp"], "selected": [],
+            "held": ["01 Epic Plants"], "reviewed_targets": []}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            package, data, out, record = self.setup(tmp, journal, data_plugins=["Epic Plants.esp"])
+            record["missing_masters"] = []                                   # what the window sees now
+            ps = self.patches(record)
+            with ps[0], ps[1], ps[2], ps[3], ps[4], ps[5],                     mock.patch.object(mock_fomod, "_activate", wraps=mock_fomod._activate) as act:
+                mock_fomod.process_staging(package.parent, data, out, only=["nothing-else"])
+            self.assertEqual(act.call_args.args[3], {"01 Epic Plants"})
+            entry = json.loads((out / "mwmanager_compatibility_journal.json").read_text(encoding="utf-8"))["mods"]["oaab"]
+            self.assertEqual((entry["held"], entry["selected"]), ([], ["01 Epic Plants"]))
+
+
 if __name__ == "__main__":
     unittest.main()
