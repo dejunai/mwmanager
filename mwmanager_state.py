@@ -103,7 +103,8 @@ def module_state_names(manager_dir):
     own = lambda name: os.path.join(manager_dir, name)               # noqa: E731
     return {
         "mwdialog_mastercheck": {"CACHE_FILE": own("mwmanager_mastercheck_cache.json"),
-                                 "SIZES_RECORD": own("mwmanager_master_sizes.json")},
+                                 "SIZES_RECORD": own("mwmanager_master_sizes.json"),
+                                 "FACTS_FILE": own("mwmanager_mastercheck_facts.json")},
         "mwdialog_longpaths": {"RECORD": os.path.join(manager_dir, "outputs", "mwmanager_longpaths.json")},
         "mwdialog_assets": {"CACHE_DB": os.path.join(manager_dir, "outputs", "mwmanager_asset_cache.sqlite"),
                             "CACHE_FILE": os.path.join(manager_dir, "outputs", "mwmanager_asset_cache.json"),
