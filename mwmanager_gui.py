@@ -1631,6 +1631,7 @@ class ManagerGUI(tk.Tk):
         tree_tags(self.tree)
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._update_buttons())
         self.tree.bind("<Button-1>", self._click_active_checkbox)
+        self.tree.bind("<space>", self._toggle_active_key)
 
         buttons = ttk.Frame(left, style="Header.TFrame")
         buttons.pack(fill="x", pady=(pad["md"], 0))
@@ -2729,20 +2730,34 @@ class ManagerGUI(tk.Tk):
         name = self.tree.identify_row(event.y)
         if not name:
             return
-        core = name.casefold() in {n.casefold() for n in CORE}
-        merged = name.casefold() in {n.casefold() for n in self.merge_inputs}
-        is_major = name.casefold() in {n.casefold() for n in self.major_masters}
-        is_fixed = name.casefold() in LOCKED_PATCHES or name.casefold() == XE_SKY_PLUGIN.casefold()
-        installed = (Path(self.settings["game_dir"]) / "Data Files" / name).is_file()
-        if core or merged or is_major or is_fixed or not installed:
+        return self._toggle_active([name])
+
+    def _toggle_active_key(self, _event=None):
+        """Space: toggle the selected plugins, as clicking their checkboxes would."""
+        if getattr(self, "_active_job", None):
             return "break"
-        key = name.casefold()
-        if key in self.active_names:
-            self.active_names.discard(key)
-        else:
-            self.active_names.add(key)
+        return self._toggle_active(list(self.tree.selection()))
+
+    def _toggle_active(self, names):
+        toggled = []
+        for name in names:
+            core = name.casefold() in {n.casefold() for n in CORE}
+            merged = name.casefold() in {n.casefold() for n in self.merge_inputs}
+            is_major = name.casefold() in {n.casefold() for n in self.major_masters}
+            is_fixed = name.casefold() in LOCKED_PATCHES or name.casefold() == XE_SKY_PLUGIN.casefold()
+            installed = (Path(self.settings["game_dir"]) / "Data Files" / name).is_file()
+            if core or merged or is_major or is_fixed or not installed:
+                continue
+            key = name.casefold()
+            if key in self.active_names:
+                self.active_names.discard(key)
+            else:
+                self.active_names.add(key)
+            toggled.append(name)
+        if not toggled:
+            return "break"
         self.refresh()
-        self.tree.selection_set(name)
+        self.tree.selection_set(names)
         self.status.set("Plugin checkbox change is pending. Save load order to apply it.")
         return "break"
 
@@ -4645,8 +4660,11 @@ class ManagerGUI(tk.Tk):
                                      f"The BSA offer threshold must be an integer of at least {MIN_BSA_OFFER}.",
                                      parent=dialog)
                 return
-            if not (game / "Data Files").is_dir():
-                messagebox.showerror("Invalid game folder", "The selected folder must contain a Data Files folder.", parent=dialog)
+            import mwmanager_detect
+            if mwmanager_detect.valid_install(str(game)) is None:      # the same check as the first window
+                messagebox.showerror("Invalid game folder",
+                                     "The selected folder must contain Morrowind.exe and a Data Files folder.",
+                                     parent=dialog)
                 return
             if downloads_var.get().strip() and not downloads.is_dir():
                 if not messagebox.askyesno("Downloads folder not found", "Save this path anyway? It will be checked again when Archive Downloads are scanned.", parent=dialog):

@@ -13,9 +13,10 @@ manager-agnostic: pick a detected manager (Vortex now, read from Vortex's own se
 shown but not supported yet; more managers plug into `MOD_MANAGER_DETECTORS`) or "None / unmanaged" and
 browse to any folder you keep archives in. `mwmanager.ini` stores it as `archive_downloads_dir` (an older
 `downloads_dir` is still read) and the settings JSON stores the source as `archive_source`
-(`vortex`, `unmanaged`, ...; an older `uses_vortex` is still read). Approving opens the
-options window with those paths; preflight starts only when that window is saved. `File > Detected
-installs…` reopens the first window later. `python mwmanager_detect.py` prints the same detection.
+(`vortex`, `unmanaged`, ...; an older `uses_vortex` is still read). On first run, approving
+saves those paths and starts preflight right away. `File > Detected installs…` reopens the window later;
+approving it then opens the options window with the chosen paths, and nothing changes until that window
+is saved. `python mwmanager_detect.py` prints the same detection.
 
 Preflight performs these checks before offering any prerequisite installation:
 

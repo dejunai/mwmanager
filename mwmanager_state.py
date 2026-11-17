@@ -223,6 +223,8 @@ def read_load_order(args):
     if not os.path.isfile(ini):
         return None
     names = ini_game_files(ini)
+    if getattr(args, "dry_run", False):              # a dry run changes nothing: Morrowind.ini's list, not saved
+        return names
     write_load_order(game_dir, names, "made from Morrowind.ini")
     print(f"Created {LOAD_ORDER_FILE} from Morrowind.ini's [Game Files] ({len(names)} plugins). From now on this "
           f"file is the load order; Morrowind.ini only gets it when --play starts the game.", file=sys.stderr)
@@ -239,7 +241,7 @@ def write_load_order(game_dir, order, note=""):
     lines = [f"; {LOAD_ORDER_FILE}: manager-owned working load order, separate from Morrowind.ini.",
              f"; Last changed {time.strftime('%Y-%m-%d %H:%M')}" + (f" by {note}" if note else "") + ". One plugin per line.",
              ""] + list(order)
-    with open(path, "w", encoding="utf-8") as f:
+    with atomic_open(path, encoding="utf-8") as f:          # a crash mid-write never empties it
         f.write("\n".join(lines) + "\n")
     return os.path.basename(bak)
 

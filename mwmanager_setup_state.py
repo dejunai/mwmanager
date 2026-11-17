@@ -14,6 +14,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -81,7 +82,14 @@ def _write(path, state) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".tmp")
     temporary.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    for attempt in range(10):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:          # Windows: the file is briefly held (antivirus, indexer); try again
+            if attempt == 9:
+                raise
+            time.sleep(0.05 * (attempt + 1))
 
 
 def _check(step: str) -> None:

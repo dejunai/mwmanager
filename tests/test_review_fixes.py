@@ -67,5 +67,28 @@ class CatalogStepTests(unittest.TestCase):
         self.assertNotIn("setup_state.begin(", loop)                      # inside the loop: set_pid only
 
 
+class KeyboardToggleTests(unittest.TestCase):
+    def test_space_toggles_the_selected_plugins_but_not_locked_ones(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "Data Files").mkdir()
+            for name in ("A.esp", "B.esp"):
+                (Path(tmp) / "Data Files" / name).write_bytes(b"")
+            gui = mock.Mock(settings={"game_dir": tmp}, merge_inputs=set(), major_masters=set(),
+                            active_names={"b.esp"}, _active_job=None)
+            gui.tree.selection.return_value = ("A.esp", "B.esp", "Morrowind.esm")
+            gui._toggle_active = lambda names: mwmanager_gui.ManagerGUI._toggle_active(gui, names)
+            self.assertEqual(mwmanager_gui.ManagerGUI._toggle_active_key(gui), "break")
+            self.assertEqual(gui.active_names, {"a.esp"})            # A on, B off; the core master untouched
+            gui.refresh.assert_called_once()
+
+
+class OptionsInstallCheckTests(unittest.TestCase):
+    def test_options_checks_the_install_like_the_first_window(self):
+        source = (ROOT / "mwmanager_gui.py").read_text(encoding="utf-8")
+        options = source[source.index("    def open_options"):]
+        options = options[:min(i for i in (options.find("\n    def ", 1), options.find("\ndef ", 1)) if i > 0)]
+        self.assertIn("mwmanager_detect.valid_install(str(game))", options)
+
+
 if __name__ == "__main__":
     unittest.main()
