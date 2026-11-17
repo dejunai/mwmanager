@@ -546,8 +546,8 @@
     },
     {
       "RelativePath": "mwdialog_luafix.py",
-      "Bytes": 123832,
-      "SHA256": "33c82a5e5abb86b9bd07520bfafca469e83fc00f0875d9885c6e98e88fd0d261",
+      "Bytes": 128699,
+      "SHA256": "6b99e40a8d4a78a4f10ddb454c8aa1bcf5fc5d7056214e6a5379a1289cbe0038",
       "Source": "<Steam Morrowind>\\mwdialog_luafix.py",
       "SourceModified": "2026-11-15T06:55:58"
     },
@@ -915,8 +915,8 @@
     },
     {
       "RelativePath": "tests\\test_luafix.py",
-      "Bytes": 40482,
-      "SHA256": "738fd517a17ce8fa9173e7aae4319592c9871a79e27e7f8f81b81cda2f4a6b86",
+      "Bytes": 42517,
+      "SHA256": "c01b4af2b4a53215feaf8e180395d2cc91beed5a2b70f819e422e671b9eaf63f",
       "Source": "<Steam Morrowind>\\tests\\test_luafix.py",
       "SourceModified": "2026-11-15T06:55:58"
     },

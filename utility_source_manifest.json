@@ -55,9 +55,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_luafix.py",
       "working": "mwdialog_luafix.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "33c82a5e5abb86b9bd07520bfafca469e83fc00f0875d9885c6e98e88fd0d261",
-      "snapshot_sha256": "33c82a5e5abb86b9bd07520bfafca469e83fc00f0875d9885c6e98e88fd0d261",
-      "working_sha256": "33c82a5e5abb86b9bd07520bfafca469e83fc00f0875d9885c6e98e88fd0d261",
+      "source_sha256": "6b99e40a8d4a78a4f10ddb454c8aa1bcf5fc5d7056214e6a5379a1289cbe0038",
+      "snapshot_sha256": "6b99e40a8d4a78a4f10ddb454c8aa1bcf5fc5d7056214e6a5379a1289cbe0038",
+      "working_sha256": "6b99e40a8d4a78a4f10ddb454c8aa1bcf5fc5d7056214e6a5379a1289cbe0038",
       "working_matches_upstream": true
     },
     {
