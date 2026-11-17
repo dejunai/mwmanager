@@ -231,9 +231,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_patchfile.py",
       "working": "mwdialog_patchfile.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "1b91c8c6173f4a4ae956c21333eb947e377b633c074b52c0e44ff102a4180984",
-      "snapshot_sha256": "1b91c8c6173f4a4ae956c21333eb947e377b633c074b52c0e44ff102a4180984",
-      "working_sha256": "1b91c8c6173f4a4ae956c21333eb947e377b633c074b52c0e44ff102a4180984",
+      "source_sha256": "9710fcd83ef78c8ae484d0a97130481b4972e7b62bef24eb15d346d4de8c08df",
+      "snapshot_sha256": "9710fcd83ef78c8ae484d0a97130481b4972e7b62bef24eb15d346d4de8c08df",
+      "working_sha256": "9710fcd83ef78c8ae484d0a97130481b4972e7b62bef24eb15d346d4de8c08df",
       "working_matches_upstream": true
     },
     {
@@ -242,9 +242,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_records.py",
       "working": "mwdialog_records.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "50f99113e80fd6422027a9f12dcd56d16d7eff8038109a80aab430ae191b41d9",
-      "snapshot_sha256": "50f99113e80fd6422027a9f12dcd56d16d7eff8038109a80aab430ae191b41d9",
-      "working_sha256": "50f99113e80fd6422027a9f12dcd56d16d7eff8038109a80aab430ae191b41d9",
+      "source_sha256": "bf13f12b2379ae2cc99736aa60064e665270397c2b4a01bbdbbdcf4ff69ee5a3",
+      "snapshot_sha256": "bf13f12b2379ae2cc99736aa60064e665270397c2b4a01bbdbbdcf4ff69ee5a3",
+      "working_sha256": "bf13f12b2379ae2cc99736aa60064e665270397c2b4a01bbdbbdcf4ff69ee5a3",
       "working_matches_upstream": true
     },
     {
