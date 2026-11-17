@@ -13,6 +13,7 @@ Mod Organizer 2 is detected but reported as not supported yet, so a later versio
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -383,3 +384,145 @@ def main(argv=None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def vortex_install_path() -> Path | None:
+    """Return Vortex's executable path from its Windows registration, if present."""
+    if os.name != "nt":
+        return None
+    try:                        # uninstall entry (InstallLocation or DisplayIcon), App Paths or the nxm:// handler
+        exe = detect_vortex(default_registry(), read_settings=False).get("exe")
+        if exe:
+            return Path(exe)
+    except Exception:
+        pass
+    try:
+        import winreg
+    except ImportError:
+        return None
+    roots = (
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+    )
+    for hive, root_path in roots:
+        try:
+            with winreg.OpenKey(hive, root_path) as root:
+                index = 0
+                while True:
+                    try:
+                        subkey_name = winreg.EnumKey(root, index)
+                    except OSError:
+                        break
+                    index += 1
+                    try:
+                        with winreg.OpenKey(root, subkey_name) as entry:
+                            display_name = str(winreg.QueryValueEx(entry, "DisplayName")[0])
+                            if "vortex" not in display_name.casefold():
+                                continue
+                            try:
+                                install_dir = Path(str(winreg.QueryValueEx(entry, "InstallLocation")[0]))
+                                exe = install_dir / "Vortex.exe"
+                                if exe.is_file():
+                                    return exe
+                            except OSError:
+                                pass
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        try:
+            with winreg.OpenKey(hive, r"Software\Microsoft\Windows\CurrentVersion\App Paths\Vortex.exe") as key:
+                raw = winreg.QueryValueEx(key, None)[0]
+                exe = Path(str(raw).strip('"'))
+                if exe.is_file():
+                    return exe
+        except OSError:
+            pass
+    return None
+
+
+def detect_vortex_downloads() -> Path | None:
+    # Vortex's own settings first (its download folder for Morrowind), then its default locations.
+    try:
+        import mwdialog_paths
+        mwdialog_paths.clear_vortex_settings_cache()                # Vortex may have changed since the GUI started
+        mastercheck = sys.modules.get("mwdialog_mastercheck")       # its staging index / master profiles too
+        if mastercheck is not None and hasattr(mastercheck, "clear_caches"):
+            mastercheck.clear_caches()
+        found = mwdialog_paths.resolve_downloads(required=False)
+        if found:
+            return Path(found)
+    except Exception:
+        pass
+    candidates = [
+        Path(os.environ.get("APPDATA", "")) / "Vortex" / "downloads" / "morrowind",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Vortex" / "downloads" / "morrowind",
+    ]
+    for path in candidates:
+        if str(path) and path.is_dir():
+            return path
+    # Vortex state files sometimes record a custom download directory.
+    appdata = Path(os.environ.get("APPDATA", "")) / "Vortex" / "state.v2" / "persistent.json"
+    if appdata.is_file():
+        try:
+            data = json.loads(appdata.read_text(encoding="utf-8"))
+            text = json.dumps(data)
+            marker = "morrowind"
+            pos = text.lower().find(marker)
+            if pos >= 0:
+                # Use only this as a candidate; avoid guessing arbitrary config schemas.
+                for candidate in candidates:
+                    if candidate.is_dir():
+                        return candidate
+        except (OSError, ValueError):
+            pass
+    return None
+
+
+def vortex_registered() -> bool:
+    """Return whether Windows has a Vortex install registration."""
+    if os.name != "nt":
+        return False
+    try:
+        import winreg
+    except ImportError:
+        return False
+
+    uninstall_roots = (
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+    )
+    for hive, root_path in uninstall_roots:
+        try:
+            with winreg.OpenKey(hive, root_path) as root:
+                index = 0
+                while True:
+                    try:
+                        subkey_name = winreg.EnumKey(root, index)
+                    except OSError:
+                        break
+                    index += 1
+                    try:
+                        with winreg.OpenKey(root, subkey_name) as entry:
+                            display_name = str(winreg.QueryValueEx(entry, "DisplayName")[0])
+                    except OSError:
+                        continue
+                    if "vortex" in display_name.casefold():
+                        return True
+        except OSError:
+            continue
+
+    app_paths = (
+        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\App Paths\Vortex.exe"),
+        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\App Paths\Vortex.exe"),
+    )
+    for hive, path in app_paths:
+        try:
+            with winreg.OpenKey(hive, path):
+                return True
+        except OSError:
+            pass
+    return False

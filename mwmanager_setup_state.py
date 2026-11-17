@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -28,6 +29,9 @@ LABELS = {"paths_confirmed": "confirming the paths", "preflight_complete": "the 
           "major_masters_staged": "staging the major masters",
           "major_masters_deployed": "deploying the major masters",
           "initialization_complete": "the major-master step"}
+
+
+_LOCK = threading.RLock()        # GUI and worker threads change the step file
 
 
 def _game_key(game_dir) -> str:
@@ -86,55 +90,61 @@ def _check(step: str) -> None:
 
 
 def start(path, game_dir) -> dict:
-    state = blank(game_dir)
-    _write(path, state)
-    return state
+    with _LOCK:
+        state = blank(game_dir)
+        _write(path, state)
+        return state
 
 
 def begin(path, game_dir, step: str, pid: int | None = None) -> dict:
     """A step is starting (again): stamp it, count the attempt, remember the process doing it."""
-    _check(step)
-    state = load(path, game_dir)
-    entry = state["steps"][step]
-    entry.update(started_at=_now(), completed_at=None, attempts=int(entry.get("attempts") or 0) + 1,
-                 pid=pid, last_error=None)
-    _write(path, state)
-    return state
+    with _LOCK:
+        _check(step)
+        state = load(path, game_dir)
+        entry = state["steps"][step]
+        entry.update(started_at=_now(), completed_at=None, attempts=int(entry.get("attempts") or 0) + 1,
+                     pid=pid, last_error=None)
+        _write(path, state)
+        return state
 
 
 def set_pid(path, game_dir, step: str, pid: int | None) -> None:
-    _check(step)
-    state = load(path, game_dir)
-    state["steps"][step]["pid"] = pid
-    _write(path, state)
+    with _LOCK:
+        _check(step)
+        state = load(path, game_dir)
+        state["steps"][step]["pid"] = pid
+        _write(path, state)
 
 
 def fail(path, game_dir, step: str, error) -> dict:
-    _check(step)
-    state = load(path, game_dir)
-    state["steps"][step].update(pid=None, last_error=str(error)[:2000])
-    _write(path, state)
-    return state
+    with _LOCK:
+        _check(step)
+        state = load(path, game_dir)
+        state["steps"][step].update(pid=None, last_error=str(error)[:2000])
+        _write(path, state)
+        return state
 
 
 def complete(path, game_dir, step: str) -> dict:
-    _check(step)
-    state = load(path, game_dir)
-    entry = state["steps"][step]
-    if not entry.get("completed_at"):
-        entry.update(completed_at=_now(), pid=None, last_error=None)
-        entry["started_at"] = entry.get("started_at") or entry["completed_at"]
-        _write(path, state)
-    return state
+    with _LOCK:
+        _check(step)
+        state = load(path, game_dir)
+        entry = state["steps"][step]
+        if not entry.get("completed_at"):
+            entry.update(completed_at=_now(), pid=None, last_error=None)
+            entry["started_at"] = entry.get("started_at") or entry["completed_at"]
+            _write(path, state)
+        return state
 
 
 def reset(path, game_dir, step: str) -> None:
     """Take a completion back (the step has to run again)."""
-    _check(step)
-    state = load(path, game_dir)
-    if state["steps"][step].get("completed_at"):
-        state["steps"][step].update(completed_at=None, pid=None)
-        _write(path, state)
+    with _LOCK:
+        _check(step)
+        state = load(path, game_dir)
+        if state["steps"][step].get("completed_at"):
+            state["steps"][step].update(completed_at=None, pid=None)
+            _write(path, state)
 
 
 def done(path, game_dir, step: str) -> bool:

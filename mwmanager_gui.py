@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import io
 import json
 import configparser
 import os
@@ -518,147 +519,8 @@ def detect_morrowind_install() -> Path | None:
     return None
 
 
-def vortex_install_path() -> Path | None:
-    """Return Vortex's executable path from its Windows registration, if present."""
-    if os.name != "nt":
-        return None
-    try:                        # uninstall entry (InstallLocation or DisplayIcon), App Paths or the nxm:// handler
-        import mwmanager_detect
-        exe = mwmanager_detect.detect_vortex(mwmanager_detect.default_registry(), read_settings=False).get("exe")
-        if exe:
-            return Path(exe)
-    except Exception:
-        pass
-    try:
-        import winreg
-    except ImportError:
-        return None
-    roots = (
-        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
-        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
-        (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
-    )
-    for hive, root_path in roots:
-        try:
-            with winreg.OpenKey(hive, root_path) as root:
-                index = 0
-                while True:
-                    try:
-                        subkey_name = winreg.EnumKey(root, index)
-                    except OSError:
-                        break
-                    index += 1
-                    try:
-                        with winreg.OpenKey(root, subkey_name) as entry:
-                            display_name = str(winreg.QueryValueEx(entry, "DisplayName")[0])
-                            if "vortex" not in display_name.casefold():
-                                continue
-                            try:
-                                install_dir = Path(str(winreg.QueryValueEx(entry, "InstallLocation")[0]))
-                                exe = install_dir / "Vortex.exe"
-                                if exe.is_file():
-                                    return exe
-                            except OSError:
-                                pass
-                    except OSError:
-                        continue
-        except OSError:
-            continue
-    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-        try:
-            with winreg.OpenKey(hive, r"Software\Microsoft\Windows\CurrentVersion\App Paths\Vortex.exe") as key:
-                raw = winreg.QueryValueEx(key, None)[0]
-                exe = Path(str(raw).strip('"'))
-                if exe.is_file():
-                    return exe
-        except OSError:
-            pass
-    return None
-
-
-def detect_vortex_downloads() -> Path | None:
-    # Vortex's own settings first (its download folder for Morrowind), then its default locations.
-    try:
-        import mwdialog_paths
-        mwdialog_paths.clear_vortex_settings_cache()                # Vortex may have changed since the GUI started
-        mastercheck = sys.modules.get("mwdialog_mastercheck")       # its staging index / master profiles too
-        if mastercheck is not None and hasattr(mastercheck, "clear_caches"):
-            mastercheck.clear_caches()
-        found = mwdialog_paths.resolve_downloads(required=False)
-        if found:
-            return Path(found)
-    except Exception:
-        pass
-    candidates = [
-        Path(os.environ.get("APPDATA", "")) / "Vortex" / "downloads" / "morrowind",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Vortex" / "downloads" / "morrowind",
-    ]
-    for path in candidates:
-        if str(path) and path.is_dir():
-            return path
-    # Vortex state files sometimes record a custom download directory.
-    appdata = Path(os.environ.get("APPDATA", "")) / "Vortex" / "state.v2" / "persistent.json"
-    if appdata.is_file():
-        try:
-            data = json.loads(appdata.read_text(encoding="utf-8"))
-            text = json.dumps(data)
-            marker = "morrowind"
-            pos = text.lower().find(marker)
-            if pos >= 0:
-                # Use only this as a candidate; avoid guessing arbitrary config schemas.
-                for candidate in candidates:
-                    if candidate.is_dir():
-                        return candidate
-        except (OSError, ValueError):
-            pass
-    return None
-
-
-def vortex_registered() -> bool:
-    """Return whether Windows has a Vortex install registration."""
-    if os.name != "nt":
-        return False
-    try:
-        import winreg
-    except ImportError:
-        return False
-
-    uninstall_roots = (
-        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
-        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\Uninstall"),
-        (winreg.HKEY_LOCAL_MACHINE, r"Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
-    )
-    for hive, root_path in uninstall_roots:
-        try:
-            with winreg.OpenKey(hive, root_path) as root:
-                index = 0
-                while True:
-                    try:
-                        subkey_name = winreg.EnumKey(root, index)
-                    except OSError:
-                        break
-                    index += 1
-                    try:
-                        with winreg.OpenKey(root, subkey_name) as entry:
-                            display_name = str(winreg.QueryValueEx(entry, "DisplayName")[0])
-                    except OSError:
-                        continue
-                    if "vortex" in display_name.casefold():
-                        return True
-        except OSError:
-            continue
-
-    app_paths = (
-        (winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\App Paths\Vortex.exe"),
-        (winreg.HKEY_LOCAL_MACHINE, r"Software\Microsoft\Windows\CurrentVersion\App Paths\Vortex.exe"),
-    )
-    for hive, path in app_paths:
-        try:
-            with winreg.OpenKey(hive, path):
-                return True
-        except OSError:
-            pass
-    return False
+from mwmanager_detect import (  # noqa: E402  (moved there so preinstall needn't load the GUI)
+    detect_vortex_downloads, vortex_install_path, vortex_registered)
 
 
 def read_settings() -> dict:
@@ -731,13 +593,14 @@ def write_settings(settings: dict) -> None:
     except (TypeError, ValueError):
         threshold = DEFAULT_BSA_OFFER
     ini.set("Staging", BSA_OFFER_SETTING, str(threshold))
-    with MWMANAGER_INI.open("w", encoding="utf-8", newline="\n") as stream:
-        ini.write(stream)
+    stream = io.StringIO()
+    ini.write(stream)
+    _atomic_write(MWMANAGER_INI, stream.getvalue().encode("utf-8"))   # a crash mid-write never empties it
 
     preferences = {key: value for key, value in settings.items()
                    if key not in PATH_SETTING_KEYS and key != BSA_OFFER_SETTING
                    and key not in RUNTIME_KEYS and key not in LEGACY_PREFERENCE_KEYS}
-    SETTINGS_FILE.write_text(json.dumps(preferences, indent=2) + "\n", encoding="utf-8")
+    _atomic_write(SETTINGS_FILE, (json.dumps(preferences, indent=2) + "\n").encode("utf-8"))
 
 
 def _windows_user_is_admin() -> bool:
@@ -1397,6 +1260,7 @@ class ManagerGUI(tk.Tk):
                 quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
             log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a", encoding="utf-8", errors="replace") as log:
+                setup_state.begin(state_path, game_dir, "catalog_complete")
                 for label, command in commands:
                     checkpoint(report)
                     recent = []
@@ -1405,7 +1269,7 @@ class ManagerGUI(tk.Tk):
                     process = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL,
                                      stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                      encoding="utf-8", errors="replace", bufsize=1, **quiet)
-                    setup_state.begin(state_path, game_dir, "catalog_complete", getattr(process, "pid", None))
+                    setup_state.set_pid(state_path, game_dir, "catalog_complete", getattr(process, "pid", None))
                     for line in process.stdout:
                         log.write(line)
                         message = " ".join(line.strip().split())
@@ -1736,7 +1600,7 @@ class ManagerGUI(tk.Tk):
         self.merged_list = tk.Listbox(merged_box, height=12, exportselection=False, background=COLORS["field"],
                                       font=FONTS["body"])
         self.merged_list.pack(fill="both", expand=True, padx=6, pady=6)
-        self.merge_status = ttk.Label(right, text="Merge exclusion controls are planned.", style="Card.Muted.TLabel",
+        self.merge_status = ttk.Label(right, text="", style="Card.Muted.TLabel",
                                       wraplength=258, justify="left")
         self.merge_status.pack(anchor="w", pady=(pad["sm"], 0))
 

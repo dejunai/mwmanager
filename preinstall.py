@@ -762,8 +762,8 @@ def _prepare_first_run(game_dir: Path, manager_dir: Path, progress, archive_sour
             continue
         if choice == "vortex":
             try:
-                import mwmanager_gui
-                launched = mwmanager_gui.vortex_install_path()
+                import mwmanager_detect
+                launched = mwmanager_detect.vortex_install_path()
                 if launched:
                     subprocess.Popen([str(launched)], cwd=str(launched.parent))
             except OSError:
