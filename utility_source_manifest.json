@@ -121,9 +121,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_mastercheck.py",
       "working": "mwdialog_mastercheck.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "6effbc70f24d85a7dab7eace6b921b044891c7d9d535ba0ad20df807f2fe2c32",
-      "snapshot_sha256": "6effbc70f24d85a7dab7eace6b921b044891c7d9d535ba0ad20df807f2fe2c32",
-      "working_sha256": "6effbc70f24d85a7dab7eace6b921b044891c7d9d535ba0ad20df807f2fe2c32",
+      "source_sha256": "8b29ac9520d32334209ca431254128a538b83b75df4ded0507472bca774779d9",
+      "snapshot_sha256": "8b29ac9520d32334209ca431254128a538b83b75df4ded0507472bca774779d9",
+      "working_sha256": "8b29ac9520d32334209ca431254128a538b83b75df4ded0507472bca774779d9",
       "working_matches_upstream": true
     },
     {
