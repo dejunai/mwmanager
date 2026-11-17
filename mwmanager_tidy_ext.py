@@ -1699,9 +1699,11 @@ def undo(staging=STAGING, plugin=None):
             except OSError as e:
                 print(f"  could not put back {op.get('dst')}: {e}", file=sys.stderr)
                 failed.add(index)
+        top = last["head"].get("staging") or staging   # never the staging folder itself or anything above it
+        top = os.path.normcase(os.path.abspath(top))
         for d in {os.path.dirname(last["ops"][i]["dst"]) for i in selected if "dst" in last["ops"][i]}:
             try:
-                while d and os.path.isdir(d) and not os.listdir(d):
+                while d and os.path.normcase(os.path.abspath(d)).startswith(top + os.sep)                         and os.path.isdir(d) and not os.listdir(d):
                     os.rmdir(d)
                     d = os.path.dirname(d)
             except OSError:

@@ -66,7 +66,7 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
                 args += ["-m", "0"] if job.get("mips") or job.get("size") or job.get("dxt") else []
                 if job.get("size"):
                     args += ["-w", str(job["size"][0]), "-h", str(job["size"][1])]
-                res = subprocess.run(args + [full], capture_output=True, text=True)
+                res = run_tool(args + [full])
                 out = os.path.join(tmp, os.path.basename(full))
                 if res.returncode or not os.path.exists(out):
                     skipped.append(f"{rel} (texconv failed: {(res.stdout + res.stderr).strip()[-120:]})")
@@ -90,7 +90,7 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
                     a += ["-ar", str(job["rate"])]
                 a += (["-c:a", "pcm_s16le"] if out.endswith(".wav") else ["-c:a", "libmp3lame", "-q:a", "2",
                                                                          "-id3v2_version", "0"]) + [out]
-                res = subprocess.run(a, capture_output=True, text=True)
+                res = run_tool(a)
                 if res.returncode or not os.path.exists(out):
                     skipped.append(f"{rel} (ffmpeg failed: {res.stderr.strip()[-120:]})")
                     continue
@@ -395,7 +395,7 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                             w, h = max(4, int(w0 / k)), max(4, int(h0 / k))
                     if w:
                         a += ["-w", str(w), "-h", str(h)]
-                    res = subprocess.run(a + [full], capture_output=True, text=True)
+                    res = run_tool(a + [full])
                     out = os.path.join(tmp, os.path.splitext(os.path.basename(full))[0] + job["convert"]
                                        if job.get("convert") else os.path.basename(full))
                     if res.returncode or not os.path.exists(out):
@@ -420,7 +420,7 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                         a += ["-ar", str(job["rate"])]
                     a += (["-c:a", "pcm_s16le"] if out.endswith(".wav") else
                           ["-c:a", "libmp3lame", "-q:a", "2", "-id3v2_version", "0", "-map_metadata", "-1"]) + [out]
-                    res = subprocess.run(a, capture_output=True, text=True)
+                    res = run_tool(a)
                     if res.returncode or not os.path.exists(out):
                         skipped.append(f"{rel} (ffmpeg: {res.stderr.strip()[-100:]})")
                         continue
