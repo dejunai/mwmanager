@@ -37,6 +37,9 @@ def upstream_modules():
             and os.path.dirname(os.path.abspath(getattr(m, "__file__", "") or "")) == HERE]
 
 
+LAYER_REPORT = {}                 # layer file -> {"replaced": [...], "added": [...]}
+
+
 def _same(a, b):
     return a is b or (isinstance(a, _SCALARS) and type(a) is type(b) and a == b)
 
@@ -69,6 +72,10 @@ def run_layer(module, path):
     exec(code, ns)
     changed = [k for k, v in ns.items() if not k.startswith("__") and (k not in before or before[k] is not v)]
     propagate(module, before, changed)
+    # which upstream names the layer replaced and which it added: an override whose upstream name was renamed
+    # or removed in a sync shows up as "added" (tests/test_layer_report.py compares this with a baseline)
+    LAYER_REPORT[os.path.basename(path)] = {"replaced": sorted(k for k in changed if k in before),
+                                            "added": sorted(k for k in changed if k not in before)}
     return changed
 
 

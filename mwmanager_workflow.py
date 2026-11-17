@@ -13,6 +13,8 @@ from tkinter import ttk
 
 from mwmanager_theme import COLORS, FONTS, center
 
+FORCE_STOP_DELAY_MS = 30000      # a stop request still unanswered after this offers Force stop
+
 
 class JobCancelled(Exception):
     """The current operation reached a safe stopping point."""
@@ -141,6 +143,7 @@ class JobView:
         self.cancel.pack(side="right")
         self.resume = ttk.Button(actions, text="Resume setup", command=owner._resume_setup)
         self.close = ttk.Button(actions, text="Close", command=self.window.withdraw)
+        self.force = ttk.Button(actions, text="Force stop", command=self.force_stop)
         self.control = None
 
     def _follow_changed(self):
@@ -154,6 +157,8 @@ class JobView:
         self.stage.set("Starting...")
         self.resume.pack_forget()
         self.close.pack_forget()
+        self.force.pack_forget()
+        self.force.configure(state="normal")
         self.cancel.configure(state="normal", command=self.request_cancel)
         self.cancel.pack(side="right")
         self.window.protocol("WM_DELETE_WINDOW", self.request_cancel)
@@ -169,6 +174,23 @@ class JobView:
             self.control.cancelled.set()
             self.stage.set("Stopping after the current operation; finishing safe writes first.")
             self.cancel.configure(state="disabled")
+            control = self.control
+            self.window.after(FORCE_STOP_DELAY_MS, lambda: self._offer_force_stop(control))
+
+    def _offer_force_stop(self, control):
+        if control is not None and self.control is control:      # the same job is still running
+            self.force.pack(side="right", padx=6)
+
+    def force_stop(self):
+        """A step that hangs after a stop request: end its processes and let the window go. The step is left
+        unfinished, so Resume runs it again."""
+        import managed_processes
+        managed_processes.end_all()
+        self.force.configure(state="disabled")
+        self.stage.set("Force stopped. The step did not finish; Resume setup runs it again.")
+        self.window.grab_release()
+        self.window.protocol("WM_DELETE_WINDOW", self.window.withdraw)
+        self.close.pack(side="right")
 
     def append(self, message):
         text = str(message)
@@ -211,6 +233,7 @@ class JobView:
     def finish(self, error=None):
         self.progress.stop()
         self.cancel.pack_forget()
+        self.force.pack_forget()
         self.control = None
         self.refresh_phases()
         self.stage.set("Paused. Resume setup when ready." if error else "Step complete. Continuing setup...")
