@@ -85,5 +85,18 @@ class BatchPlanTests(unittest.TestCase):
                                                                     ["Tamriel_Data.esm"], lines.append), [])
 
 
+class UnreadableArchiveTests(unittest.TestCase):
+    def test_an_archive_that_could_not_be_listed_is_tried_again(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dl = Path(tmp) / "downloads"
+            dl.mkdir()
+            (dl / "Epic Plants-1.7z").write_bytes(b"7z")
+            index = Path(tmp) / "index.json"
+            with mock.patch.object(needed_mods.core_addons, "_members", return_value=([], "7-Zip is required")):
+                self.assertEqual(needed_mods.archive_index(dl, index, None), {})
+            with mock.patch.object(needed_mods.core_addons, "_members", return_value=(["Data/Epic Plants.esp"], None)):
+                self.assertEqual(needed_mods.archive_index(dl, index, "7z.exe"), {"Epic Plants-1.7z": ["Epic Plants.esp"]})
+
+
 if __name__ == "__main__":
     unittest.main()

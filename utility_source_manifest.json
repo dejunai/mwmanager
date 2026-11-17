@@ -55,9 +55,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_luafix.py",
       "working": "mwdialog_luafix.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "6b99e40a8d4a78a4f10ddb454c8aa1bcf5fc5d7056214e6a5379a1289cbe0038",
-      "snapshot_sha256": "6b99e40a8d4a78a4f10ddb454c8aa1bcf5fc5d7056214e6a5379a1289cbe0038",
-      "working_sha256": "6b99e40a8d4a78a4f10ddb454c8aa1bcf5fc5d7056214e6a5379a1289cbe0038",
+      "source_sha256": "cc2fb0cf557dce7809444297aa11e08cd36e9ed1c45917f8ab6dd95e02aaa1b4",
+      "snapshot_sha256": "cc2fb0cf557dce7809444297aa11e08cd36e9ed1c45917f8ab6dd95e02aaa1b4",
+      "working_sha256": "cc2fb0cf557dce7809444297aa11e08cd36e9ed1c45917f8ab6dd95e02aaa1b4",
       "working_matches_upstream": true
     },
     {
@@ -121,9 +121,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_mastercheck.py",
       "working": "mwdialog_mastercheck.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "8e5fb139c64f0328c48d118a306c9c7bcd11f84a060adbe90de9c23eb3f1d2a6",
-      "snapshot_sha256": "8e5fb139c64f0328c48d118a306c9c7bcd11f84a060adbe90de9c23eb3f1d2a6",
-      "working_sha256": "8e5fb139c64f0328c48d118a306c9c7bcd11f84a060adbe90de9c23eb3f1d2a6",
+      "source_sha256": "87b85ad5b0e9e63d13fe082242bf90679cc7f149d4e26ff906b5854eff2ff4f3",
+      "snapshot_sha256": "87b85ad5b0e9e63d13fe082242bf90679cc7f149d4e26ff906b5854eff2ff4f3",
+      "working_sha256": "87b85ad5b0e9e63d13fe082242bf90679cc7f149d4e26ff906b5854eff2ff4f3",
       "working_matches_upstream": true
     },
     {

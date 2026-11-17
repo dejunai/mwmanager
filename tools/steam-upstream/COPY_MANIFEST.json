@@ -399,8 +399,8 @@
     },
     {
       "RelativePath": "mwdialog_assets.py",
-      "Bytes": 107359,
-      "SHA256": "4d70a3eba89f4fbaa172aab3562abd29b2859a8a8ad13ba6045fdb24280c9358",
+      "Bytes": 107231,
+      "SHA256": "0a087c6927484c746ced238aaf088df51717bfd8aa35356dc72b45b907917164",
       "Source": "<Steam Morrowind>\\mwdialog_assets.py",
       "SourceModified": "2026-11-15T06:55:58"
     },
@@ -546,8 +546,8 @@
     },
     {
       "RelativePath": "mwdialog_luafix.py",
-      "Bytes": 128699,
-      "SHA256": "6b99e40a8d4a78a4f10ddb454c8aa1bcf5fc5d7056214e6a5379a1289cbe0038",
+      "Bytes": 128790,
+      "SHA256": "cc2fb0cf557dce7809444297aa11e08cd36e9ed1c45917f8ab6dd95e02aaa1b4",
       "Source": "<Steam Morrowind>\\mwdialog_luafix.py",
       "SourceModified": "2026-11-15T06:55:58"
     },
@@ -560,8 +560,8 @@
     },
     {
       "RelativePath": "mwdialog_mastercheck.py",
-      "Bytes": 43330,
-      "SHA256": "8e5fb139c64f0328c48d118a306c9c7bcd11f84a060adbe90de9c23eb3f1d2a6",
+      "Bytes": 42797,
+      "SHA256": "87b85ad5b0e9e63d13fe082242bf90679cc7f149d4e26ff906b5854eff2ff4f3",
       "Source": "<Steam Morrowind>\\mwdialog_mastercheck.py",
       "SourceModified": "2026-11-14T10:39:48"
     },
@@ -859,8 +859,8 @@
     },
     {
       "RelativePath": "tests\\test_assets.py",
-      "Bytes": 8481,
-      "SHA256": "89058be2cead2514f6078fd27447749c01f2d33943def8038a49f8233294c35d",
+      "Bytes": 8505,
+      "SHA256": "84cb510e77c8e80e0e6dc2fdeee9d1e413d1e8c0acbaab5e62089a66a94d5a79",
       "Source": "<Steam Morrowind>\\tests\\test_assets.py",
       "SourceModified": "2026-11-14T06:30:34"
     },
@@ -915,8 +915,8 @@
     },
     {
       "RelativePath": "tests\\test_luafix.py",
-      "Bytes": 42517,
-      "SHA256": "c01b4af2b4a53215feaf8e180395d2cc91beed5a2b70f819e422e671b9eaf63f",
+      "Bytes": 42610,
+      "SHA256": "037b2b82ba41ef376d7d2d4fe0f081a1a2b2141286642de09e343adf6ca924e4",
       "Source": "<Steam Morrowind>\\tests\\test_luafix.py",
       "SourceModified": "2026-11-15T06:55:58"
     },

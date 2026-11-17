@@ -39,7 +39,11 @@ def archive_index(downloads: Path, index_path: Path, seven_zip: str | None, prog
         if isinstance(old, dict) and old.get("stamp") == stamp:
             fresh[name] = old
             continue
-        members, _error = core_addons._members(Path(downloads) / name, seven_zip)
+        members, error = core_addons._members(Path(downloads) / name, seven_zip)
+        if error:                           # e.g. no 7-Zip yet, or still downloading: tried again next run
+            if isinstance(old, dict):
+                fresh[name] = old
+            continue
         fresh[name] = {"stamp": stamp, "plugins": sorted({m.replace("\\", "/").rsplit("/", 1)[-1] for m in members
                                                           if m.casefold().endswith(PLUGIN_EXTS)})}
         listed += 1

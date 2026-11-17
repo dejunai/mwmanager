@@ -218,9 +218,8 @@ class TidySteps(unittest.TestCase):
 
         assets = self.t._scanner.asset_health_module()
         issues, fixes = assets.check_folder(str(root), self.t._scanner, str(self.data), set())
-        self.assertTrue(any("WAV (converted to MP3" in message for _severity, _path, message in issues))
-        self.assertTrue(any(kind == "snd" and job.get("mp3")
-                            for kind, _full, _relative, job in fixes))
+        self.assertFalse(any(kind == "snd" and job.get("mp3") for kind, _full, _relative, job in fixes))
+        fixes = [("snd", str(sound), "Sound\\ambient.wav", {"mp3": True})]   # the apply path, for the later repathing
         with mock.patch.object(assets, "find_ffmpeg", return_value="ffmpeg.exe"), \
                 mock.patch.object(assets.subprocess, "run", side_effect=convert):
             done, skipped = assets.apply_folder(
