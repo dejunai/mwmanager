@@ -4,6 +4,7 @@ import signal
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 CHILDREN = set()
 _POPEN_TYPE = subprocess.Popen
@@ -102,17 +103,22 @@ def terminate(process):
         CHILDREN.discard(process)
 
 
-def run(command, *, progress=None, timeout=7200, **kwargs):
+def run(command, *, progress=None, timeout=7200, heartbeat_label=None, **kwargs):
     process = popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, **kwargs)
     try:
         deadline = time.monotonic() + timeout
+        next_heartbeat = time.monotonic() + 30
         while True:
             check = getattr(progress, "check_cancelled", None)
             if check:
                 check()
             if time.monotonic() >= deadline:
                 raise subprocess.TimeoutExpired(command, timeout)
+            if progress and time.monotonic() >= next_heartbeat:
+                label = heartbeat_label or Path(command[0]).name
+                progress(f"{label}: still working; the process is active and has not hung.")
+                next_heartbeat = time.monotonic() + 30
             try:
                 stdout, stderr = process.communicate(timeout=0.2)
                 return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)

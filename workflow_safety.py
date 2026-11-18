@@ -234,6 +234,25 @@ class DurableTransaction:
         os.link(source, target)
         return operation
 
+    def copy(self, source, target, backup):
+        """Copy source to target while journaling the replacement before mutation."""
+        source, target, backup = (self.safe(p) for p in (source, target, backup))
+        if target.exists() and not target.is_file():
+            raise IsADirectoryError(target)
+        if backup.exists():
+            raise FileExistsError(f"Refusing to overwrite a recovery backup: {backup}")
+        operation = {"kind": "copy", "source": str(source), "target": str(target),
+                     "backup": str(backup) if target.exists() else None,
+                     "sha256": digest(source),
+                     "original_sha256": digest(target) if target.exists() else None}
+        self.record(operation)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if operation["backup"]:
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(target, backup)
+        shutil.copy2(source, target)
+        return operation
+
     def move(self, source, target):
         source, target = self.safe(source), self.safe(target)
         if target.exists():
@@ -280,7 +299,7 @@ class DurableTransaction:
                 os.replace(backup, target)
             elif op.get("original_sha256") and not target.exists():
                 raise RuntimeError(f"Recovery original is missing: {target}")
-        for snapshot in self.state["snapshots"]:
+        for snapshot in reversed(self.state["snapshots"]):
             path = self.safe(snapshot["path"])
             if snapshot["exists"]:
                 saved = self.safe(snapshot["saved"])

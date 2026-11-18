@@ -29,6 +29,12 @@ MWManager's own behaviour is in extension modules that `mwmanager_upstream.py` l
 | `mwmanager_install.py` | Tidy command line: `--options` → plan → `--apply` (exit 2 = refused, nothing changed) |
 | `mwmanager_gui.py` | the GUI (`python mwmanager_gui.py`) |
 | `mwmanager_workflow.py` | persistent setup window, progress presentation, safe-stop controls and native conflict picker |
+| `mwmanager_recovery.py` | read-only inventory and scoped recovery for interrupted deployments |
+| `mwmanager_profiles.py` | save, compare, export and apply manager-state profiles |
+| `mwmanager_integrity.py` | deployed-file integrity checks and regression snapshots |
+| `mwmanager_install_plan.py` | deterministic read-only plans for staged plugin deployments |
+| `mwmanager_update_impact.py` | staged-version file and TES3-record impact comparison |
+| `mwmanager_record_report.py` | catalog-based record conflict explanations |
 
 Other modules: `plugin_install.py`, `core_addons.py`, `major_master_deploy.py`, `mock_fomod.py`, `preinstall.py`,
 `mwmanager_detect.py`, `mwmanager_journal.py`, `mwse_lint.py`, `nexus_updates.py`, `mwnexus_*.py`,
@@ -71,6 +77,17 @@ setup** after a pause; optional community masters can also be explicitly skipped
   require preflight again. This is a performance cache, not a content-integrity guarantee.
 - **Conflict decisions:** GUI patch generation uses a native picker instead of opening a console.
   Skip leaves a pair unchanged; Finish review saves choices already made and returns to patch generation.
+- **Archive trust checks:** scanned ZIP/7-Zip/RAR payloads are classified before extraction; unsafe paths,
+  reparse/link entries, encryption, excessive expansion, high compression ratios and blocked payloads stop install.
+- **Recovery center:** interrupted regular and major-master deployment state, ready plugin stages and journal
+  problems are listed in one place; only a selected, validated recovery item is changed.
+- **Profiles and review tools:** the Tools menu can capture manager-state profiles, inspect deployment integrity
+  and catalog record conflicts, preview staged installs, compare staged updates, and compare integrity snapshots.
+  Profiles restore manager choices only; they do not implicitly redeploy or remove game files.
+- **Automatic drift notice:** a low-overhead startup check hashes tracked deployed files in the background and
+  reports missing, changed or unverifiable files without blocking the interface.
+- **Regression corpus:** `python tools\archive_corpus.py OUTPUT_DIR` creates a deterministic set of safe and
+  adversarial archives used to exercise path, payload, link and compression safeguards.
 
 ## Tests
 

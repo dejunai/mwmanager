@@ -605,7 +605,8 @@ def install_prerequisite_archive(key: str, archive: Path, game_dir: Path, manage
     from plugin_install import extract_archive
     with tempfile.TemporaryDirectory(prefix=f"{key}-", dir=store) as temporary:
         extracted = Path(temporary) / "files"
-        extract_archive({"archive": str(kept)}, extracted, Path(manager_dir))
+        extract_archive({"archive": str(kept), "trusted_prerequisite": True},
+                        extracted, Path(manager_dir))
         payload = _payload_root(extracted, key)
         if payload is None:
             installer = next((path for path in extracted.rglob("*.exe")

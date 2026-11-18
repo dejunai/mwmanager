@@ -180,6 +180,23 @@ class BaselineTests(Fixture):
         self.assertIn(("delete", "Data Files/XE Sky Variations.esp"),
                       {(step["op"], step["path"]) for step in plan["prerequisite_steps"]})
 
+    def test_prerequisite_absence_deletes_a_file_created_after_checkpoint(self):
+        self.journal.capture_baseline(self.game)
+        self.journal.capture_prerequisites(self.game)
+        generated = write(self.game / "Data Files/Meshes/m/a.nif", b"generated later")
+        original = self.journal.preserve_original(self.game, generated)
+        generated.write_bytes(b"repaired later")
+        self.journal.record("repair", "Data Files/Meshes/m/a.nif", "replace",
+                            sha(generated), original)
+        plan = self.journal.plan_rollback(self.game)
+        self.assertIn({"op": "delete", "path": "Data Files/Meshes/m/a.nif"},
+                      plan["steps"])
+        self.assertFalse(any(step.get("op") == "restore"
+                             and step.get("path") == "Data Files/Meshes/m/a.nif"
+                             for step in plan["steps"]))
+        self.journal.execute_rollback(self.game, plan)
+        self.assertFalse(generated.exists())
+
 
 class LedgerTests(Fixture):
     def test_cli_real_rollback_verifies_and_archives(self):

@@ -1,6 +1,8 @@
 """BAIN packages are tidied before their options are offered, so the option window finds the choices in
 Extras/<plugin> and their descriptions in Docs/<plugin>."""
 import os
+import io
+import contextlib
 import shutil
 import struct
 import sys
@@ -154,6 +156,113 @@ class KeptCoreTests(unittest.TestCase):
                 self.assertEqual(ext.undo(str(staging), mod.name), 0)
             self.assertFalse((mod / "Rocks.esp").exists())
             self.assertEqual((mod / "00 Core" / "Textures" / "rock.dds").read_bytes(), b"standard")
+
+    def test_core_openmw_file_is_planned_once_before_it_moves_to_off(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            staging = Path(tmp) / "staging"
+            mod = staging / "Tamriel Data"
+            for rel, data in {
+                "00 Data Files/Tamriel_Data.esm": b"TES3",
+                "00 Data Files/Tamriel_Data.omwscripts": b"scripts",
+                "00 Data Files/l10n/TamrielData/en.yaml": b"language",
+                "00 Data Files/Textures/rock.dds": b"texture",
+            }.items():
+                (mod / rel).parent.mkdir(parents=True, exist_ok=True)
+                (mod / rel).write_bytes(data)
+            with mwmanager_upstream.use_manager_dir(tmp):
+                Path(tmp, "outputs").mkdir(exist_ok=True)
+                plan = ext.plan_mod(str(mod))
+                self.assertNotIsInstance(plan, str)
+                sources = [os.path.normcase(os.path.abspath(src)) for src, _dst, _why in plan]
+                self.assertEqual(len(sources), len(set(sources)))
+                omitted = [(src, dst) for src, dst, _why in plan
+                           if src.endswith("Tamriel_Data.omwscripts")]
+                self.assertEqual(len(omitted), 1)
+                failed = ext.apply(plan, str(staging))
+                self.assertEqual(failed, [])
+            self.assertTrue(list((mod / "Off").rglob("Tamriel_Data.omwscripts")))
+
+    def test_fomod_openmw_payload_is_quarantined_and_never_offered(self):
+        xml = (
+            '<config><installSteps><installStep name="Engine"><optionalFileGroups>'
+            '<group name="Engine support" type="SelectOne"><plugins>'
+            '<plugin name="OpenMW"><files><file source="Engine/OpenMW/engine.omwscripts" '
+            'destination="engine.omwscripts"/></files></plugin>'
+            '<plugin name="MWSE"><files><file source="Engine/MWSE/engine.lua" '
+            'destination="MWSE/mods/engine/engine.lua"/></files></plugin>'
+            '</plugins></group></optionalFileGroups></installStep></installSteps></config>'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            staging = Path(tmp) / "staging"
+            mod = staging / "Engine Pack"
+            for relative, data in {
+                "fomod/ModuleConfig.xml": xml.encode(),
+                "Engine/OpenMW/engine.omwscripts": b"openmw",
+                "Engine/MWSE/engine.lua": b"mwse",
+                "Engine.esp": b"TES3",
+            }.items():
+                (mod / relative).parent.mkdir(parents=True, exist_ok=True)
+                (mod / relative).write_bytes(data)
+            with mwmanager_upstream.use_manager_dir(tmp):
+                Path(tmp, "outputs").mkdir(exist_ok=True)
+                plan = ext.plan_mod(str(mod))
+                self.assertNotIsInstance(plan, str)
+                self.assertEqual(ext.apply(plan, str(staging)), [])
+                records = mock_fomod._discover_fomod(mod, {"engine.esp"})
+                visible = mock_fomod._select_vanilla_technology(records)
+            self.assertTrue(list((mod / "Off").rglob("engine.omwscripts")))
+            self.assertFalse((mod / "Engine" / "OpenMW").exists())
+            self.assertFalse(any(item["label"] == "OpenMW" for item in visible))
+            self.assertTrue(any(item["label"] == "MWSE" for item in visible))
+
+    def test_gui_apply_reports_determinate_tidy_progress(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            staging = Path(tmp) / "staging"
+            mod = staging / "Pack"
+            mod.mkdir(parents=True)
+            moves = []
+            for index in range(4):
+                source, target = mod / f"a{index}.txt", mod / "Docs" / f"a{index}.txt"
+                target.parent.mkdir(exist_ok=True)
+                source.write_text(str(index), encoding="utf-8")
+                moves.append((str(source), str(target), "document"))
+            output = io.StringIO()
+            with mwmanager_upstream.use_manager_dir(tmp), \
+                    mock.patch.dict(os.environ, {"MWMANAGER_GUI": "1"}), \
+                    contextlib.redirect_stderr(output):
+                Path(tmp, "outputs").mkdir(exist_ok=True)
+                self.assertEqual(ext.apply(moves, str(staging)), [])
+            progress = [line for line in output.getvalue().splitlines()
+                        if line.startswith("MWMANAGER-PROGRESS:")]
+            self.assertEqual(progress[0], "MWMANAGER-PROGRESS: Applying Tidy moves 0 of 4")
+            self.assertEqual(progress[-1], "MWMANAGER-PROGRESS: Applying Tidy moves 4 of 4")
+
+    def test_gui_apply_reports_only_every_two_thousand_moves(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            staging = Path(tmp) / "staging"
+            mod = staging / "Pack"
+            mod.mkdir(parents=True)
+            moves = []
+            for index in range(4002):
+                source, target = mod / f"a{index}.txt", mod / "Docs" / f"a{index}.txt"
+                target.parent.mkdir(exist_ok=True)
+                source.write_text("", encoding="utf-8")
+                moves.append((str(source), str(target), "document"))
+            output = io.StringIO()
+            with mwmanager_upstream.use_manager_dir(tmp), \
+                    mock.patch.dict(os.environ, {"MWMANAGER_GUI": "1"}), \
+                    contextlib.redirect_stderr(output):
+                Path(tmp, "outputs").mkdir(exist_ok=True)
+                self.assertEqual(ext.apply(moves, str(staging)), [])
+            progress = [line for line in output.getvalue().splitlines()
+                        if line.startswith("MWMANAGER-PROGRESS:")]
+            self.assertEqual(progress, [
+                "MWMANAGER-PROGRESS: Applying Tidy moves 0 of 4,002",
+                "MWMANAGER-PROGRESS: Applying Tidy moves 1 of 4,002",
+                "MWMANAGER-PROGRESS: Applying Tidy moves 2,000 of 4,002",
+                "MWMANAGER-PROGRESS: Applying Tidy moves 4,000 of 4,002",
+                "MWMANAGER-PROGRESS: Applying Tidy moves 4,002 of 4,002",
+            ])
 
     def test_a_fomod_package_is_tidied_first_and_its_options_still_resolve(self):
         xml = ('<config><installSteps><installStep name="Main"><optionalFileGroups><group name="Core Files" '

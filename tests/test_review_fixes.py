@@ -94,6 +94,141 @@ class OptionsInstallCheckTests(unittest.TestCase):
 
 
 class PluginPathSafetyTests(unittest.TestCase):
+    def test_archive_analysis_reports_zip_risks_without_extracting(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "risky.zip"
+            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                zf.writestr("Meshes/example.nif", b"one")
+                zf.writestr("meshes/EXAMPLE.NIF", b"two")
+                zf.writestr("installer.exe", b"payload")
+                zf.writestr("large.txt", b"A" * (2 * 1024 * 1024))
+                link = zipfile.ZipInfo("redirected")
+                link.create_system = 3
+                link.external_attr = 0o120000 << 16
+                zf.writestr(link, b"outside")
+                reparse = zipfile.ZipInfo("reparse")
+                reparse.create_system = 0
+                reparse.external_attr = 0x400
+                zf.writestr(reparse, b"outside")
+
+            report = plugin_install.analyze_archive({"archive": str(archive)}, root)
+
+            self.assertTrue(report["blocked"])
+            codes = {finding["code"] for finding in report["findings"]}
+            self.assertTrue({"path_collision", "suspicious_payload",
+                             "compression_ratio_anomaly", "link_member"} <= codes)
+            self.assertFalse((root / "staging").exists())
+
+    def test_archive_analysis_preserves_allowed_mwse_and_script_payloads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "safe-scripts.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("Data Files/MWSE/mods/example/main.lua", b"safe")
+                zf.writestr("OpenMW/Scripts/example.py", b"safe")
+                zf.writestr("Docs/setup.exe", b"documentation-only")
+
+            report = plugin_install.analyze_archive({"archive": str(archive)}, root)
+
+            self.assertTrue(report["safe"])
+            self.assertNotIn("suspicious_payload",
+                             {finding["code"] for finding in report["findings"]})
+
+    def test_archive_analysis_detects_encryption_from_zip_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "encrypted.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("payload.txt", b"content")
+            data = bytearray(archive.read_bytes())
+            for signature, flag_offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+                offset = data.find(signature)
+                while offset >= 0:
+                    flags = int.from_bytes(data[offset + flag_offset:offset + flag_offset + 2],
+                                           "little") | 1
+                    data[offset + flag_offset:offset + flag_offset + 2] = flags.to_bytes(2, "little")
+                    offset = data.find(signature, offset + 4)
+            archive.write_bytes(data)
+
+            report = plugin_install.analyze_archive({"archive": str(archive)}, root)
+
+            self.assertTrue(report["blocked"])
+            self.assertIn("encrypted_member",
+                          {finding["code"] for finding in report["findings"]})
+
+    def test_archive_analysis_reads_7z_solid_encryption_and_link_attributes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "risky.7z"
+            archive.write_bytes(b"placeholder")
+            listing = mock.Mock(returncode=0, stderr="", stdout=(
+                f"Path = {archive}\nType = 7z\nSolid = +\nEncrypted = +\n\n"
+                "Path = good.txt\nSize = 10\nPacked Size = 10\nSymbolic Link = -\n\n"
+                "Path = redirected\nSize = 1\nPacked Size = 1\n"
+                "Mode = lrwxrwxrwx\nSymbolic Link = outside\n\n"))
+            with mock.patch.object(plugin_install, "_seven_zip", return_value="7z.exe"), \
+                    mock.patch.object(plugin_install.subprocess, "run", return_value=listing) as run:
+                report = plugin_install.analyze_archive({"archive": str(archive)}, root)
+
+            codes = {finding["code"] for finding in report["findings"]}
+            self.assertTrue({"solid_archive", "encrypted_member", "link_member"} <= codes)
+            self.assertEqual(
+                [finding["path"] for finding in report["findings"]
+                 if finding["code"] == "link_member"],
+                ["redirected"],
+            )
+            self.assertTrue(report["blocked"])
+            self.assertTrue(all(call.args[0][1] == "l" for call in run.call_args_list))
+
+    def test_archive_analysis_applies_expansion_and_member_count_limits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "oversized.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("one.bin", b"123456")
+                zf.writestr("two.bin", b"123456")
+            with mock.patch.multiple(
+                    plugin_install, MAX_EXPANDED_MEMBER_BYTES=4,
+                    MAX_EXPANDED_ARCHIVE_BYTES=8, MAX_ARCHIVE_MEMBERS=1):
+                report = plugin_install.analyze_archive({"archive": str(archive)}, root)
+
+            codes = {finding["code"] for finding in report["findings"]}
+            self.assertTrue({"oversized_member", "oversized_archive",
+                             "excessive_member_count"} <= codes)
+
+    def test_extraction_refuses_fresh_high_severity_findings(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "payload.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("setup.exe", b"payload")
+            destination = root / "staging"
+
+            with self.assertRaisesRegex(ValueError, "suspicious|setup.exe"):
+                plugin_install.extract_archive({"archive": str(archive)}, destination, root)
+            self.assertFalse(destination.exists())
+
+    def test_regular_scan_does_not_open_payloads_after_high_risk_finding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            downloads, manager = root / "downloads", root / "manager"
+            downloads.mkdir()
+            manager.mkdir()
+            archive = downloads / "risky.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("Example.esp", b"plugin header")
+                zf.writestr("setup.exe", b"payload")
+
+            with mock.patch.object(
+                    plugin_install, "_archive_esm_masters",
+                    side_effect=AssertionError("payload was opened")) as inspect_master:
+                items = plugin_install.scan_archives(downloads, manager)
+
+            self.assertTrue(items[0]["blocked"])
+            inspect_master.assert_not_called()
+            self.assertTrue(items[0]["archive_risk"]["blocked"])
+
     def test_failed_extraction_does_not_leave_partial_staging(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -140,6 +275,29 @@ class PluginPathSafetyTests(unittest.TestCase):
                     or real_link(Path(path))):
                 with self.assertRaisesRegex(ValueError, "Staged package contains"):
                     plugin_install.deploy_package(package, data, "Test.esp")
+
+    def test_transactional_deploy_rolls_back_game_and_staging_changes(self):
+        from workflow_safety import DurableTransaction
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager, data, package = root / "manager", root / "game" / "Data Files", root / "staging"
+            manager.mkdir()
+            data.mkdir(parents=True)
+            package.mkdir()
+            source = package / "Test.esp"
+            source.write_bytes(b"new plugin")
+            target = data / "Test.esp"
+            target.write_bytes(b"old plugin")
+            transaction = DurableTransaction(
+                manager / "transactions" / "plugin-deploy", [manager, data.parent, package]).begin()
+            linked, skipped, operations = plugin_install.deploy_package(
+                package, data, "Test.esp", transaction=transaction)
+            self.assertEqual((linked, skipped), (1, 0))
+            self.assertEqual(target.read_bytes(), b"new plugin")
+            self.assertEqual(len(operations), 1)
+            transaction.rollback()
+            self.assertEqual(target.read_bytes(), b"old plugin")
+            self.assertFalse((manager / "transactions" / "plugin-deploy").exists())
 
     def test_seven_zip_link_entries_are_rejected_before_extraction(self):
         listing = mock.Mock(returncode=0, stderr="", stdout=(

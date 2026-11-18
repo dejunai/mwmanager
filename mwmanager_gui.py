@@ -899,13 +899,8 @@ def write_gui_state(state: dict) -> None:
 
 
 def deployed_master_names() -> set[str]:
-    try:
-        journal = json.loads(DEPLOYMENT_JOURNAL.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return set()
-    return {name.casefold() for deployment in journal.get("deployments", [])
-            if isinstance(deployment, dict)
-            for name in deployment.get("masters", []) if isinstance(name, str)}
+    from major_master_deploy import tracked_deployment_masters
+    return {name.casefold() for name in tracked_deployment_masters(APP_DIR)}
 
 
 def ordered_signature(plugin_names: list[str], order: list[str], active_names: set[str], game_dir: str) -> str:
@@ -974,11 +969,15 @@ class ManagerGUI(tk.Tk):
         if not first_run or paths_confirmed:
             offer_elevation(Path(self.settings["game_dir"]))
         from major_master_deploy import recovery_pending
-        if not first_run and not recovery_pending(APP_DIR):
+        interrupted_setup, _ = setup_state.interrupted(
+            self._setup_path(), self.settings["game_dir"])
+        if (not first_run and not recovery_pending(APP_DIR)
+                and interrupted_setup != "major_masters_deployed"):
             self._initialize_plugin_baseline()
         self._ensure_core()
         self._build_menu()
         self._build_ui()
+        self._clear_major_master_scan_cache()
         if first_run:
             if paths_confirmed:
                 self.game_label.config(text="Saved paths loaded. Resuming the incomplete preflight…")
@@ -992,6 +991,8 @@ class ManagerGUI(tk.Tk):
         from major_master_deploy import recovery_pending
         if not first_run and recovery_pending(APP_DIR):
             self.after(150, self._resume_interrupted_major_masters)
+        elif not first_run and (APP_DIR / "transactions" / "plugin-deploy").is_dir():
+            self.after(150, self._resume_interrupted_plugin_deployment)
         elif (not first_run and self._setup_done("initial_full_complete")
                 and not self._setup_done("catalog_complete")):
             # setup stopped (or was made) before the catalog step: build it now, then carry on
@@ -1005,12 +1006,42 @@ class ManagerGUI(tk.Tk):
         elif not first_run and (self.settings.get("archive_source") is None
                                 or not self.settings.get("archive_downloads_dir")):
             self.after(150, self._ensure_archive_downloads)
+        if not first_run and self.settings.get("paths_confirmed"):
+            self.after(2000, self._start_background_integrity)
 
     def _ensure_core(self):
         order_by_name = {name.casefold(): name for name in self.order}
         core = [order_by_name.get(name.casefold(), name) for name in CORE]
         rest = [n for n in self.order if n.casefold() not in {c.casefold() for c in CORE}]
         self.order = core + rest
+
+    def _start_background_integrity(self):
+        """Check tracked deployed files off the Tk thread and surface drift once."""
+        if getattr(self, "_integrity_running", False):
+            return
+        self._integrity_running = True
+
+        def work():
+            import mwmanager_integrity
+            try:
+                result = mwmanager_integrity.inspect(
+                    APP_DIR, Path(self.settings["game_dir"]) / "Data Files")
+            except (OSError, ValueError):
+                self.after(0, lambda: setattr(self, "_integrity_running", False))
+                return
+
+            def finish():
+                self._integrity_running = False
+                counts = result.get("counts") or {}
+                drift = sum(count for status, count in counts.items() if status != "ok")
+                if drift:
+                    self.status.set(
+                        f"Integrity warning: {drift} tracked deployment file(s) are missing, "
+                        "modified, unreadable, or unverifiable. Open Tools > Integrity report.")
+
+            self.after(0, finish)
+
+        threading.Thread(target=work, name="MWManager integrity check", daemon=True).start()
 
     def _setup_path(self):
         return APP_DIR / "mwmanager_setup_state.json"
@@ -1085,9 +1116,9 @@ class ManagerGUI(tk.Tk):
         self.status.set(note)
         return True
 
-    def _initialize_plugin_baseline(self):
+    def _initialize_plugin_baseline(self, *, force=False):
         game_dir = str(Path(self.settings["game_dir"]).resolve())
-        if (isinstance(self.gui_state.get("known_plugins"), list)
+        if (not force and isinstance(self.gui_state.get("known_plugins"), list)
                 and str(self.gui_state.get("game_dir", "")).casefold() == game_dir.casefold()):
             return
         deployed = deployed_master_names()
@@ -1105,8 +1136,299 @@ class ManagerGUI(tk.Tk):
         file_menu.add_command(label="Resume setup", command=self._resume_setup)
         file_menu.add_command(label="Exit", command=self._on_close)
         menu.add_cascade(label="File", menu=file_menu)
+        tools_menu = tk.Menu(menu, tearoff=False)
+        tools_menu.add_command(label="Recovery center…", command=self.show_recovery_center)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Integrity report…", command=self.show_integrity_report)
+        tools_menu.add_command(label="Capture integrity snapshot…", command=self.capture_integrity_snapshot)
+        tools_menu.add_command(label="Compare integrity snapshot…", command=self.compare_integrity_snapshot)
+        tools_menu.add_command(label="Record conflict report…", command=self.show_record_conflicts)
+        tools_menu.add_command(label="Save install profile…", command=self.save_install_profile)
+        tools_menu.add_command(label="Apply install profile…", command=self.apply_install_profile)
+        tools_menu.add_separator()
+        tools_menu.add_command(label="Preview staged install…", command=self.preview_staged_install)
+        tools_menu.add_command(label="Compare staged update…", command=self.compare_staged_update)
+        menu.add_cascade(label="Tools", menu=tools_menu)
         self.file_menu = file_menu
+        self.tools_menu = tools_menu
         self.config(menu=menu)
+
+    def _show_tool_report(self, title, lines):
+        dialog = tk.Toplevel(self)
+        dialog.title(title)
+        dialog.transient(self)
+        dialog.minsize(620, 360)
+        center(dialog, self, 760, 520)
+        frame = ttk.Frame(dialog, padding=16)
+        frame.pack(fill="both", expand=True)
+        box = tk.Text(frame, wrap="word", font=FONTS["mono"], relief="flat", padx=10, pady=8)
+        scroll = ttk.Scrollbar(frame, command=box.yview)
+        box.configure(yscrollcommand=scroll.set)
+        box.insert("1.0", "\n".join(str(line) for line in lines) + "\n")
+        box.configure(state="disabled")
+        box.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        ttk.Button(frame, text="Close", command=dialog.destroy).pack(side="bottom", anchor="e", pady=(10, 0))
+
+    def show_integrity_report(self):
+        import mwmanager_integrity
+        try:
+            report = mwmanager_integrity.inspect(
+                APP_DIR, Path(self.settings["game_dir"]) / "Data Files", include_untracked=False)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Integrity report failed", str(exc), parent=self)
+            return
+        self._show_tool_report("MWManager integrity report", mwmanager_integrity.render(report))
+
+    def show_record_conflicts(self):
+        import mwmanager_record_report
+        report = mwmanager_record_report.load_conflicts(
+            APP_DIR / "game_catalog.sqlite3", active_plugins=read_order())
+        self._show_tool_report("Catalog record conflicts", mwmanager_record_report.render(report))
+
+    def capture_integrity_snapshot(self):
+        import mwmanager_integrity
+        name = messagebox.askstring("Integrity snapshot", "Snapshot name:", parent=self)
+        if not name:
+            return
+        try:
+            path = mwmanager_integrity.capture_snapshot(
+                APP_DIR, Path(self.settings["game_dir"]) / "Data Files", name)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Snapshot failed", str(exc), parent=self)
+            return
+        messagebox.showinfo("Snapshot saved", f"Integrity snapshot saved to:\n\n{path}", parent=self)
+
+    def compare_integrity_snapshot(self):
+        import mwmanager_integrity
+        folder = APP_DIR / "snapshots"
+        names = sorted(path.stem for path in folder.glob("*.json")) if folder.is_dir() else []
+        if not names:
+            messagebox.showinfo("Integrity snapshots", "No snapshots are available.", parent=self)
+            return
+        name = messagebox.askstring(
+            "Compare integrity snapshot",
+            "Snapshot name:\n\n" + "\n".join(names[:20]),
+            initialvalue=names[0], parent=self)
+        if not name:
+            return
+        try:
+            report = mwmanager_integrity.compare_snapshot(
+                APP_DIR, Path(self.settings["game_dir"]) / "Data Files", name)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Snapshot comparison failed", str(exc), parent=self)
+            return
+        self._show_tool_report("Integrity snapshot comparison", [
+            f"Snapshot: {report['snapshot']}",
+            f"Added: {len(report['added'])}",
+            *(f"  + {path}" for path in report["added"]),
+            f"Removed: {len(report['removed'])}",
+            *(f"  - {path}" for path in report["removed"]),
+            f"Changed: {len(report['changed'])}",
+            *(f"  ~ {path}" for path in report["changed"]),
+            f"Unchanged: {report['unchanged']}",
+        ])
+
+    def show_recovery_center(self):
+        import mwmanager_recovery
+        try:
+            inventory = mwmanager_recovery.build_recovery_inventory(
+                APP_DIR, self.settings["game_dir"],
+                APP_DIR / "staging" / "major_masters")
+        except (OSError, ValueError, TypeError) as exc:
+            messagebox.showerror("Recovery scan failed", str(exc), parent=self)
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("MWManager recovery center")
+        dialog.transient(self)
+        dialog.minsize(760, 420)
+        center(dialog, self, 900, 560)
+        frame = ttk.Frame(dialog, padding=16)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Interrupted operations and deployment ownership",
+                  style="H2.TLabel").pack(anchor="w")
+        summary = inventory["counts"]
+        ttk.Label(frame, text=(f"{summary['items']} item(s), {summary['recoverable']} recoverable, "
+                               f"{summary['needs_review']} need review"),
+                  style="Muted.TLabel").pack(anchor="w", pady=(4, 10))
+        columns = ("kind", "status", "label", "id")
+        tree = ttk.Treeview(frame, columns=columns, show="headings", selectmode="browse")
+        for name, title, width in (("kind", "Kind", 145), ("status", "Status", 105),
+                                   ("label", "Item", 450), ("id", "ID", 160)):
+            tree.heading(name, text=title)
+            tree.column(name, width=width, stretch=name == "label")
+        scroll = ttk.Scrollbar(frame, command=tree.yview)
+        tree.configure(yscrollcommand=scroll.set)
+        tree.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        by_id = {}
+        for item in inventory["items"]:
+            iid = tree.insert("", "end", values=(
+                item["kind"], item["status"], item["label"], item["id"]))
+            by_id[iid] = item
+        footer = ttk.Frame(dialog, padding=(16, 0, 16, 16))
+        footer.pack(fill="x")
+
+        def recover_selected():
+            selection = tree.selection()
+            if not selection:
+                return
+            item = by_id[selection[0]]
+            if not item.get("recoverable"):
+                self._show_tool_report("Recovery needs review", [
+                    item["label"], "", item.get("details", {}).get("problem")
+                    or "This item is not safe to recover automatically.",
+                ])
+                return
+            if not messagebox.askyesno(
+                    "Recover selected item",
+                    f"Recover this item?\n\n{item['label']}\n\n"
+                    "MWManager will retain any modified file that cannot be safely restored.",
+                    parent=dialog):
+                return
+            try:
+                result = mwmanager_recovery.recover_item(
+                    APP_DIR, self.settings["game_dir"], item["id"],
+                    APP_DIR / "staging" / "major_masters")
+            except (OSError, KeyError, RuntimeError, ValueError) as exc:
+                messagebox.showerror("Recovery failed", str(exc), parent=dialog)
+                return
+            dialog.destroy()
+            self.settings = read_settings()
+            self.order = read_order()
+            self.active_names = {name.casefold() for name in self.order}
+            self.major_masters = set(configured_major_masters())
+            self.refresh()
+            self._show_tool_report("Recovery complete", [
+                f"Action: {result.get('action')}",
+                f"Removed: {result.get('removed', 0)}",
+                f"Restored: {result.get('restored', 0)}",
+                f"Pending: {result.get('pending', 0)}",
+            ])
+
+        ttk.Button(footer, text="Recover selected", command=recover_selected).pack(side="right")
+        ttk.Button(footer, text="Close", command=dialog.destroy).pack(side="right", padx=(0, 8))
+
+    def save_install_profile(self):
+        import mwmanager_profiles
+        name = messagebox.askstring("Save install profile", "Profile name:", parent=self)
+        if not name:
+            return
+        note = messagebox.askstring("Save install profile", "Optional note:", parent=self) or ""
+        try:
+            path = mwmanager_profiles.save(APP_DIR, name, note=note)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Could not save profile", str(exc), parent=self)
+            return
+        messagebox.showinfo("Profile saved", f"Saved {name} to:\n\n{path}", parent=self)
+
+    def apply_install_profile(self):
+        import mwmanager_profiles
+        profiles = mwmanager_profiles.list_profiles(APP_DIR)
+        if not profiles:
+            messagebox.showinfo("Install profiles", "No saved profiles are available.", parent=self)
+            return
+        choices = [(f"{item['name']} — {item.get('note') or item.get('saved_at')}", item["name"])
+                   for item in profiles]
+        dialog = tk.Toplevel(self)
+        dialog.title("Apply install profile")
+        dialog.transient(self)
+        dialog.grab_set()
+        center(dialog, self, 620, 360)
+        selection = tk.StringVar(value=choices[0][1])
+        frame = ttk.Frame(dialog, padding=20)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Choose the manager choices to restore:",
+                  style="H2.TLabel").pack(anchor="w", pady=(0, 10))
+        for label, value in choices:
+            ttk.Radiobutton(frame, text=label, variable=selection, value=value).pack(anchor="w", pady=3)
+
+        def apply_selected():
+            name = selection.get()
+            delta = mwmanager_profiles.compare(APP_DIR, name)
+            changed = delta["changed"] + delta["missing"] + delta["extra"]
+            if not messagebox.askyesno(
+                    "Apply install profile",
+                    f"Apply {name}?\n\n{len(changed)} managed state file(s) differ. "
+                    "This restores manager choices only; it does not redeploy or remove game files.",
+                    parent=dialog):
+                return
+            try:
+                result = mwmanager_profiles.apply(APP_DIR, name)
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("Could not apply profile", str(exc), parent=dialog)
+                return
+            dialog.destroy()
+            self.settings = read_settings()
+            self.order = read_order()
+            self.active_names = {name.casefold() for name in self.order}
+            self.major_masters = set(configured_major_masters())
+            self.refresh()
+            messagebox.showinfo(
+                "Profile applied",
+                f"Restored {len(result['restored'])} state file(s).\n\nBackup: {result['backup_dir']}",
+                parent=self)
+
+        ttk.Button(frame, text="Apply profile", command=apply_selected).pack(anchor="e", pady=(14, 0))
+
+    def preview_staged_install(self):
+        import mwmanager_install_plan
+        initial = APP_DIR / "staging" / "plugins"
+        package = filedialog.askdirectory(parent=self, title="Choose a staged plugin package",
+                                          initialdir=str(initial))
+        if not package:
+            return
+        package_path = Path(package).resolve()
+        plugins = sorted(path.name for path in package_path.rglob("*")
+                         if path.suffix.casefold() in {".esp", ".esm"})
+        try:
+            plan = mwmanager_install_plan.build(
+                {"selected_plugins": plugins}, package_path,
+                Path(self.settings["game_dir"]) / "Data Files", APP_DIR)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Preview failed", str(exc), parent=self)
+            return
+        lines = mwmanager_install_plan.render(plan)
+        lines.extend([
+            "",
+            "Operations:",
+            *[f"  {op['action']}: {op['relative_target']} ({op['size']:,} bytes)"
+              for op in plan["operations"][:500]],
+        ])
+        self._show_tool_report("Staged install preview", lines)
+
+    def compare_staged_update(self):
+        import mwmanager_update_impact
+        initial = APP_DIR / "staging" / "plugins"
+        old = filedialog.askdirectory(parent=self, title="Choose the current/deployed staged package",
+                                      initialdir=str(initial))
+        if not old:
+            return
+        new = filedialog.askdirectory(parent=self, title="Choose the replacement staged package",
+                                      initialdir=str(old))
+        if not new:
+            return
+        try:
+            report = mwmanager_update_impact.compare(Path(old), Path(new))
+        except (OSError, ValueError) as exc:
+            messagebox.showerror("Update comparison failed", str(exc), parent=self)
+            return
+        files = report["files"]
+        lines = [
+            f"Risk score: {mwmanager_update_impact.risk_score(report)}",
+            f"Files added: {len(files['added'])}",
+            *(f"  + {path}" for path in files["added"]),
+            f"Files removed: {len(files['removed'])}",
+            *(f"  - {path}" for path in files["removed"]),
+            f"Files changed: {len(files['changed'])}",
+            *(f"  ~ {path}" for path in files["changed"]),
+            "",
+            "Plugins:",
+            *[f"  {item['plugin']}: {item['status']}, +{item.get('records_added', 0)} "
+              f"-{item.get('records_removed', 0)} ~{item.get('records_changed', 0)} records"
+              for item in report["plugins"]],
+        ]
+        self._show_tool_report("Staged update impact", lines)
 
     def _ensure_archive_downloads(self):
         """Make sure an Archive Downloads folder is set: a detected mod manager's folder, or one the user chose."""
@@ -1756,7 +2078,9 @@ class ManagerGUI(tk.Tk):
             if name.casefold() not in seen:
                 order.append(name)
                 seen.add(name.casefold())
-        installed_major = [disk[n.casefold()] for n in self.major_masters if n.casefold() in disk]
+        deployed_major = deployed_master_names()
+        installed_major = [disk[n.casefold()] for n in self.major_masters
+                           if n.casefold() in disk and n.casefold() in deployed_major]
         self.installed_major_names = {n.casefold() for n in installed_major}
         core_names = [disk.get(n.casefold(), n) for n in CORE]
         core_keys = {n.casefold() for n in CORE}
@@ -2218,21 +2542,42 @@ class ManagerGUI(tk.Tk):
                 # Preflight the entire batch before the first package changes Data Files.
                 for package, label in pending:
                     check_deploy_path_lengths(package, data_dir, label)
-                for package, label in pending:
-                    progress(f"Deploying {label}…")
-                    item = pending_items[str(package)]
-                    refreshed = pull_updated_steam_luas(package)
-                    if refreshed:
-                        progress(f"Refreshed {len(refreshed)} MWSE Lua file(s) from the Steam install for {label}.")
-                    linked, _skipped, operations = deploy_package(
-                        package, data_dir, label, APP_DIR / "protected_replacer_textures.json")
-                    archives = sorted(package.glob("*.bsa"), key=lambda path: path.name.casefold())
-                    registrations = register_archives(data_dir.parent / "Morrowind.ini", archives, APP_DIR)
-                    plugins = item.get("selected_plugins", item.get("plugins", []))
-                    record_deployment(APP_DIR, item, package, operations, archives, registrations, data_dir)
-                    index_deployment(APP_DIR, data_dir, plugins, archives)
-                    _remove_ready_plugin_stage(package)
-                    progress(f"Deployed {linked:,} files from {label}.")
+                from workflow_safety import DurableTransaction
+                transaction_root = APP_DIR / "transactions" / "plugin-deploy"
+                DurableTransaction.recover(
+                    transaction_root, [APP_DIR, data_dir.parent, staging_root])
+                transaction = DurableTransaction(
+                    transaction_root, [APP_DIR, data_dir.parent, staging_root]).begin()
+                try:
+                    for path in (
+                            data_dir.parent / "Morrowind.ini",
+                            APP_DIR / "plugin_deployments.json",
+                            APP_DIR / "protected_replacer_textures.json",
+                            APP_DIR / "journal" / "install.jsonl",
+                            APP_DIR / "journal" / "runs.jsonl",
+                            APP_DIR / "game_catalog.sqlite3",
+                            PLUGIN_STAGE_MANIFEST):
+                        transaction.snapshot(path, database=path.name == "game_catalog.sqlite3")
+                    for package, label in pending:
+                        progress(f"Deploying {label}…")
+                        item = pending_items[str(package)]
+                        refreshed = pull_updated_steam_luas(package)
+                        if refreshed:
+                            progress(f"Refreshed {len(refreshed)} MWSE Lua file(s) from the Steam install for {label}.")
+                        linked, _skipped, operations = deploy_package(
+                            package, data_dir, label, APP_DIR / "protected_replacer_textures.json",
+                            transaction=transaction)
+                        archives = sorted(package.glob("*.bsa"), key=lambda path: path.name.casefold())
+                        registrations = register_archives(data_dir.parent / "Morrowind.ini", archives, APP_DIR)
+                        plugins = item.get("selected_plugins", item.get("plugins", []))
+                        record_deployment(APP_DIR, item, package, operations, archives, registrations, data_dir)
+                        index_deployment(APP_DIR, data_dir, plugins, archives)
+                        _remove_ready_plugin_stage(package)
+                        progress(f"Deployed {linked:,} files from {label}.")
+                    transaction.commit()
+                except BaseException:
+                    transaction.rollback()
+                    raise
                 progress("Running --all checks and resolving newly surfaced cell conflicts…")
                 run_batch_check(progress)
                 pending = []
@@ -3093,26 +3438,31 @@ class ManagerGUI(tk.Tk):
         def refresh_masters():
             if not dialog.winfo_exists():
                 return
-            from major_master_deploy import staged_masters
+            from major_master_deploy import deployment_status, staged_masters
             staged_map = staged_masters(APP_DIR / "staging" / "major_masters", masters)
             tree.delete(*tree.get_children())
             required_names = self._required_major_master_names()
             unfinished = {name.casefold() for name in self._unfinished_master_stages(masters)}
             for i, name in enumerate(masters, 1):
-                exists = (data_dir / name).is_file()
                 key = name.casefold()
+                status_info = deployment_status(
+                    name, data_dir, APP_DIR, staged=key in staged_map)
+                exists = status_info["state"] == "deployed"
                 enabled = key in self.selected_major_masters
-                ready = key in staged_map and not exists
+                ready = status_info["state"] == "ready"
                 required = name.casefold() in required_names
                 if required and (exists or ready):
                     self.selected_major_masters.add(key)
                     if exists:
                         self.active_names.add(name.casefold())
                 check = "☑" if (exists or ready) and (enabled or required) else "☐"
-                state = "Installed" if exists else "Ready for install" if ready else "Not staged"
+                state = status_info["label"]
                 if ready and key in unfinished:
                     state = "Needs processing"
-                tag = "required" if required else "installed" if exists else "ready" if ready else "absent"
+                if status_info["state"] in {"recovery", "missing", "untracked"}:
+                    tag = "required"
+                else:
+                    tag = "required" if required else "installed" if exists else "ready" if ready else "absent"
                 tree.insert("", "end", iid=name, text=f"{i:02d}  {name}", values=(check, state), tags=(tag,))
             self.deploy_master_button.state(["!disabled"] if any(
                 name.casefold() in self.selected_major_masters and name.casefold() in staged_map
@@ -3419,6 +3769,9 @@ class ManagerGUI(tk.Tk):
         if cache.get(kind, (None,))[0] != stamps:
             cache[kind] = (stamps, compute())
         return set(cache[kind][1])
+
+    def _clear_major_master_scan_cache(self):
+        self.__dict__.pop("_master_scan_cache", None)
 
     def _staged_major_master_names(self):
         """Return configured major-master ESMs present in current staged packages."""
@@ -3979,6 +4332,10 @@ class ManagerGUI(tk.Tk):
                 control.check()
                 from workflow_safety import mutation_lock
                 with mutation_lock(APP_DIR, self.settings["game_dir"]):
+                    from workflow_safety import DurableTransaction
+                    DurableTransaction.recover(
+                        APP_DIR / "transactions" / "plugin-deploy",
+                        [APP_DIR, Path(self.settings["game_dir"]), APP_DIR / "staging" / "plugins"])
                     from major_master_deploy import recovery_pending, recover_deployment
                     if recovery_pending(APP_DIR):
                         report("Recovering interrupted installation changes before starting this job.")
@@ -4212,10 +4569,12 @@ class ManagerGUI(tk.Tk):
             walk(self)
             self._busy_widget_states = saved
             self._busy_menu_states = []
-            for index in range((self.file_menu.index("end") or 0) + 1):
-                if self.file_menu.type(index) == "command":
-                    self._busy_menu_states.append((index, self.file_menu.entrycget(index, "state")))
-                    self.file_menu.entryconfigure(index, state="disabled")
+            for menu in (self.file_menu, self.tools_menu):
+                for index in range((menu.index("end") or 0) + 1):
+                    if menu.type(index) == "command":
+                        self._busy_menu_states.append(
+                            (menu, index, menu.entrycget(index, "state")))
+                        menu.entryconfigure(index, state="disabled")
         else:
             for widget, previous in getattr(self, "_busy_widget_states", []):
                 try:
@@ -4223,8 +4582,8 @@ class ManagerGUI(tk.Tk):
                     widget.state(previous)
                 except tk.TclError:
                     pass
-            for index, state in getattr(self, "_busy_menu_states", []):
-                self.file_menu.entryconfigure(index, state=state)
+            for menu, index, state in getattr(self, "_busy_menu_states", []):
+                menu.entryconfigure(index, state=state)
             self._busy_widget_states = []
 
     def _pause_setup(self, reason):
@@ -4294,25 +4653,85 @@ class ManagerGUI(tk.Tk):
                     "Major-master staging had finished when MWManager was closed.\n\n"
                     "Deploy the staged masters to the game now?"))
         elif step == "major_masters_deployed":
-            from major_master_deploy import recover_deployment, recovery_pending
+            from major_master_deploy import (
+                recover_deployment, recovery_pending, tracked_deployment_masters,
+            )
             if recovery_pending(APP_DIR):
                 def recovered(_result, error):
                     if error:
                         self._setup_fail("major_masters_deployed", error)
                         messagebox.showerror("Deployment recovery needs review", str(error), parent=self)
                     else:
-                        self._initialize_plugin_baseline()
+                        self._clear_major_master_scan_cache()
+                        self._initialize_plugin_baseline(force=True)
                         self.status.set("Interrupted deployment recovered. Review the selected masters before deploying.")
+                        self.refresh()
                         if hasattr(self, "_major_master_refresh"):
                             self._major_master_refresh()
                 self.after(300, lambda: self._run_progress_job(
                     "Recover interrupted deployment", "Reconciling the interrupted deployment before continuing.",
                     lambda progress: recover_deployment(APP_DIR, self.settings["game_dir"]), recovered))
             else:
-                self.after(300, self.deploy_major_masters)
+                data_dir = Path(self.settings["game_dir"]) / "Data Files"
+                tracked = {name.casefold() for name in tracked_deployment_masters(APP_DIR)}
+                live = {name.casefold() for name in self.major_masters
+                        if (data_dir / name).is_file()}
+                staged = self._staged_major_master_names()
+                untracked = live - tracked
+                if tracked and not untracked and all(name in live for name in tracked):
+                    self._setup_complete("major_masters_deployed")
+                    self._clear_major_master_scan_cache()
+                    self.status.set("Deployment state is complete; the deployed masters are now tracked.")
+                    self._initialize_plugin_baseline(force=True)
+                    self.refresh()
+                elif untracked:
+                    self._setup_fail(
+                        "major_masters_deployed",
+                        "Live major-master files exist without a committed deployment record; recovery/review is required.")
+                    self.status.set(
+                        "Deployment recovery required: major-master files are untracked. "
+                        "Open Tools > Recovery center; nothing was automatically redeployed.")
+                elif tracked:
+                    self._setup_fail(
+                        "major_masters_deployed",
+                        "Committed deployment state references major-master files that are missing or incomplete.")
+                    self.status.set(
+                        "Deployment recovery required: committed major-master files are missing. "
+                        "Use Remove deployed masters or the Recovery center.")
+                elif staged:
+                    self.after(300, self.deploy_major_masters)
+                else:
+                    self._setup_complete("major_masters_deployed")
+                    self._clear_major_master_scan_cache()
+                    self.status.set(
+                        "No major-master deployment was committed; staging is not present, "
+                        "so the main view was reconciled from live state.")
+                    self._initialize_plugin_baseline(force=True)
+                    self.refresh()
         if open_dialog:
             self.open_major_masters()
         return True
+
+    def _resume_interrupted_plugin_deployment(self):
+        from workflow_safety import DurableTransaction
+        root = APP_DIR / "transactions" / "plugin-deploy"
+        if not root.is_dir():
+            return
+
+        def recovered(_result, error):
+            if error:
+                messagebox.showerror("Plugin deployment recovery needs review", str(error), parent=self)
+            else:
+                self.status.set("Interrupted plugin deployment recovered; no incomplete files were left active.")
+                self.refresh()
+
+        self._run_progress_job(
+            "Recover interrupted plugin deployment",
+            "Reconciling the interrupted regular-plugin deployment before continuing.",
+            lambda _progress: DurableTransaction.recover(
+                root, [APP_DIR, Path(self.settings["game_dir"]),
+                       APP_DIR / "staging" / "plugins"]),
+            recovered)
 
     def _set_staging_run(self, masters):
         """Remember (or, with None, forget) the masters chosen for the staging run in progress."""
@@ -4390,7 +4809,10 @@ class ManagerGUI(tk.Tk):
 
                 env = os.environ.copy()          # the option window's "Open source archive" button reads this
                 archive = _read_staged_archive_marker(mod_dir).get("archive")
-                if archive:
+                archive_path = _read_staged_archive_marker(mod_dir).get("archive_path")
+                if archive_path:
+                    source_archive = Path(archive_path)
+                elif archive:
                     source_archive = Path(archive)
                     if not source_archive.is_absolute():
                         source_archive = Path(self.settings.get("archive_downloads_dir", "")) / source_archive

@@ -725,6 +725,13 @@ class Journal:
             if k == "morrowind.ini":
                 continue                         # the whole baseline INI is authoritative, including old ledgers
             rel = original["path"]
+            if k not in rollback_checkpoint:
+                # A later repair may have preserved the bytes of a file generated after
+                # the checkpoint. Checkpoint ownership is authoritative: if the file
+                # did not exist at the prerequisite point, it must be deleted, not
+                # reconstructed from its later first journaled state.
+                steps.append({"op": "delete", "path": rel})
+                continue
             if original["kind"] == "absent":
                 steps.append({"op": "delete", "path": rel})
                 continue

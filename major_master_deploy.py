@@ -450,6 +450,8 @@ def assert_package_disposable(package, staging, data_dir, manager_dir, configure
             if any(op.get(key) and Path(op[key]).resolve().is_relative_to(package)
                    for key in ("source", "backup")):
                 raise ValueError(f"{package.name} is referenced by a deployment; remove that deployment first.")
+    if package_has_live_deployment(package, data_dir):
+        raise ValueError(f"{package.name} still owns live deployed files; remove its deployment first.")
     for name, source in staged_masters(staging, configured).items():
         if source.resolve().is_relative_to(package) and any(
                 path.name.casefold() == name for path in Path(data_dir).glob("*") if path.is_file()):
@@ -486,6 +488,73 @@ def tracked_deployment_masters(manager_dir: Path) -> list[str]:
     state = _read_deployment_state(manager_dir)
     return list(dict.fromkeys(name for deployment in state["deployments"]
                               for name in deployment.get("masters", [])))
+
+
+def deployment_status(name: str, data_dir: Path, manager_dir: Path,
+                      *, staged: bool = False) -> dict:
+    """Classify one configured master from live files plus durable ownership state."""
+    data_dir, manager_dir = Path(data_dir).resolve(), Path(manager_dir).resolve()
+    path = data_dir / name
+    live = path.is_file()
+    deployments = _read_deployment_state(manager_dir)["deployments"]
+    tracked = next((entry for entry in reversed(deployments)
+                    if str(name).casefold() in {
+                        str(master).casefold() for master in entry.get("masters", [])}), None)
+    active_targets = {
+        Path(operation.get("target", "")).resolve()
+        for entry in deployments if isinstance(entry, dict)
+        for operation in entry.get("operations", [])
+        if operation.get("target")
+    }
+    if recovery_pending(manager_dir):
+        transaction = manager_dir / "transactions" / "major-master-deploy"
+        if transaction.is_dir():
+            return {"state": "recovery", "label": "Recovery required",
+                    "live": live, "tracked": bool(tracked)}
+    if live and tracked and path.resolve() in active_targets:
+        return {"state": "deployed", "label": "Deployed", "live": True, "tracked": True}
+    if tracked:
+        return {"state": "missing", "label": "Deployment incomplete",
+                "live": live, "tracked": True}
+    if live:
+        return {"state": "untracked", "label": "Untracked on disk",
+                "live": True, "tracked": False}
+    if staged:
+        return {"state": "ready", "label": "Ready for install",
+                "live": False, "tracked": False}
+    return {"state": "absent", "label": "Not staged", "live": False, "tracked": False}
+
+
+def package_has_live_deployment(package: Path, data_dir: Path) -> bool:
+    """An ESM or payload file in this package still owns a live game target."""
+    package, data_dir = Path(package).resolve(), Path(data_dir).resolve()
+    for source in package.rglob("*"):
+        try:
+            relative_parts = source.relative_to(package).parts
+        except ValueError:
+            continue
+        if any(part.casefold() in SKIP_FOLDERS or part.startswith(".")
+               for part in relative_parts[:-1]):
+            continue
+        if not source.is_file() or source.name.startswith("."):
+            continue
+        relative = _data_relative(package, source)
+        if not relative.parts:
+            continue
+        target = (data_dir.parent / relative
+                  if relative.parts[0].casefold() in GAME_ROOT_FOLDERS
+                  else data_dir / source.name
+                  if source.suffix.casefold() in {".esm", ".esp", ".bsa"}
+                  else data_dir / relative)
+        if not target.is_file():
+            continue
+        try:
+            if os.path.samefile(source, target):
+                return True
+        except OSError:
+            if target.stat().st_size == source.stat().st_size and sha256(target) == sha256(source):
+                return True
+    return False
 
 
 def has_tracked_deployment(manager_dir: Path) -> bool:
@@ -784,6 +853,7 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
                 ready).fetchall()
         deployment_state = _read_deployment_state(manager_dir)
         deployment_state["deployments"].append({
+            "deployed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "masters": ready,
             "archives": [Path(item["source"]).name for item in operations
                          if Path(item["source"]).suffix.casefold() == ".bsa"],

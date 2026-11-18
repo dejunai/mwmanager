@@ -8,13 +8,15 @@ from pathlib import Path
 import re
 import shutil
 import sqlite3
+import stat
 import subprocess
 import uuid
 import zipfile
 from datetime import datetime
 
 from core_addons import (ARCHIVE_EXTENSIONS, _members, _member_preflight,
-                         _archive_rank, _archive_esm_masters,
+                         _archive_rank, _archive_esm_masters, _seven_zip_listing,
+                         LARGE_ARCHIVE_BYTES,
                          _quiet_subprocess_options, _seven_zip, stamped_backup_path)
 
 SKIP_DIRS = {"off", "bugreports", "fomod", "extras", "docs", "screenshots"}
@@ -22,7 +24,12 @@ BSA_FOLDERS = {"bookart", "icons", "meshes", "textures", "video"}
 WINDOWS_MAX_PATH = 260  # MAX_PATH includes the terminating NUL; paths must stay below this length.
 PLUGIN_RENAMES = {"anthologysolstheim.esp": "AnthologySolstheimPatched.esp"}
 MASTER_RENAMES = {"tr_data.esm": "Tamriel_Data.esm"}
-ARCHIVE_SCAN_CACHE_VERSION = 1
+ARCHIVE_SCAN_CACHE_VERSION = 2
+MAX_EXPANDED_ARCHIVE_BYTES = 8 * 1024 ** 3
+MAX_EXPANDED_MEMBER_BYTES = 2 * 1024 ** 3
+MAX_ARCHIVE_MEMBERS = 100_000
+COMPRESSION_RATIO_LIMIT = 100
+COMPRESSION_RATIO_SAMPLE_BYTES = 1024 ** 2
 BLOCKED_PAYLOAD_EXTENSIONS = {
     # Executables, native libraries, installers, and common script formats.
     ".exe", ".dll", ".com", ".scr", ".msi", ".msp", ".cpl", ".ocx", ".sys",
@@ -76,6 +83,222 @@ def _allowed_script_payload(name: str) -> bool:
     if suffix in {".lua", ".dll"} and "mwse" in parts:
         return True
     return False
+
+
+def _blocked_archive_payloads(names: list[str]) -> list[str]:
+    normalized = [name.replace("\\", "/").lstrip("/") for name in names]
+    return sorted(
+        {name for name in normalized
+         if Path(name).suffix.casefold() in BLOCKED_PAYLOAD_EXTENSIONS
+         and not any(part.casefold() == "docs" for part in Path(name).parts)
+         and not any("openmw" in part.casefold() for part in Path(name).parts[:-1])
+         and not _allowed_script_payload(name)},
+        key=str.casefold,
+    )
+
+
+def _risk_finding(severity: str, code: str, message: str, **details) -> dict:
+    finding = {"severity": severity, "code": code, "message": message}
+    finding.update(details)
+    return finding
+
+
+def _technical_flag(value) -> bool:
+    return str(value or "").strip().casefold() in {"+", "yes", "true", "on", "1"}
+
+
+def _technical_size(value) -> int:
+    try:
+        return max(0, int(str(value).replace(",", "").strip()))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _technical_link_value(value) -> bool:
+    return bool(str(value or "").strip()) and str(value).strip().casefold() not in {
+        "-", "0", "false", "no", "none",
+    }
+
+
+def _seven_zip_member_is_link(record: dict[str, str]) -> bool:
+    attributes = str(record.get("attributes", "")).casefold()
+    mode = str(record.get("mode", "")).casefold()
+    link_type = str(record.get("link type", "")).casefold()
+    return bool(
+        _technical_link_value(record.get("symbolic link")) or
+        _technical_link_value(record.get("hard link")) or
+        "symbolic link" in attributes or "reparse" in attributes or
+        link_type in {"symbolic", "hard", "junction"} or
+        mode.startswith(("l", "j"))
+    )
+
+
+def analyze_archive(item: dict, manager: Path) -> dict:
+    """Inspect an archive without extracting it and return structured risk findings."""
+    archive = Path(item["archive"])
+    seven_zip = _seven_zip(manager)
+    names, inspection_error = _members(archive, seven_zip)
+    findings = []
+    if inspection_error:
+        findings.append(_risk_finding(
+            "high", "archive_inspection_error",
+            f"Archive could not be inspected: {inspection_error}",
+        ))
+
+    unsafe, collisions = _member_preflight(names)
+    findings.extend(_risk_finding("high", "unsafe_member_path", message)
+                    for message in unsafe)
+    findings.extend(_risk_finding("high", "path_collision", message)
+                    for message in collisions)
+
+    if not item.get("trusted_prerequisite"):
+        for payload in _blocked_archive_payloads(names):
+            findings.append(_risk_finding(
+                "high", "suspicious_payload",
+                f"Archive contains executable, library, or script payload: {payload}",
+                path=payload,
+            ))
+
+    expanded_bytes = member_count = 0
+    encrypted_paths = set()
+    link_paths = set()
+    solid = False
+    if not inspection_error and archive.suffix.casefold() == ".zip":
+        try:
+            with zipfile.ZipFile(archive) as zf:
+                infos = zf.infolist()
+                member_count = len(infos)
+                for info in infos:
+                    expanded_bytes += max(0, info.file_size)
+                    mode = info.external_attr >> 16
+                    is_link = stat.S_ISLNK(mode)
+                    # 0x400 is FILE_ATTRIBUTE_REPARSE_POINT in ZIP MS-DOS attributes.
+                    is_reparse = bool(info.external_attr & 0x400)
+                    if is_link or is_reparse:
+                        link_paths.add(info.filename)
+                    if info.flag_bits & 0x1:
+                        encrypted_paths.add(info.filename)
+                    ratio = info.file_size / max(1, info.compress_size)
+                    if (not info.is_dir() and info.file_size >= COMPRESSION_RATIO_SAMPLE_BYTES
+                            and ratio >= COMPRESSION_RATIO_LIMIT):
+                        findings.append(_risk_finding(
+                            "high", "compression_ratio_anomaly",
+                            f"Member has an unusually high compression ratio ({ratio:.1f}:1): "
+                            f"{info.filename}",
+                            path=info.filename, ratio=round(ratio, 2),
+                            expanded_bytes=info.file_size, packed_bytes=info.compress_size,
+                        ))
+                    if info.file_size > MAX_EXPANDED_MEMBER_BYTES:
+                        findings.append(_risk_finding(
+                            "high", "oversized_member",
+                            f"Member expands beyond the safety limit: {info.filename}",
+                            path=info.filename, expanded_bytes=info.file_size,
+                        ))
+        except (OSError, zipfile.BadZipFile) as exc:
+            findings.append(_risk_finding(
+                "high", "archive_inspection_error",
+                f"Archive details could not be inspected: {exc}",
+            ))
+    elif not inspection_error:
+        archive_record, records, detail_error = _seven_zip_listing(archive, seven_zip)
+        if detail_error:
+            findings.append(_risk_finding(
+                "high", "archive_inspection_error",
+                f"Archive details could not be inspected: {detail_error}",
+            ))
+        else:
+            member_count = len(records)
+            all_records = [archive_record, *records]
+            solid = any(_technical_flag(record.get("solid")) for record in all_records)
+            for record in records:
+                path = record.get("path", "")
+                size = _technical_size(record.get("size"))
+                packed = _technical_size(record.get("packed size"))
+                expanded_bytes += size
+                if (_technical_flag(record.get("encrypted"))
+                        or "encrypted" in str(record.get("method", "")).casefold()
+                        or "aes" in str(record.get("method", "")).casefold()):
+                    encrypted_paths.add(path)
+                if any(_technical_link_value(record.get(field)) for field in
+                       ("symbolic link", "hard link", "reparse", "reparse point")):
+                    link_paths.add(path)
+                elif _seven_zip_member_is_link(record):
+                    link_paths.add(path)
+                if (record.get("packed size") is not None and packed
+                        and size >= COMPRESSION_RATIO_SAMPLE_BYTES
+                        and size / packed >= COMPRESSION_RATIO_LIMIT):
+                    ratio = size / max(1, packed)
+                    findings.append(_risk_finding(
+                        "high", "compression_ratio_anomaly",
+                        f"Member has an unusually high compression ratio ({ratio:.1f}:1): {path}",
+                        path=path, ratio=round(ratio, 2),
+                        expanded_bytes=size, packed_bytes=packed,
+                    ))
+                if size > MAX_EXPANDED_MEMBER_BYTES:
+                    findings.append(_risk_finding(
+                        "high", "oversized_member",
+                        f"Member expands beyond the safety limit: {path}",
+                        path=path, expanded_bytes=size,
+                    ))
+            if (not encrypted_paths and any(
+                    _technical_flag(record.get("encrypted"))
+                    or "aes" in str(record.get("method", "")).casefold()
+                    for record in all_records)):
+                encrypted_paths.add("")
+
+    for path in sorted(encrypted_paths, key=str.casefold):
+        findings.append(_risk_finding(
+            "high", "encrypted_member",
+            "Archive or member is encrypted" + (f": {path}" if path else ""),
+            **({"path": path} if path else {}),
+        ))
+    for path in sorted(link_paths, key=str.casefold):
+        findings.append(_risk_finding(
+            "high", "link_member",
+            f"Archive contains a symbolic link, hard link, junction, or reparse point: {path}",
+            path=path,
+        ))
+    if solid:
+        findings.append(_risk_finding(
+            "medium", "solid_archive",
+            "Archive is solid; one corrupted member can affect extraction of later members.",
+        ))
+    if member_count > MAX_ARCHIVE_MEMBERS:
+        findings.append(_risk_finding(
+            "high", "excessive_member_count",
+            f"Archive contains an excessive number of members: {member_count}",
+            member_count=member_count,
+        ))
+    if expanded_bytes > MAX_EXPANDED_ARCHIVE_BYTES:
+        findings.append(_risk_finding(
+            "high", "oversized_archive",
+            f"Archive expands beyond the safety limit: {expanded_bytes} bytes",
+            expanded_bytes=expanded_bytes,
+        ))
+    try:
+        archive_bytes = archive.stat().st_size
+    except OSError:
+        archive_bytes = 0
+    if archive_bytes > LARGE_ARCHIVE_BYTES:
+        findings.append(_risk_finding(
+            "medium", "large_archive",
+            f"Archive is unusually large and may require significant disk and time: "
+            f"{archive_bytes} bytes",
+            archive_bytes=archive_bytes,
+        ))
+
+    high = [finding for finding in findings if finding["severity"] == "high"]
+    return {
+        "archive": str(archive),
+        "safe": not high,
+        "blocked": bool(high),
+        "findings": findings,
+        "member_names": names,
+        "member_count": member_count or len(names),
+        "expanded_bytes": expanded_bytes,
+        "archive_bytes": archive_bytes,
+        "high_severity_findings": high,
+    }
 
 
 def _canonical_plugin_name(name: str) -> str:
@@ -145,7 +368,8 @@ def _seven_zip_link_members(seven_zip: str, archive: Path) -> list[str]:
         attributes = str(fields.get("attributes", "")).lower()
         mode = str(fields.get("mode", "")).lower()
         if current and (
-                fields.get("symbolic link") or fields.get("hard link") or
+                _technical_link_value(fields.get("symbolic link")) or
+                _technical_link_value(fields.get("hard link")) or
                 "symbolic link" in attributes or "reparse" in attributes or
                 "reparse point" in attributes or mode.startswith(("l", "j"))):
             linked.append(current)
@@ -302,22 +526,23 @@ def scan_archives(downloads: Path, manager: Path, progress=None,
             continue
         if progress:
             progress(f"Inspecting archive {index} of {len(archives)}: {archive.name}")
-        names, error = _members(archive, seven_zip)
+        risk = analyze_archive({"archive": str(archive)}, manager)
+        names = risk["member_names"]
+        error = "; ".join(finding["message"] for finding in risk["findings"]
+                          if finding["code"] == "archive_inspection_error") or None
         normalized = [name.replace("\\", "/").lstrip("/") for name in names]
-        blocked_payloads = sorted({name for name in normalized
-                                   if Path(name).suffix.casefold() in BLOCKED_PAYLOAD_EXTENSIONS
-                                   and not any(part.casefold() == "docs" for part in Path(name).parts)
-                                   and not any("openmw" in part.casefold() for part in Path(name).parts[:-1])
-                                   and not _allowed_script_payload(name)},
-                                  key=str.casefold)
+        blocked_payloads = _blocked_archive_payloads(names)
         archive_plugins = sorted({Path(name).name for name in normalized
                                   if Path(name).suffix.casefold() in {".esp", ".esm"}}, key=str.casefold)
         plugin_masters = {}
-        for archive_plugin in archive_plugins:
-            plugin = _canonical_plugin_name(archive_plugin)
-            masters, master_error = _archive_esm_masters(archive, archive_plugin, manager, names)
-            if not master_error:
-                plugin_masters[plugin] = [MASTER_RENAMES.get(master.casefold(), master) for master in masters]
+        if not risk["blocked"]:
+            for archive_plugin in archive_plugins:
+                plugin = _canonical_plugin_name(archive_plugin)
+                masters, master_error = _archive_esm_masters(archive, archive_plugin, manager, names)
+                if not master_error:
+                    plugin_masters[plugin] = [
+                        MASTER_RENAMES.get(master.casefold(), master) for master in masters
+                    ]
         plugins = sorted({_canonical_plugin_name(name) for name in archive_plugins}, key=str.casefold)
         unsafe, collisions = _member_preflight(names)
         assets = [name for name in normalized if name and not name.endswith("/")
@@ -347,14 +572,13 @@ def scan_archives(downloads: Path, manager: Path, progress=None,
                 "has_fomod": has_fomod, "has_bain": bool(bain_dirs), "replacer": replacer,
                 "utility_route": utility[0] if utility else None,
                 "blocked_payloads": blocked_payloads,
-                "blocked": bool(error or unsafe or collisions or utility or blocked_payloads),
-                "problem": "; ".join(filter(None, [error, "; ".join(unsafe + collisions),
-                                                     ("Contains blocked executable/library/script file(s): "
-                                                      + ", ".join(blocked_payloads[:12])
-                                                      + (f" (and {len(blocked_payloads) - 12} more)"
-                                                         if len(blocked_payloads) > 12 else ""))
-                                                     if blocked_payloads else None,
-                                                     utility[1] if utility else None])),
+                "archive_risk": risk,
+                "blocked": bool(risk["blocked"] or utility),
+                "problem": "; ".join(filter(None, [
+                    "; ".join(finding["message"] for finding in risk["findings"]
+                              if finding["severity"] == "high"),
+                    utility[1] if utility else None,
+                ])),
                 "vortex_metadata": metadata}
         item["download_time"] = _download_timestamp(metadata, mtime)
         _apply_nexus_id_fallback(item, archive)
@@ -560,14 +784,13 @@ def pack_package_assets(package: Path, plugin_name: str, manager: Path, progress
 
 def extract_archive(item: dict, destination: Path, manager: Path) -> Path:
     archive = Path(item["archive"])
-    if item.get("blocked"):
-        raise ValueError(f"Archive needs review: {archive.name}: {item.get('problem') or 'unsafe archive'}")
-    names, error = _members(archive, _seven_zip(manager))
-    if error:
-        raise RuntimeError(f"Could not inspect {archive.name}: {error}")
-    unsafe, collisions = _member_preflight(names)
-    if unsafe or collisions:
-        raise ValueError(f"Archive paths are unsafe: {archive.name}: " + "; ".join(unsafe + collisions))
+    risk = analyze_archive(item, manager)
+    if risk["blocked"] or item.get("blocked"):
+        reasons = "; ".join(finding["message"] for finding in risk["high_severity_findings"])
+        raise ValueError(
+            f"Archive needs review: {archive.name}: "
+            f"{reasons or item.get('problem') or 'unsafe archive'}"
+        )
     destination = destination.resolve()
     if destination.exists():
         raise FileExistsError(f"Staging destination already exists: {destination}")
@@ -580,8 +803,10 @@ def extract_archive(item: dict, destination: Path, manager: Path) -> Path:
                 for entry in zf.infolist():
                     if entry.is_dir():
                         continue
-                    if (entry.external_attr >> 16) & 0o170000 == 0o120000:
-                        raise ValueError(f"Archive contains a symbolic link: {entry.filename}")
+                    if (stat.S_ISLNK(entry.external_attr >> 16)
+                            or entry.external_attr & 0x400):
+                        raise ValueError(f"Archive contains a symbolic or reparse link: "
+                                         f"{entry.filename}")
                     target = _safe_child(temporary, Path(entry.filename.replace("\\", "/")),
                                          label="Archive member")
                     target.parent.mkdir(parents=True, exist_ok=True)
@@ -610,7 +835,8 @@ def extract_archive(item: dict, destination: Path, manager: Path) -> Path:
 
 
 def deploy_package(package: Path, data_dir: Path, plugin_label: str,
-                   protected_texture_file: Path | None = None) -> tuple[int, int, list[dict]]:
+                   protected_texture_file: Path | None = None, *,
+                   transaction=None) -> tuple[int, int, list[dict]]:
     """Deploy tidied files, retaining replacer textures against later unrelated overrides."""
     check_deploy_path_lengths(package, data_dir, plugin_label)
     linked = skipped = 0
@@ -674,7 +900,10 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
             if is_texture and target.exists() and rel_key in protected and not protect_this_package:
                 retained = package / "Off" / _safe_name(Path(plugin_label).stem) / "protected textures" / rel
                 retained.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(source), str(retained))
+                if transaction:
+                    transaction.move(source, retained)
+                else:
+                    shutil.move(str(source), str(retained))
                 skipped += 1
                 continue
             if target.is_file() and target.stat().st_size == source.stat().st_size:
@@ -690,23 +919,36 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
                 if not target.is_file():
                     raise IsADirectoryError(f"A directory blocks deployment of {target}")
                 backup = stamped_backup_path(off_root / rel)
-                backup.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(target, backup)
-            copied = False
-            try:
-                os.link(source, target)
-            except OSError:
-                shutil.copy2(source, target)
-                copied = True
+                if not transaction:
+                    backup.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(target, backup)
+            elif transaction:
+                backup = stamped_backup_path(off_root / rel)
+            copied = os.path.splitdrive(str(source.resolve()))[0].casefold() != \
+                os.path.splitdrive(str(data_dir.resolve()))[0].casefold()
+            if transaction:
+                if copied:
+                    tx_operation = transaction.copy(source, target, backup)
+                else:
+                    tx_operation = transaction.link(source, target, backup)
+                backup = Path(tx_operation["backup"]) if tx_operation.get("backup") else None
+            else:
+                try:
+                    os.link(source, target)
+                except OSError:
+                    shutil.copy2(source, target)
+                    copied = True
             linked += 1
             operations.append({"source": str(source.resolve()), "target": str(target.resolve()),
                                "backup": str(backup.resolve()) if backup is not None else None,
                                "size": source.stat().st_size,
-                               "sha256": _sha256_file(source) if copied else None})
+                               "sha256": _sha256_file(source)})
     if protect_this_package:
         protected.update(texture_paths)
     if protected_texture_file:
         protected_texture_file.parent.mkdir(parents=True, exist_ok=True)
+        if transaction:
+            transaction.snapshot(protected_texture_file)
         temp = protected_texture_file.with_suffix(protected_texture_file.suffix + ".tmp")
         temp.write_text(json.dumps(sorted(protected), indent=2) + "\n", encoding="utf-8")
         os.replace(temp, protected_texture_file)
@@ -878,6 +1120,7 @@ def record_deployment(manager: Path, item: dict, package: Path, operations: list
     _apply_nexus_id_fallback(item, Path(source_archive)) if source_archive else None
     label = item.get("archive_label") or (Path(source_archive).name if source_archive else package.name)
     entry = {"id": uuid.uuid4().hex, "label": label,
+             "deployed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
              "archive": str(Path(source_archive).resolve()) if source_archive and not item.get("staged_only") else None,
              "nexus_mod_id": item.get("nexus_mod_id"), "nexus_file_id": item.get("nexus_file_id"),
              "rank": item.get("archive_rank"), "plugins": item.get("selected_plugins", item.get("plugins", [])),

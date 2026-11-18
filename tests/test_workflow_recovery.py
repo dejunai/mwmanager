@@ -54,6 +54,83 @@ def prepare_deployment(root, baseline=True):
 
 
 class BackendProbes(unittest.TestCase):
+    def test_major_master_archive_is_localized_before_staging(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager, game = root / "manager", root / "game"
+            manager.mkdir()
+            game.mkdir()
+            archive = root / "Vortex" / "A.zip"
+            archive.parent.mkdir()
+            with zipfile.ZipFile(archive, "w") as stream:
+                stream.writestr("A.esm", esm())
+            digest = ca._sha256(archive)
+            plan = {"archives": [{
+                "archive": str(archive), "core_masters": ["A.esm"],
+                "sha256": digest, "member_count": 1, "install_blocked": False,
+            }]}
+            staged = ca.stage_core_master_archives(
+                plan, ["A.esm"], manager, game, clear_staging=False)
+            marker = json.loads((staged[0] / ".mwmanager-stage.json").read_text())
+            cached = Path(marker["archive_path"])
+            self.assertTrue(cached.is_file())
+            self.assertTrue(cached.is_relative_to(manager / "archive_cache"))
+            self.assertNotEqual(cached.resolve(), archive.resolve())
+            self.assertEqual(ca._sha256(cached), digest)
+            archive.unlink()
+            self.assertEqual(ca.staged_source_archive(staged[0]), cached)
+
+    def test_stale_partial_staging_tree_is_removed_despite_readonly_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stale = root / ".extract-leftover"
+            child = stale / "nested"
+            child.mkdir(parents=True)
+            file = child / "held.txt"
+            file.write_text("partial", encoding="utf-8")
+            if os.name == "nt":
+                os.chmod(file, 0o400)
+                os.chmod(child, 0o400)
+                os.chmod(stale, 0o400)
+            ca._remove_staging_tree(stale)
+            self.assertFalse(stale.exists())
+
+    def test_untracked_live_hardlink_blocks_unstage_even_without_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package, data = prepare_deployment(root, baseline=False)
+            os.link(package / "A.esm", data / "A.esm")
+            self.assertFalse((root / "major_master_deployments.json").exists())
+            with self.assertRaisesRegex(ValueError, "live deployed files"):
+                deploy.unstage_packages(
+                    [package], package.parent, data, root, ["A.esm"])
+            self.assertTrue((data / "A.esm").exists())
+            self.assertTrue(package.exists())
+
+    def test_master_status_distinguishes_tracked_ready_and_untracked_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package, data = prepare_deployment(root, baseline=False)
+            ready = deploy.deployment_status("A.esm", data, root, staged=True)
+            self.assertEqual(ready["state"], "ready")
+            os.link(package / "A.esm", data / "A.esm")
+            untracked = deploy.deployment_status("A.esm", data, root, staged=True)
+            self.assertEqual(untracked["state"], "untracked")
+            digest = deploy.sha256(package / "A.esm")
+            (root / "major_master_deployments.json").write_text(json.dumps({
+                "version": 1,
+                "deployments": [{
+                    "masters": ["A.esm"],
+                    "operations": [{
+                        "source": str(package / "A.esm"),
+                        "target": str(data / "A.esm"),
+                        "sha256": digest,
+                    }],
+                }],
+            }), encoding="utf-8")
+            tracked = deploy.deployment_status("A.esm", data, root, staged=True)
+            self.assertEqual(tracked["state"], "deployed")
+
     def test_archive_name_collisions_keep_separate_packages(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -193,6 +270,46 @@ class BackendProbes(unittest.TestCase):
             self.assertFalse((data / "A.esm").exists())
             self.assertFalse((root / "major_master_deployments.json").exists())
             self.assertFalse(deploy.recovery_pending(root))
+
+    def test_regular_plugin_transaction_is_auto_recovered(self):
+        from workflow_safety import DurableTransaction
+        import mwmanager_recovery
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "staging" / "plugins" / "A"
+            data = root / "game" / "Data Files"
+            package.mkdir(parents=True)
+            data.mkdir(parents=True)
+            source, target = package / "A.esp", data / "A.esp"
+            source.write_bytes(b"new")
+            transaction = DurableTransaction(
+                root / "transactions" / "plugin-deploy",
+                [root, data.parent, package.parent]).begin()
+            transaction.link(source, target, package / "Off" / "A.esp")
+            inventory = mwmanager_recovery.build_recovery_inventory(root, data.parent, package.parent)
+            selected = next(item for item in inventory["items"]
+                            if item["kind"] == "transaction")
+            result = mwmanager_recovery.recover_item(
+                root, data.parent, selected, package.parent)
+            self.assertTrue(result["recovered"])
+            self.assertFalse(target.exists())
+            self.assertFalse(transaction.root.exists())
+
+    def test_repeated_snapshots_restore_the_transaction_start_state(self):
+        from workflow_safety import DurableTransaction
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            state = root / "state.json"
+            root.mkdir(exist_ok=True)
+            state.write_bytes(b"start")
+            transaction = DurableTransaction(
+                root / "transactions" / "snapshots", [root]).begin()
+            transaction.snapshot(state)
+            state.write_bytes(b"middle")
+            transaction.snapshot(state)
+            state.write_bytes(b"last")
+            transaction.rollback()
+            self.assertEqual(state.read_bytes(), b"start")
 
     def test_process_death_mid_deployment_recovers_and_retries(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -413,6 +530,8 @@ class GuiProbes(unittest.TestCase):
 
     def test_resume_schedules_interrupted_deployment(self):
         self.app.settings.update(first_run=0, init_complete=1)
+        self.package("A.esm", complete=True)
+        self.app._clear_major_master_scan_cache()
         self.app._setup_begin("major_masters_deployed")
         with mock.patch.object(self.app, "open_major_masters") as catalog, \
                 mock.patch.object(self.app, "deploy_major_masters") as actual_deploy, \
@@ -421,6 +540,32 @@ class GuiProbes(unittest.TestCase):
         catalog.assert_called_once()
         after.assert_called_with(300, actual_deploy)
         self.assertTrue(self.app._setup_done("major_masters_deployed") is False)
+
+    def test_interrupted_deploy_without_files_or_staging_is_reconciled(self):
+        self.app.settings.update(first_run=0, init_complete=1)
+        self.app.major_masters = ["A.esm"]
+        self.app._setup_begin("major_masters_deployed")
+        with mock.patch.object(self.app, "open_major_masters"), \
+                mock.patch.object(self.app, "deploy_major_masters") as deploy_now, \
+                mock.patch.object(self.app, "_initialize_plugin_baseline") as baseline:
+            self.assertTrue(self.app._resume_interrupted_major_masters())
+        deploy_now.assert_not_called()
+        baseline.assert_called_once_with(force=True)
+        self.assertTrue(self.app._setup_done("major_masters_deployed"))
+
+    def test_untracked_live_major_is_not_declared_deployed(self):
+        package = self.package("A.esm", complete=True)
+        data = Path(self.app.settings["game_dir"]) / "Data Files"
+        put(data, "A.esm", esm())
+        self.app.open_major_masters()
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        tree = next(widget for widget in descendants(self.app._major_master_dialog)
+                    if isinstance(widget, self.g.ttk.Treeview))
+        self.assertEqual(tree.item("A.esm")["values"][1], "Untracked on disk")
+        self.assertFalse(os.path.samefile(package / "A.esm", data / "A.esm"))
 
 
 if __name__ == "__main__":

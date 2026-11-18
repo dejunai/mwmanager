@@ -297,6 +297,12 @@ def _fomod_payload(mod_dir: Path, plugin: ET.Element, payload_root: Path | None 
                 source = fallback
             except ValueError:
                 pass
+        if not source.exists():
+            relative_source = Path(source_text.replace("\\", os.sep))
+            off_candidates = [path for path in (mod_dir / "Off").rglob(relative_source.as_posix())
+                              if path.exists()] if (mod_dir / "Off").is_dir() else []
+            if off_candidates:
+                source = sorted(off_candidates, key=lambda path: str(path).casefold())[0]
         destination = Path(destination_text.replace("\\", "/"))
         if destination.is_absolute() or ".." in destination.parts:
             continue

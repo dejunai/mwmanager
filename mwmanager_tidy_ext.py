@@ -19,7 +19,9 @@ import shutil
 import stat
 import struct
 import traceback
+import threading
 import xml.etree.ElementTree as ET
+from contextlib import contextmanager
 from pathlib import Path
 
 import mwdialog_check as _scanner
@@ -302,20 +304,20 @@ def plan_mod(mod_dir):
         except ValueError:
             return False
 
-    def move(src, dst, why):
+    def move(src, dst, why, *, force=False):
         fomod_state = fomod_path_state(src)
-        if dst and fomod_state == "file":
+        if dst and fomod_state == "file" and not force:
             # Leave individual declared files in place until their enclosing option
             # folder is moved, or relocate loose referenced files in the final pass.
             return
-        if dst and fomod_state == "contains":
+        if dst and fomod_state == "contains" and not force:
             # Keep FOMOD paths reusable, but move them out of the game-data root.
             # Relocating an ancestor preserves the complete archive-relative tree.
             if not already_in_fomod_extras(src):
                 relative = os.path.relpath(src, mod_dir)
                 dst = os.path.join(extras, relative)
                 why = "FOMOD support source -> Extras/<plugin> with its original relative path"
-        elif dst and fomod_state == "inside_dir":
+        elif dst and fomod_state == "inside_dir" and not force:
             # The source directory itself will be relocated as a unit later in this plan.
             return
         source_key = os.path.normcase(os.path.abspath(src))
@@ -494,7 +496,10 @@ def plan_mod(mod_dir):
     def link(src, dst, why):
         """A 00 Core file goes into the root as a hard link; its 00 folder stays whole under Extras. A file an option
         already put at that path wins: the core copy is still in Extras, so nothing is renamed or lost."""
-        planned_sources.add(os.path.normcase(os.path.abspath(src)))
+        source_key = os.path.normcase(os.path.abspath(src))
+        if source_key in planned_sources:
+            return
+        planned_sources.add(source_key)
         key = os.path.normcase(os.path.abspath(dst))
         if os.path.exists(dst) or key in taken:
             return
@@ -564,7 +569,7 @@ def plan_mod(mod_dir):
             if openmw_path or normal_map_folder or normal_map_has_diffuse:
                 reason = "OpenMW-only file or confirmed normal map retained under Off/<Vortex mod name>/OpenMW"
                 move(source, os.path.join(mod_dir, "Off", off_owner, "OpenMW", relative),
-                     reason)
+                     reason, force=openmw_path)
             optional_payload = any(
                 (match := re.match(r"^(\d{1,2})(?:\s+|[_-])", part))
                 and int(match.group(1)) > 0
@@ -1094,6 +1099,25 @@ def drop_covered_moves(res):
     return keep
 
 
+@contextmanager
+def _long_phase_heartbeat(message, interval=30):
+    """Keep long silent scans visibly active; the caller writes exact progress when available."""
+    stop = threading.Event()
+
+    def pulse():
+        while not stop.wait(interval):
+            print(f"MWMANAGER-PROGRESS: {message} — still working; this tool is active, not hung.",
+                  flush=True)
+
+    thread = threading.Thread(target=pulse, name="MWManager Tidy heartbeat", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=1)
+
+
 def run_plan(args):
     REVIEW.clear()
     CONVERTED_ADDONS.clear()
@@ -1114,7 +1138,10 @@ def run_plan(args):
         if hit:
             skipped.append((d, f"blacklisted ({hit})"))
             continue
-        res = drop_covered_moves(plan_mod(os.path.join(args.staging, d)))
+        if os.environ.get("MWMANAGER_GUI") == "1":
+            print(f"MWMANAGER-PROGRESS: Planning Tidy rules for {d}", flush=True)
+        with _long_phase_heartbeat(f"Planning Tidy rules for {d}"):
+            res = drop_covered_moves(plan_mod(os.path.join(args.staging, d)))
         if isinstance(res, str):
             skipped.append((d, res))
             continue
@@ -1452,6 +1479,24 @@ def apply(moves, staging, progress=None, head_extra=None):
     done, failed, packing = 0, [], {}
     plugins = sorted({_path_plugin(src, staging) for src, _dst, _why in moves if _path_plugin(src, staging)},
                      key=str.casefold)
+    total = len(moves)
+    last_reported = -1
+
+    def mark(index, *, force=False, record=True):
+        nonlocal last_reported
+        if record and progress is not None:
+            progress.append(index)
+        if (os.environ.get("MWMANAGER_GUI") == "1"
+                and (force or index == 0 or ((index + 1) % 2000 == 0 and index != total - 1)
+                     or index == total - 1)
+                and index != last_reported):
+            print(f"MWMANAGER-PROGRESS: Applying Tidy moves {index + 1:,} of {total:,}",
+                  file=sys.stderr, flush=True)
+            last_reported = index
+
+    if total and os.environ.get("MWMANAGER_GUI") == "1":
+        print(f"MWMANAGER-PROGRESS: Applying Tidy moves 0 of {total:,}",
+              file=sys.stderr, flush=True)
     head = {"run": time.strftime("%Y-%m-%d %H:%M:%S"), "staging": staging, "plugins": plugins}
     head.update(head_extra or {})
     with open(JOURNAL, "a", encoding="utf-8") as j:
@@ -1467,8 +1512,7 @@ def apply(moves, staging, progress=None, head_extra=None):
                                             "plugin": _path_plugin(src, staging)}) + "\n")
                         j.flush()
                         done += 1
-                        if progress is not None:
-                            progress.append(i)
+                        mark(i)
                         continue
                     for base, dirs, fns in os.walk(src, topdown=False):   # only empty folders go
                         if not os.listdir(base):
@@ -1494,8 +1538,7 @@ def apply(moves, staging, progress=None, head_extra=None):
                                 os.rmdir(base)
                             j.write(json.dumps({"rmdir": base, "plugin": _path_plugin(base, staging)}) + "\n")
                             j.flush()
-                    if progress is not None:
-                        progress.append(i)
+                    mark(i)
                     continue
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 if why.startswith(LINK_PREFIX):
@@ -1510,8 +1553,7 @@ def apply(moves, staging, progress=None, head_extra=None):
                     if PACKING_MARK in why:
                         packing.setdefault(_path_plugin(src, staging), []).append((src, dst, why))
                     done += 1
-                    if progress is not None:
-                        progress.append(i)
+                    mark(i)
                     continue
                 # journaled (on disk) before the move: a crash between the two never leaves a move --undo can't see
                 j.write(json.dumps({"src": src, "dst": dst, "plugin": _path_plugin(src, staging)}) + "\n")
@@ -1521,19 +1563,21 @@ def apply(moves, staging, progress=None, head_extra=None):
                 if PACKING_MARK in why:
                     packing.setdefault(_path_plugin(src, staging), []).append((src, dst, why))
                 done += 1
-                if progress is not None:
-                    progress.append(i)
+                mark(i)
                 if NO_DIFFUSE_WARNING in why:
                     print(f"  WARNING: moved {src} -> {dst}: {NO_DIFFUSE_WARNING}")
             except OSError as e:
                 print(f"  could not move {src}: {e}", file=sys.stderr)
                 failed.append((src, dst, why))
+                mark(i)
         # Prune by checking the live directory contents: os.walk's bottom-up
         # dirs list still includes children removed earlier in the same walk.
         _prune_empty_directories(staging, j)
     _write_packing_reports(staging, packing)
     print(f"Moved {done} item(s). Journal: {JOURNAL} (each entry names its package: --undo --only <package> "
           f"puts back that package's changes from every run, --undo alone the whole last run).")
+    if total and last_reported != total - 1:
+        mark(total - 1, force=True, record=False)
     return failed
 
 
@@ -2080,11 +2124,13 @@ def mwmanager_main(argv=None):
         run_post_option_tidy(args)
     if not args.apply:
         print("MWMANAGER-PROGRESS: Organizing plugin folders and checking tidy rules", flush=True)
-        rc = plan_main(args)
+        with _long_phase_heartbeat("Planning Tidy, Lua checks, and asset repairs"):
+            rc = plan_main(args)
         _plan_state(args)
         return rc
     print("MWMANAGER-PROGRESS: Applying the reviewed tidy plan", flush=True)
-    rc = apply_main(args)
+    with _long_phase_heartbeat("Validating and applying the reviewed tidy plan"):
+        rc = apply_main(args)
     if rc == 2:
         return rc
     update_omwaddon_masters(args.staging, apply_changes=True)

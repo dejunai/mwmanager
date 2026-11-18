@@ -7,6 +7,7 @@ import re
 import shutil
 import struct
 import subprocess
+import time
 import urllib.request
 import zipfile
 import hashlib
@@ -75,6 +76,56 @@ def _seven_zip(manager_dir: Path) -> str | None:
     return next((str(p) for p in candidates if p.is_file()), None)
 
 
+def _parse_seven_zip_listing(output: str) -> tuple[dict[str, str], list[dict[str, str]]]:
+    """Split 7-Zip's technical listing into archive and member properties."""
+    archive: dict[str, str] = {}
+    records: list[dict[str, str]] = []
+    current: dict[str, str] = {}
+
+    def finish():
+        nonlocal current
+        if current.get("path") not in (None, ""):
+            records.append(current)
+        current = {}
+
+    for line in output.splitlines():
+        if not line.strip():
+            finish()
+            continue
+        key, separator, value = line.partition(" = ")
+        if not separator:
+            continue
+        normalized = key.strip().casefold()
+        value = value.strip()
+        current[normalized] = value
+    finish()
+    if records:
+        archive = records.pop(0)
+    return archive, records
+
+
+def _seven_zip_listing(path: Path, seven_zip: str | None) -> tuple[
+        dict[str, str], list[dict[str, str]], str | None]:
+    if not seven_zip:
+        return {}, [], "7-Zip is required to inspect this archive format"
+    try:
+        result = subprocess.run([seven_zip, "l", "-slt", "-ba", "--", str(path)],
+                                capture_output=True, text=True, errors="replace", timeout=180,
+                                **_quiet_subprocess_options())
+        if result.returncode:
+            return {}, [], (result.stderr or result.stdout or
+                            f"7-Zip exited {result.returncode}").strip()
+        archive, records = _parse_seven_zip_listing(result.stdout)
+        # Some 7-Zip versions omit archive-level data with -ba. In that case the
+        # first record is the first member, so preserve it rather than losing a path.
+        if archive and archive.get("path") != str(path):
+            records.insert(0, archive)
+            archive = {}
+        return archive, records, None
+    except (OSError, subprocess.SubprocessError) as exc:
+        return {}, [], str(exc)
+
+
 def _members(path: Path, seven_zip: str | None) -> tuple[list[str], str | None]:
     if path.suffix.lower() == ".zip":
         try:
@@ -84,16 +135,10 @@ def _members(path: Path, seven_zip: str | None) -> tuple[list[str], str | None]:
             return [], str(exc)
     if not seven_zip:
         return [], "7-Zip is required to inspect this archive format"
-    try:
-        result = subprocess.run([seven_zip, "l", "-slt", "-ba", "--", str(path)],
-                                capture_output=True, text=True, errors="replace", timeout=180,
-                                **_quiet_subprocess_options())
-        if result.returncode:
-            return [], (result.stderr or result.stdout or f"7-Zip exited {result.returncode}").strip()
-        return [m.group(1) for line in result.stdout.splitlines()
-                if (m := re.match(r"Path = (.*)", line)) and m.group(1) not in (str(path), "")], None
-    except (OSError, subprocess.SubprocessError) as exc:
-        return [], str(exc)
+    _archive, records, error = _seven_zip_listing(path, seven_zip)
+    if error:
+        return [], error
+    return [record["path"] for record in records], None
 
 
 def _load_non_master_blacklist(manager: Path) -> dict:
@@ -255,7 +300,8 @@ def prepare_core_master_review(manager_dir: str | Path, game_dir: str | Path,
             continue
         archive_key = str(archive.resolve())
         if item.get("sha256") and archive_key not in archive_hashes:
-            archive_hashes[archive_key] = _sha256(archive)
+            archive_hashes[archive_key] = _sha256(
+                archive, progress, f"Verifying selected archive {archive.name}")
         if item.get("sha256") and archive_hashes[archive_key] != item["sha256"]:
             rows.append({"name": master, "deps": [], "error": "download changed since the archive scan; rescan required",
                          "installed": False, "selected": False, "path": str(archive),
@@ -580,12 +626,74 @@ _WINDOWS_RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 1
                     *(f"lpt{i}" for i in range(1, 10))}
 
 
-def _sha256(path: Path) -> str:
+def _sha256(path: Path, progress_callback=None, label=None) -> str:
     digest = hashlib.sha256()
+    total = 0
+    heartbeat = time.monotonic()
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
+            total += len(block)
+            if progress_callback and time.monotonic() - heartbeat >= 30:
+                size = path.stat().st_size
+                progress_callback(f"{label or f'Fingerprinting {path.name}'}: "
+                                  f"{total / 1024 ** 2:,.0f} MiB of {size / 1024 ** 2:,.0f} MiB; continuing.")
+                heartbeat = time.monotonic()
     return digest.hexdigest()
+
+
+def _local_major_master_archive(source: Path, manager: Path, expected_sha256: str | None,
+                                progress_callback=None) -> Path:
+    """Own a stable copy of a selected archive so Vortex paths can disappear after scan."""
+    from workflow_safety import require_space
+    source = Path(source).resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"Selected archive is no longer accessible: {source}")
+    digest = expected_sha256 or _sha256(
+        source, progress_callback, f"Fingerprinting {source.name} before local copy")
+    cache = manager / "archive_cache" / "major_masters"
+    cache.mkdir(parents=True, exist_ok=True)
+    clean_name = re.sub(r"[^A-Za-z0-9._ -]+", "_", source.name).strip(" .") or "archive"
+    destination = cache / f"{digest[:16]}-{clean_name}"
+    if destination.is_file():
+        if _sha256(destination, progress_callback,
+                   f"Verifying cached copy of {source.name}") == digest:
+            return destination
+        destination.unlink()
+    require_space(cache, source.stat().st_size + 64 * 1024 * 1024)
+    partial = destination.with_name(destination.name + f".{os.getpid()}.partial")
+    copied = 0
+    heartbeat = time.monotonic()
+    try:
+        with source.open("rb") as incoming, partial.open("wb") as outgoing:
+            while True:
+                block = incoming.read(4 * 1024 * 1024)
+                if not block:
+                    break
+                outgoing.write(block)
+                copied += len(block)
+                if progress_callback and time.monotonic() - heartbeat >= 30:
+                    progress_callback(
+                        f"Copying {source.name} into MWManager-owned archive storage: "
+                        f"{copied / 1024 ** 2:,.0f} MiB of "
+                        f"{source.stat().st_size / 1024 ** 2:,.0f} MiB; continuing.")
+                    heartbeat = time.monotonic()
+            outgoing.flush()
+            os.fsync(outgoing.fileno())
+        actual = _sha256(partial, progress_callback,
+                         f"Verifying local copy of {source.name}")
+        if actual != digest:
+            raise RuntimeError(
+                f"{source.name} changed while MWManager copied it; rescan the archive.")
+        os.replace(partial, destination)
+        if progress_callback:
+            progress_callback(
+                f"Saved a stable local archive copy: {destination.name}. "
+                "Later staging and recovery no longer depend on the Vortex download folder.")
+        return destination
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
 
 
 def _archive_path_key(name: str) -> str:
@@ -1003,7 +1111,9 @@ def scan_downloads(downloads_dir: str | os.PathLike, manager_dir: str | os.PathL
             progress_callback(f"Checking archive fingerprint {index} of {len(candidates)}: {archive.name}")
         try:
             stat = archive.stat()
-            fingerprint = _sha256(archive)
+            fingerprint = _sha256(
+                archive, progress_callback,
+                f"Fingerprinting archive {index} of {len(candidates)}: {archive.name}")
             size_bytes = stat.st_size
         except OSError as exc:
             fingerprint, size_bytes = None, None
@@ -1221,7 +1331,7 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
     staged: list[Path] = []
     selected_priority = {name.casefold(): i for i, name in enumerate(selected_masters)}
     ordered_archives = sorted(archives.values(), key=lambda x: min(
-            (selected_priority[name.casefold()] for name in item.get("core_masters", [])
+            (selected_priority[name.casefold()] for name in x.get("core_masters", [])
              if name.casefold() in selected_priority), default=len(selected_masters)))
     # A Stage action starts fresh once. Subsequent selected archives in the same
     # action must accumulate beside the first so dependencies and options can see them.
@@ -1230,7 +1340,7 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
             progress_callback("Clearing previous major-master staging before fresh extraction")
         for previous in staging.iterdir():
             if previous.is_dir() and not previous.is_symlink():
-                shutil.rmtree(previous, onerror=_rmtree_clear_readonly)
+                _remove_staging_tree(previous, progress_callback)
             else:
                 try:
                     os.chmod(previous, 0o666)
@@ -1238,13 +1348,15 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
                     pass
                 previous.unlink()
     for index, item in enumerate(ordered_archives, 1):
-        archive = Path(item["archive"]).resolve()
+        source_archive = Path(item["archive"]).resolve()
         if progress_callback:
-            progress_callback(f"Preparing archive {index} of {len(ordered_archives)}: {archive.name}")
+            progress_callback(
+                f"Preparing archive {index} of {len(ordered_archives)}: {source_archive.name}")
         if item.get("install_blocked") or item.get("inspection_error"):
-            raise ValueError(f"Archive failed safety inspection: {archive.name}")
-        if not archive.is_file() or (item.get("sha256") and _sha256(archive) != item["sha256"]):
-            raise ValueError(f"Archive is missing or changed since scan; scan again: {archive.name}")
+            raise ValueError(f"Archive failed safety inspection: {source_archive.name}")
+        archive = _local_major_master_archive(
+            source_archive, manager, item.get("sha256"), progress_callback)
+        archive_display_name = source_archive.name
         names, error = _members(archive, seven_zip)
         if error:
             raise ValueError(f"Could not list {archive.name}: {error}")
@@ -1252,13 +1364,15 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
         if unsafe or collisions:
             raise ValueError(f"Archive now contains unsafe or colliding paths: {archive.name}")
 
-        safe_stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .") or "major-master"
+        safe_stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", source_archive.stem).strip(" .") or "major-master"
         destination = staging / safe_stem
         old_marker = _read_staged_archive_marker(destination)
-        if old_marker and (old_marker.get("archive", "").casefold() != archive.name.casefold() or
-                           (old_marker.get("archive_path") and
-                            os.path.normcase(old_marker["archive_path"]) != os.path.normcase(str(archive)))):
-            destination = staging / (safe_stem + "-" + hashlib.sha256(str(archive).encode()).hexdigest()[:12])
+        if old_marker and (old_marker.get("archive", "").casefold() != archive_display_name.casefold() or
+                           (old_marker.get("archive_origin") and
+                            os.path.normcase(old_marker["archive_origin"]) !=
+                            os.path.normcase(str(source_archive)))):
+            destination = staging / (
+                safe_stem + "-" + hashlib.sha256(str(source_archive).encode()).hexdigest()[:12])
             old_marker = _read_staged_archive_marker(destination)
         package_masters = [name for name in selected_masters
                            if name.casefold() in {m.casefold() for m in item.get("core_masters", [])}]
@@ -1288,7 +1402,8 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
             steps["extracted"]["attempts"] = prior["extracted"]["attempts"]
         base_marker = {
             **_stage_plugin_identity(item, package_masters),
-            "archive": archive.name, "sha256": archive_hash, "archive_path": str(archive),
+            "archive": archive_display_name, "sha256": archive_hash, "archive_path": str(archive),
+            "archive_origin": str(source_archive),
             "processing_version": PACKAGE_PROCESSING_VERSION,
             "selected_masters": package_masters,
         }
@@ -1299,7 +1414,9 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
                 progress_callback(extraction_status(archive, index, len(ordered_archives)))
             if archive.suffix.casefold() == ".zip":
                 with zipfile.ZipFile(archive) as zf:
-                    for info in zf.infolist():
+                    members = zf.infolist()
+                    heartbeat = time.monotonic()
+                    for member_index, info in enumerate(members, 1):
                         if info.is_dir():
                             continue
                         # Unix symlink entries are not valid game assets and must not be materialized.
@@ -1312,12 +1429,20 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
                         target.parent.mkdir(parents=True, exist_ok=True)
                         with zf.open(info) as source, target.open("wb") as sink:
                             shutil.copyfileobj(source, sink, length=1024 * 1024)
+                        if (progress_callback and
+                                (time.monotonic() - heartbeat >= 30 or member_index == len(members))):
+                            progress_callback(
+                                f"Extracting {archive_display_name}: {member_index:,} of "
+                                f"{len(members):,} archive members; continuing.")
+                            heartbeat = time.monotonic()
             else:
                 if not seven_zip:
                     raise ValueError("7-Zip is required to extract this archive.")
                 import managed_processes
                 result = managed_processes.run([seven_zip, "x", f"-o{destination}", "-y", "--", str(archive)],
-                                        progress=progress_callback, text=True, errors="replace", timeout=7200,
+                                        progress=progress_callback,
+                                        heartbeat_label=f"Extracting {archive.name} with 7-Zip",
+                                        text=True, errors="replace", timeout=7200,
                                         **_quiet_subprocess_options())
                 if result.returncode:
                     raise RuntimeError((result.stderr or result.stdout or
@@ -1332,7 +1457,7 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
                 except BaseException:
                     os.replace(stale, published)
                     raise
-                shutil.rmtree(stale, onerror=_rmtree_clear_readonly)
+                _remove_staging_tree(stale, progress_callback)
             else:
                 os.replace(destination, published)
             staged.append(published)
@@ -1342,7 +1467,12 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
             # nothing half-extracted is left behind; only the marker stays, with the attempt and its error
             failed = (package_steps(destination) or steps)["extracted"]
             failed.update(completed_at=None, last_error=str(exc)[:2000])
-            shutil.rmtree(destination, ignore_errors=True)
+            try:
+                _remove_staging_tree(destination, progress_callback)
+            except OSError as cleanup_error:
+                raise RuntimeError(
+                    f"Extraction failed and MWManager could not clear the partial staging folder "
+                    f"{destination}: {cleanup_error}. Close Explorer/archive tools and retry.") from exc
             try:
                 if not published.exists():
                     published.mkdir(parents=True, exist_ok=True)
@@ -1568,7 +1698,12 @@ def staged_source_archive(package: str | Path) -> Path | None:
     """The archive a staged package came from: its marker keeps the file name, the folder is mwmanager.ini's
     [Paths] archive_downloads_dir (an absolute name in an older marker is used as it is). None when it is gone."""
     import configparser
-    name = str(_read_staged_archive_marker(Path(package)).get("archive") or "").strip()
+    marker = _read_staged_archive_marker(Path(package))
+    absolute = str(marker.get("archive_path") or "").strip()
+    if absolute:
+        candidate = Path(absolute)
+        return candidate if candidate.is_file() else None
+    name = str(marker.get("archive") or "").strip()
     if not name:
         return None
     candidate = Path(name)
@@ -1625,6 +1760,34 @@ def _rmtree_clear_readonly(func, path, _exc_info):
     else:
         os.chmod(path, 0o700)
     func(path)
+
+
+def _remove_staging_tree(path: str | Path, progress_callback=None) -> None:
+    """Retry removal of stale/partial extraction trees held briefly by Windows/AV."""
+    path = Path(path)
+    last_error = None
+    for attempt in range(12):
+        if not path.exists():
+            return
+        try:
+            if os.name == "nt":
+                for base, dirs, files in os.walk(path, topdown=True):
+                    for name in (*dirs, *files):
+                        child = Path(base) / name
+                        try:
+                            os.chmod(child, 0o700)
+                        except OSError:
+                            pass
+            shutil.rmtree(path, onerror=_rmtree_clear_readonly)
+            return
+        except OSError as exc:
+            last_error = exc
+            if progress_callback and (attempt == 0 or attempt % 4 == 0):
+                progress_callback(
+                    f"Waiting for Windows to release stale staging folder {path.name}; "
+                    f"cleanup attempt {attempt + 1} of 12. The tool is still active.")
+            time.sleep(min(0.25 * (attempt + 1), 2))
+    raise last_error or PermissionError(f"Could not remove {path}")
 
 
 def apply_plugin_replacement_overrides(trigger_plugin: str, data_dir: str | Path,
