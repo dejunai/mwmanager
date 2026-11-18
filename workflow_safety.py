@@ -188,12 +188,19 @@ class DurableTransaction:
         return self
 
     def record(self, operation):
+        self.record_many([operation])
+
+    def record_many(self, operations):
+        """Durably record a batch before applying any of its operations."""
+        if not operations:
+            return
         # Append-only intents avoid rewriting an ever-growing list per asset.
         with (self.root / "operations.jsonl").open("ab") as stream:
-            stream.write((json.dumps(operation) + "\n").encode())
+            for operation in operations:
+                stream.write((json.dumps(operation) + "\n").encode())
             stream.flush()
             os.fsync(stream.fileno())
-        self.state["operations"].append(operation)
+        self.state["operations"].extend(operations)
 
     def snapshot(self, path, *, database=False):
         path = self.safe(path)
@@ -216,23 +223,44 @@ class DurableTransaction:
         self.state["snapshots"].append(entry)
         self.save()
 
-    def link(self, source, target, backup):
-        source, target, backup = (self.safe(p) for p in (source, target, backup))
-        if target.exists() and not target.is_file():
-            raise IsADirectoryError(target)
-        if backup.exists():
-            raise FileExistsError(f"Refusing to overwrite a recovery backup: {backup}")
-        operation = {"kind": "link", "source": str(source), "target": str(target),
-                     "backup": str(backup) if target.exists() else None,
-                     "sha256": digest(source),
-                     "original_sha256": digest(target) if target.exists() else None}
-        self.record(operation)  # Durable before either backup or link changes the game.
-        target.parent.mkdir(parents=True, exist_ok=True)
-        if operation["backup"]:
-            backup.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(target, backup)
-        os.link(source, target)
-        return operation
+    def link(self, source, target, backup, *, source_sha256=None, target_sha256=None):
+        return self.link_many([(source, target, backup, source_sha256, target_sha256)])[0]
+
+    def link_many(self, links):
+        """Record unique-target hardlink intents with one flush, then apply them in order."""
+        operations = []
+        targets = set()
+        for source, target, backup, source_sha256, target_sha256 in links:
+            source, target, backup = (self.safe(p) for p in (source, target, backup))
+            target_key = os.path.normcase(str(target))
+            if target_key in targets:
+                raise ValueError(f"Duplicate target in hardlink batch: {target}")
+            targets.add(target_key)
+            if target.exists() and not target.is_file():
+                raise IsADirectoryError(target)
+            if backup.exists():
+                raise FileExistsError(f"Refusing to overwrite a recovery backup: {backup}")
+            target_exists = target.exists()
+            operation = {"kind": "link", "source": str(source), "target": str(target),
+                         "backup": str(backup) if target_exists else None,
+                         "sha256": str(source_sha256) if source_sha256 else None,
+                         "original_sha256": (str(target_sha256 or digest(target))
+                                              if target_exists else None)}
+            if not target_exists:
+                operation["verification"] = "hardlink"
+            elif not operation["sha256"]:
+                operation["sha256"] = digest(source)
+            operations.append(operation)
+        self.record_many(operations)  # Durable before any backup or link changes the game.
+        for operation in operations:
+            source, target = Path(operation["source"]), Path(operation["target"])
+            backup = Path(operation["backup"]) if operation.get("backup") else None
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if backup:
+                backup.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(target, backup)
+            os.link(source, target)
+        return operations
 
     def copy(self, source, target, backup):
         """Copy source to target while journaling the replacement before mutation."""
@@ -253,12 +281,12 @@ class DurableTransaction:
         shutil.copy2(source, target)
         return operation
 
-    def move(self, source, target):
+    def move(self, source, target, *, source_sha256=None):
         source, target = self.safe(source), self.safe(target)
         if target.exists():
             raise FileExistsError(target)
         operation = {"kind": "move", "source": str(source), "target": str(target),
-                     "sha256": digest(source)}
+                     "sha256": str(source_sha256 or digest(source))}
         self.record(operation)
         target.parent.mkdir(parents=True, exist_ok=True)
         os.replace(source, target)
@@ -285,11 +313,20 @@ class DurableTransaction:
             if backup and backup.exists() and digest(backup) != op["original_sha256"]:
                 raise RuntimeError(f"Recovery backup changed: {backup}")
             if target.exists():
-                actual = digest(target) if target.is_file() else None
+                if op.get("verification") == "hardlink":
+                    try:
+                        linked = source.is_file() and target.is_file() and os.path.samefile(source, target)
+                    except OSError:
+                        linked = False
+                    if not linked:
+                        raise RuntimeError(f"Recovery needs review; deployed hardlink changed: {target}")
+                    actual = None
+                else:
+                    actual = digest(target) if target.is_file() else None
                 if (op.get("original_sha256") is not None and actual == op["original_sha256"]
                         and not (backup and backup.exists())):
                     continue  # Intent not started, or already rolled back.
-                if actual != op["sha256"]:
+                if op.get("verification") != "hardlink" and actual != op["sha256"]:
                     raise RuntimeError(f"Recovery needs review; deployed file changed: {target}")
                 if backup and not backup.is_file():
                     raise RuntimeError(f"Recovery backup is missing: {backup}")

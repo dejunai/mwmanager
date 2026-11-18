@@ -899,8 +899,12 @@ def write_gui_state(state: dict) -> None:
 
 
 def deployed_master_names() -> set[str]:
-    from major_master_deploy import tracked_deployment_masters
-    return {name.casefold() for name in tracked_deployment_masters(APP_DIR)}
+    from major_master_deploy import deployment_statuses, tracked_deployment_masters
+    data_dir = Path(read_settings().get("game_dir", "")) / "Data Files"
+    tracked = tracked_deployment_masters(APP_DIR)
+    statuses = deployment_statuses(tracked, data_dir, APP_DIR)
+    return {name.casefold() for name in tracked
+            if statuses[name.casefold()]["state"] == "deployed"}
 
 
 def ordered_signature(plugin_names: list[str], order: list[str], active_names: set[str], game_dir: str) -> str:
@@ -1614,6 +1618,10 @@ class ManagerGUI(tk.Tk):
                 self.status.set("Initial Tidy stopped; --full was not started.")
                 self._show_report("Initial setup failed", log_path)
                 return
+            # The CLI sort may drop plugins whose masters are not installed yet. Do not let the
+            # pre-sort in-memory order add them back when generate_patches() saves the next pass.
+            self.order = read_order()
+            self.active_names = {name.casefold() for name in self.order}
             self.status.set("Shipped-plugin sort and Initial Tidy complete. Running the initial --full cycle…")
             self.after(100, on_success)
 
@@ -3438,15 +3446,15 @@ class ManagerGUI(tk.Tk):
         def refresh_masters():
             if not dialog.winfo_exists():
                 return
-            from major_master_deploy import deployment_status, staged_masters
+            from major_master_deploy import deployment_statuses, staged_masters
             staged_map = staged_masters(APP_DIR / "staging" / "major_masters", masters)
+            statuses = deployment_statuses(masters, data_dir, APP_DIR, staged=staged_map)
             tree.delete(*tree.get_children())
             required_names = self._required_major_master_names()
             unfinished = {name.casefold() for name in self._unfinished_master_stages(masters)}
             for i, name in enumerate(masters, 1):
                 key = name.casefold()
-                status_info = deployment_status(
-                    name, data_dir, APP_DIR, staged=key in staged_map)
+                status_info = statuses[key]
                 exists = status_info["state"] == "deployed"
                 enabled = key in self.selected_major_masters
                 ready = status_info["state"] == "ready"
@@ -4699,7 +4707,13 @@ class ManagerGUI(tk.Tk):
                         "Deployment recovery required: committed major-master files are missing. "
                         "Use Remove deployed masters or the Recovery center.")
                 elif staged:
-                    self.after(300, self.deploy_major_masters)
+                    self._setup_fail(
+                        "major_masters_deployed",
+                        "The previous deployment was not committed. Staged masters remain ready for review.")
+                    self._clear_major_master_scan_cache()
+                    self.status.set(
+                        "Interrupted deployment was rolled back. Review the staged major masters and choose Deploy when ready.")
+                    self.refresh()
                 else:
                     self._setup_complete("major_masters_deployed")
                     self._clear_major_master_scan_cache()

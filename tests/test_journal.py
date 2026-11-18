@@ -203,6 +203,9 @@ class LedgerTests(Fixture):
         self.journal.capture_baseline(self.game)
         settings = self.manager / "mwmanager_gui_settings.json"
         settings.write_text(json.dumps({"first_run": 0, "init_complete": 1}), encoding="utf-8")
+        deployments = self.manager / "major_master_deployments.json"
+        deployments.write_text(json.dumps({"version": 1, "deployments": [{"masters": ["A.esm"]}]}),
+                               encoding="utf-8")
         generated = write(self.game / "Data Files/generated.esp", b"generated")
         staged = write(self.manager / "staging/major_masters/Keep/.mwmanager-stage.json", b"{}")
         self.journal.record("run", "Data Files/generated.esp", "create", sha(generated), {"kind": "absent"})
@@ -215,6 +218,7 @@ class LedgerTests(Fixture):
         self.assertTrue(self.journal.verify(self.game, against="baseline", full_hash=True)["ok"])
         self.assertEqual(json.loads(settings.read_text())["first_run"], 1)
         self.assertEqual(json.loads(settings.read_text())["init_complete"], 0)
+        self.assertEqual(json.loads(deployments.read_text())["deployments"], [])
         setup = json.loads((self.manager / "mwmanager_setup_state.json").read_text())
         self.assertTrue(setup["steps"]["paths_confirmed"]["completed_at"])
         self.assertIsNone(setup["steps"]["preflight_complete"]["completed_at"])

@@ -175,6 +175,13 @@ class WorkflowGuiTests(unittest.TestCase):
         view.append("Read without following")
         self.assertLess(view.log.yview()[1], 0.8)
 
+    def test_hardlink_heartbeat_updates_stage_without_log_spam(self):
+        from mwmanager_workflow import JobView
+        view = JobView(self.app)
+        view.append("MWMANAGER-STAGE: Hardlinking OAAB: 500 files scanned; 500 linked")
+        self.assertIn("500 files scanned", view.stage.get())
+        self.assertNotIn("Hardlinking OAAB", view.log.get("1.0", "end"))
+
     def test_cancel_waits_for_safe_boundary_and_all_actions_restore(self):
         started, release = threading.Event(), threading.Event()
         done = []

@@ -287,16 +287,27 @@ class GuiSmokeTests(unittest.TestCase):
             (data / name).write_bytes(b"TES3")
             self.app.active_names.discard(name.casefold())
         commands = []
+        stale = "Needs Missing Master.esp"
+        (data / stale).write_bytes(b"TES3")
+        self.app.order.append(stale)
+        self.app.active_names.add(stale.casefold())
 
         class Process:
+            def __init__(self, command):
+                self.command = command
+
             stdout = ()
 
             def wait(self):
+                if "--sort" in self.command:
+                    self.app_order = [name for name in self_test.app.order if name != stale]
+                    self_test.g.write_order(self.app_order)
                 return 0
 
+        self_test = self
         self.app._run_progress_job = lambda _title, _description, worker, completed: completed(worker(lambda _line: None), None)
         with mock.patch.object(self.g.subprocess, "Popen",
-                               side_effect=lambda command, **_kwargs: (commands.append(command), Process())[1]):
+                               side_effect=lambda command, **_kwargs: (commands.append(command), Process(command))[1]):
             self.app._run_initial_tidy(lambda: None)
             self.pump(0.2)
         self.assertTrue({name.casefold() for name in self.g.OFFICIAL_SHIPPED_ESPS} <= self.app.active_names)
@@ -304,6 +315,8 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertTrue(all(name.casefold() in saved.casefold() for name in self.g.OFFICIAL_SHIPPED_ESPS))
         self.assertEqual(commands[0][-3:], ["--sort", "--yes", "--no-follow-up"])
         self.assertIn("--init", commands[1])
+        self.assertNotIn(stale, self.app.order)
+        self.assertNotIn(stale.casefold(), self.app.active_names)
 
     def test_post_full_major_master_handoff_opens_staging(self):
         self.app.settings["init_complete"] = 0

@@ -131,6 +131,12 @@ class BackendProbes(unittest.TestCase):
             tracked = deploy.deployment_status("A.esm", data, root, staged=True)
             self.assertEqual(tracked["state"], "deployed")
 
+            with mock.patch.object(deploy, "_read_deployment_state", wraps=deploy._read_deployment_state) as read:
+                statuses = deploy.deployment_statuses(["A.esm", "B.esm"], data, root, staged={"b.esm"})
+            self.assertEqual(read.call_count, 1)
+            self.assertEqual(statuses["a.esm"]["state"], "deployed")
+            self.assertEqual(statuses["b.esm"]["state"], "ready")
+
     def test_archive_name_collisions_keep_separate_packages(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -158,6 +164,45 @@ class BackendProbes(unittest.TestCase):
             self.assertGreater(result["pending"], 0)
             self.assertEqual((data / "Textures/a.dds").read_bytes(), b"user's in-place edit")
 
+    def test_deploy_reports_package_scan_link_and_catalog_phases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package, data = prepare_deployment(root)
+            progress = mock.Mock()
+            with mock.patch.object(sys, "path", list(sys.path)), mock.patch.dict(sys.modules):
+                deploy.deploy(package.parent, data, root, ["A.esm"], progress=progress)
+            messages = [call.args[0] for call in progress.call_args_list]
+            self.assertTrue(any("scanning deployable files" in message for message in messages))
+            self.assertTrue(any("scan complete" in message for message in messages))
+            self.assertTrue(any("Cataloguing major master" in message for message in messages))
+            self.assertTrue(any("Deployment ownership recorded" in message for message in messages))
+
+    def test_new_hardlinks_are_batched_and_keep_removal_hashes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package, data = prepare_deployment(root)
+            for index in range(600):
+                put(package, f"Textures/batch-{index}.dds", b"x")
+            with mock.patch("workflow_safety.os.fsync", wraps=os.fsync) as sync, \
+                    mock.patch.object(sys, "path", list(sys.path)), mock.patch.dict(sys.modules):
+                deploy.deploy(package.parent, data, root, ["A.esm"])
+            state = json.loads((root / "major_master_deployments.json").read_text())
+            operations = state["deployments"][0]["operations"]
+            self.assertTrue(all(operation.get("sha256") for operation in operations))
+            self.assertLess(sync.call_count, len(operations) // 2)
+            self.assertEqual(deploy.remove_deployed(package.parent, data, root)["pending"], 0)
+
+    def test_deploy_reuses_precomputed_hashes_for_same_size_replacements(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package, data = prepare_deployment(root)
+            put(data, "Textures/a.dds", b"old texture")
+            with mock.patch.object(deploy, "sha256", wraps=deploy.sha256) as hash_file, \
+                    mock.patch.object(sys, "path", list(sys.path)), mock.patch.dict(sys.modules):
+                deploy.deploy(package.parent, data, root, ["A.esm"])
+            hashes = hash_file.call_count
+            self.assertLessEqual(hashes, 3, hashes)
+
     def test_removal_manifest_failure_restores_deployment(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -180,16 +225,14 @@ class BackendProbes(unittest.TestCase):
             root = Path(tmp)
             package, data = prepare_deployment(root)
             put(data, "Textures/a.dds", b"old")
-            record, calls = Journal.record, []
+            record_many = Journal.record_many
 
-            def fail_second(ledger, *args, **kwargs):
-                calls.append(args)
-                if len(calls) == 2:
-                    raise OSError("partial journal failure")
-                return record(ledger, *args, **kwargs)
+            def fail_after_first(ledger, records):
+                record_many(ledger, records[:1])
+                raise OSError("partial journal failure")
 
             with mock.patch.object(sys, "path", list(sys.path)), mock.patch.dict(sys.modules), \
-                    mock.patch.object(Journal, "record", fail_second):
+                    mock.patch.object(Journal, "record_many", fail_after_first):
                 with self.assertRaisesRegex(OSError, "partial journal"):
                     deploy.deploy(package.parent, data, root, ["A.esm"])
             self.assertFalse((data / "A.esm").exists())
@@ -528,7 +571,7 @@ class GuiProbes(unittest.TestCase):
         self.assertEqual(result["pending"], 0)
         self.assertEqual((data / "Textures/a.dds").read_bytes(), b"original game texture")
 
-    def test_resume_schedules_interrupted_deployment(self):
+    def test_resume_leaves_rolled_back_deployment_ready_for_review(self):
         self.app.settings.update(first_run=0, init_complete=1)
         self.package("A.esm", complete=True)
         self.app._clear_major_master_scan_cache()
@@ -538,7 +581,9 @@ class GuiProbes(unittest.TestCase):
                 mock.patch.object(self.app, "after") as after:
             self.assertTrue(self.app._resume_interrupted_major_masters())
         catalog.assert_called_once()
-        after.assert_called_with(300, actual_deploy)
+        actual_deploy.assert_not_called()
+        self.assertFalse(any(call.args[:2] == (300, actual_deploy) for call in after.call_args_list))
+        self.assertIn("rolled back", self.app.status.get())
         self.assertTrue(self.app._setup_done("major_masters_deployed") is False)
 
     def test_interrupted_deploy_without_files_or_staging_is_reconciled(self):

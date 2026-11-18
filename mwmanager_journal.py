@@ -34,6 +34,7 @@ import re
 import shutil
 import sys
 import textwrap
+import time
 import uuid
 import zipfile
 from pathlib import Path
@@ -88,8 +89,23 @@ def hashes(path: Path) -> tuple[str, str]:
     return sha.hexdigest(), md5.hexdigest()
 
 
-def sha256_file(path: Path) -> str:
-    return hashes(path)[0]
+def sha256_file(path: Path, progress=None, label: str | None = None) -> str:
+    if not progress or not label:
+        return hashes(path)[0]
+    digest = hashlib.sha256()
+    total = Path(path).stat().st_size
+    done = 0
+    last_report = time.monotonic()
+    with open(path, "rb") as stream:
+        for block in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(block)
+            done += len(block)
+            now = time.monotonic()
+            if now - last_report >= 5:
+                progress(f"MWMANAGER-STAGE: {label} ({done / (1 << 20):,.0f} of "
+                         f"{total / (1 << 20):,.0f} MiB hashed)")
+                last_report = now
+    return digest.hexdigest()
 
 
 def canon(obj) -> str:
@@ -323,27 +339,39 @@ class Journal:
         return self.preserve_file(path)
 
     def record_deployment(self, game_dir, operations: list[dict], *, tool: str, tag: str,
-                          inputs: dict | None = None, moves: list[dict] | None = None) -> dict:
+                          inputs: dict | None = None, moves: list[dict] | None = None,
+                          progress=None) -> dict:
         """Bridge a completed GUI deployment's operation list into the install rollback ledger."""
         game_dir = Path(game_dir).resolve()
         if not self.has_baseline():
             raise RuntimeError("deployment requires an install baseline so rollback can remove it")
         run = self.start_run(tool, inputs)
-        for operation in operations:
+        records = []
+        total = len(operations)
+        for index, operation in enumerate(operations, 1):
             target = Path(operation["target"]).resolve()
             rel = rel_of(game_dir, target)
             backup = Path(operation["backup"]).resolve() if operation.get("backup") else None
             original = self.preserve_file(backup) if backup else {"kind": "absent"}
             if not target.is_file():
                 raise FileNotFoundError(f"deployed file disappeared before journaling: {target}")
-            self.record(run["run"], rel, "replace" if backup else "create", sha256_file(target),
-                        original, tag=tag)
+            if progress and (index == 1 or index % 250 == 0):
+                progress(f"MWMANAGER-STAGE: Recording deployment: {index:,} of {total:,} files verified")
+            deployed_hash = operation.get("sha256") or sha256_file(
+                target, progress, f"Recording deployment: {index:,} of {total:,} files — {target.name}")
+            operation["sha256"] = deployed_hash
+            records.append({"run": run["run"], "path": rel,
+                            "action": "replace" if backup else "create",
+                            "after_sha256": deployed_hash, "original": original, "tag": tag})
         for move in moves or []:
             source, target = Path(move["source"]).resolve(), Path(move["target"]).resolve()
             original = self.preserve_file(target)
-            self.record(run["run"], rel_of(game_dir, source), "move", None, original, tag=tag)
-            self.record(run["run"], rel_of(game_dir, target), "create", original.get("sha256"),
-                        {"kind": "absent"}, tag=tag)
+            records.append({"run": run["run"], "path": rel_of(game_dir, source), "action": "move",
+                            "after_sha256": None, "original": original, "tag": tag})
+            records.append({"run": run["run"], "path": rel_of(game_dir, target), "action": "create",
+                            "after_sha256": original.get("sha256"), "original": {"kind": "absent"},
+                            "tag": tag})
+        self.record_many(records)
         return self.finish_run(run)
 
     def baseline(self) -> dict:
@@ -377,17 +405,28 @@ class Journal:
 
     @classmethod
     def _append(cls, path: Path, entry: dict) -> dict:
+        return cls._append_many(path, [entry])[0]
+
+    @classmethod
+    def _append_many(cls, path: Path, new_entries: list[dict]) -> list[dict]:
+        if not new_entries:
+            return []
         entries, _problems = cls._read_jsonl(path)
         prev = entries[-1]["hash"] if entries else None
-        entry = dict(entry, seq=(entries[-1]["seq"] + 1) if entries else 1, prev=prev)
-        entry.pop("hash", None)
-        entry["hash"] = hashlib.sha256(((prev or "") + canon(entry)).encode("utf-8")).hexdigest()
+        seq = (entries[-1]["seq"] + 1) if entries else 1
+        prepared = []
+        for entry in new_entries:
+            entry = dict(entry, seq=seq, prev=prev)
+            entry.pop("hash", None)
+            entry["hash"] = hashlib.sha256(((prev or "") + canon(entry)).encode("utf-8")).hexdigest()
+            prepared.append(entry)
+            prev, seq = entry["hash"], seq + 1
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as stream:
-            stream.write(canon(entry) + "\n")
+            stream.writelines(canon(entry) + "\n" for entry in prepared)
             stream.flush()
             os.fsync(stream.fileno())
-        return entry
+        return prepared
 
     def entries(self) -> tuple[list[dict], list[str]]:
         return self._read_jsonl(self.ledger)
@@ -400,22 +439,37 @@ class Journal:
 
     def record(self, run: str, rel: str, action: str, after_sha256: str | None, original: dict | None = None,
                tag: str | None = None, mod: str | None = None) -> dict:
+        return self.record_many([{"run": run, "path": rel, "action": action,
+                                  "after_sha256": after_sha256, "original": original,
+                                  "tag": tag, "mod": mod}])[0]
+
+    def record_many(self, records: list[dict]) -> list[dict]:
         """One install change. original = {"kind": absent|gog|off|mwse-backups|mwmanager|disabled|baseline,
         "location": "game:<rel>" | "manager:<rel>" | "journal:<rel>", "sha256": ...}. Morrowind.ini edits use
         kind "baseline" with location "journal:baseline/Morrowind.ini".; only the first original for a path counts."""
-        if action not in ("create", "replace", "modify", "remove", "move", "disable"):
-            raise ValueError(f"unknown action {action}")
-        if original and original.get("kind") != "absent" and not original.get("sha256"):
-            raise ValueError("an original needs its sha256")
-        if self.first_original(rel):
-            original = None
-        entry = {"ts": now(), "run": run, "path": rel.replace("\\", "/"), "action": action,
-                 "after_sha256": after_sha256, "original": original}
-        if tag:
-            entry["tag"] = tag
-        if mod:
-            entry["mod"] = mod
-        return self._append(self.ledger, entry)
+        existing, _problems = self.entries()
+        original_paths = {key(entry["path"]) for entry in existing if entry.get("original")}
+        entries = []
+        for record in records:
+            action = record["action"]
+            if action not in ("create", "replace", "modify", "remove", "move", "disable"):
+                raise ValueError(f"unknown action {action}")
+            original = record.get("original")
+            if original and original.get("kind") != "absent" and not original.get("sha256"):
+                raise ValueError("an original needs its sha256")
+            path = str(record["path"]).replace("\\", "/")
+            if key(path) in original_paths:
+                original = None
+            elif original:
+                original_paths.add(key(path))
+            entry = {"ts": now(), "run": record["run"], "path": path, "action": action,
+                     "after_sha256": record.get("after_sha256"), "original": original}
+            if record.get("tag"):
+                entry["tag"] = record["tag"]
+            if record.get("mod"):
+                entry["mod"] = record["mod"]
+            entries.append(entry)
+        return self._append_many(self.ledger, entries)
 
     def move_original(self, game_dir, source, destination, run: str, *, tag: str | None = None) -> dict:
         """Move an original file while preserving a journal-owned copy for reliable rollback."""
@@ -922,6 +976,12 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
         removed = journal.cleanup_used_backups(game_dir, plan, apply=True)
         archived = journal.archive_ledger()
         manager_dir = journal.root.parent
+        try:
+            from workflow_safety import atomic_json
+            atomic_json(manager_dir / "major_master_deployments.json", {"version": 1, "deployments": []})
+        except OSError as exc:
+            print_report([str(exc)], "Game rollback verified, but deployment ownership could not be reset:")
+            return 1
         settings_path = manager_dir / "mwmanager_gui_settings.json"
         try:
             settings = json.loads(settings_path.read_text(encoding="utf-8"))
@@ -936,8 +996,9 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
             setup_state.complete(state_path, game_dir, "paths_confirmed")
             # preflight_complete is not marked, even when the prerequisites were kept: the rollback also took
             # out the MWSE Lua suite and the moved add-on documents, which the preflight puts back
-        except OSError:
-            pass
+        except OSError as exc:
+            print_report([str(exc)], "Game rollback verified, but setup checkpoints could not be reset:")
+            return 1
         summary = [f"Verified against {against} with full hashes."]
         if args.no_staging:
             summary.append(f"Cleared {cleared_staging} staging entr{'y' if cleared_staging == 1 else 'ies'}.")

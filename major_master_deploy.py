@@ -490,39 +490,53 @@ def tracked_deployment_masters(manager_dir: Path) -> list[str]:
                               for name in deployment.get("masters", [])))
 
 
-def deployment_status(name: str, data_dir: Path, manager_dir: Path,
-                      *, staged: bool = False) -> dict:
-    """Classify one configured master from live files plus durable ownership state."""
+def deployment_statuses(names, data_dir: Path, manager_dir: Path, *, staged=()) -> dict[str, dict]:
+    """Classify configured masters with one deployment-state read."""
     data_dir, manager_dir = Path(data_dir).resolve(), Path(manager_dir).resolve()
-    path = data_dir / name
-    live = path.is_file()
+    names = list(names)
+    staged_keys = ({str(name).casefold() for name in staged}
+                   if not isinstance(staged, bool) else set())
     deployments = _read_deployment_state(manager_dir)["deployments"]
-    tracked = next((entry for entry in reversed(deployments)
-                    if str(name).casefold() in {
-                        str(master).casefold() for master in entry.get("masters", [])}), None)
+    tracked_names = {str(master).casefold()
+                     for entry in deployments if isinstance(entry, dict)
+                     for master in entry.get("masters", [])}
     active_targets = {
-        Path(operation.get("target", "")).resolve()
+        os.path.normcase(os.path.abspath(operation["target"]))
         for entry in deployments if isinstance(entry, dict)
         for operation in entry.get("operations", [])
         if operation.get("target")
     }
-    if recovery_pending(manager_dir):
-        transaction = manager_dir / "transactions" / "major-master-deploy"
-        if transaction.is_dir():
-            return {"state": "recovery", "label": "Recovery required",
-                    "live": live, "tracked": bool(tracked)}
-    if live and tracked and path.resolve() in active_targets:
-        return {"state": "deployed", "label": "Deployed", "live": True, "tracked": True}
-    if tracked:
-        return {"state": "missing", "label": "Deployment incomplete",
-                "live": live, "tracked": True}
-    if live:
-        return {"state": "untracked", "label": "Untracked on disk",
-                "live": True, "tracked": False}
-    if staged:
-        return {"state": "ready", "label": "Ready for install",
-                "live": False, "tracked": False}
-    return {"state": "absent", "label": "Not staged", "live": False, "tracked": False}
+    recovering = (manager_dir / "transactions" / "major-master-deploy").is_dir()
+    statuses = {}
+    for name in names:
+        key = str(name).casefold()
+        path = data_dir / name
+        live = path.is_file()
+        tracked = key in tracked_names
+        if recovering:
+            status = {"state": "recovery", "label": "Recovery required",
+                      "live": live, "tracked": tracked}
+        elif live and tracked and os.path.normcase(os.path.abspath(path)) in active_targets:
+            status = {"state": "deployed", "label": "Deployed", "live": True, "tracked": True}
+        elif tracked:
+            status = {"state": "missing", "label": "Deployment incomplete",
+                      "live": live, "tracked": True}
+        elif live:
+            status = {"state": "untracked", "label": "Untracked on disk",
+                      "live": True, "tracked": False}
+        elif staged is True or key in staged_keys:
+            status = {"state": "ready", "label": "Ready for install",
+                      "live": False, "tracked": False}
+        else:
+            status = {"state": "absent", "label": "Not staged", "live": False, "tracked": False}
+        statuses[key] = status
+    return statuses
+
+
+def deployment_status(name: str, data_dir: Path, manager_dir: Path,
+                      *, staged: bool = False) -> dict:
+    """Classify one configured master from live files plus durable ownership state."""
+    return deployment_statuses([name], data_dir, manager_dir, staged=staged)[str(name).casefold()]
 
 
 def package_has_live_deployment(package: Path, data_dir: Path) -> bool:
@@ -671,7 +685,7 @@ def _remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=
             if source_matches and operation.get("sha256"):
                 source_matches = sha256(target) == operation["sha256"]
             # Legacy records have no installed hash: preserve uncertain edits.
-            elif source_matches:
+            elif source_matches and operation.get("verification") != "hardlink":
                 source_matches = False
             if source_matches:
                 tx.move(target, tx.root / ("removed-" + uuid.uuid4().hex))
@@ -779,14 +793,41 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
                 if progress: progress(f"Firemoth was not moved because the preservation path already exists: {target}")
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
-            digest = sha256(source)
-            tx.move(source, target)
+            if progress:
+                progress("Preserving shipped Siege at Firemoth.esp in Off; hashing and moving it…")
+            moved = tx.move(source, target)
+            digest = moved["sha256"]
             moves.append({"source": str(source), "target": str(target), "sha256": digest})
             if progress: progress("Moved shipped Siege at Firemoth.esp to Off/Official Add-Ons because Tamriel Rebuilt was deployed without Remove Firemoth.")
         for package, plugins in package_info:
+            package_label = Path(package).name
+            if progress:
+                progress(f"MWMANAGER-STAGE: Hardlinking {package_label}: scanning deployable files…")
+            file_count = 0
+            last_heartbeat = time.monotonic()
+            batch = []
+            batch_rel = []
+            batch_targets = set()
+
+            def flush_batch():
+                nonlocal last_heartbeat
+                if not batch:
+                    return
+                new_operations = tx.link_many(batch)
+                operations.extend(new_operations)
+                linked.extend(batch_rel)
+                batch.clear()
+                batch_rel.clear()
+                batch_targets.clear()
+                if progress:
+                    progress(f"MWMANAGER-STAGE: Hardlinking {package_label}: "
+                             f"{file_count:,} files scanned; {len(operations):,} linked")
+                last_heartbeat = time.monotonic()
+
             for base, dirs, files in os.walk(package):
                 dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS and not d.startswith(".")]
                 for filename in files:
+                    file_count += 1
                     source = Path(base) / filename
                     if source.is_symlink():
                         raise ValueError(f"Refusing to deploy a symbolic link: {source}")
@@ -804,18 +845,31 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
                     target = (data_dir.parent / rel if rel.parts[0].casefold() in GAME_ROOT_FOLDERS
                               else data_dir / filename if source.suffix.casefold() in {".esm", ".esp", ".bsa"}
                               else data_dir / rel)
-                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target_key = os.path.normcase(str(target))
+                    if target_key in batch_targets:
+                        flush_batch()
                     backup = backup_root / package.name / str(len(operations)) / rel
+                    source_digest = None
+                    target_digest = None
                     if target.exists():
-                        if target.is_file() and target.stat().st_size == source.stat().st_size and sha256(target) == sha256(source):
-                            skipped.append(str(rel))
-                            continue
+                        if target.is_file() and target.stat().st_size == source.stat().st_size:
+                            target_digest = sha256(target)
+                            source_digest = sha256(source)
+                            if target_digest == source_digest:
+                                skipped.append(str(rel))
+                                continue
                         if not target.is_file():
                             raise IsADirectoryError(f"A directory blocks deployment of {target}")
                         backed_up.append((target, backup))
-                    operation = tx.link(source, target, backup)
-                    linked.append(str(rel))
-                    operations.append(operation)
+                    batch.append((source, target, backup, source_digest, target_digest))
+                    batch_rel.append(str(rel))
+                    batch_targets.add(target_key)
+                    if len(batch) >= 256 or time.monotonic() - last_heartbeat >= 5:
+                        flush_batch()
+            flush_batch()
+            if progress:
+                progress(
+                    f"Hardlinking {package_label}: scan complete, {file_count:,} file(s) examined.")
         ini_path = data_dir.parent / "Morrowind.ini"
         archives = []
         seen_archives = set()
@@ -825,6 +879,8 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
                     archives.append(archive)
                     seen_archives.add(archive.name.casefold())
         registered_archives = register_archives(ini_path, archives, manager_dir)
+        if progress:
+            progress(f"Registered {len(registered_archives):,} BSA archive(s); building catalog…")
         # Index after deployment. The catalog keeps full record bodies and BSA member provenance.
         catalog = manager_dir / "database"
         import sys
@@ -835,13 +891,19 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
             catalog_module.create_schema(db, catalog / "schema.sql")
             priority = {name.casefold(): index + 3 for index, name in enumerate(configured)}
             for plugin in ready:
+                if progress:
+                    progress(f"Cataloguing major master {plugin}…")
                 catalog_module.index_esm(db, data_dir / plugin, priority[plugin.casefold()])
             for plugin in configured:
                 if (data_dir / plugin).is_file():
                     db.execute("UPDATE esm_record SET load_order=? WHERE lower(source_file)=lower(?)",
                                (priority[plugin.casefold()], plugin))
             for archive in archives:
+                if progress:
+                    progress(f"Cataloguing archive {archive.name}…")
                 catalog_module.index_bsa(db, archive)
+            if progress:
+                progress("Cataloguing complete; checking record conflicts…")
             placeholders = ",".join("?" for _ in ready)
             conflicts = db.execute(
                 f"SELECT record_tag, editor_id, group_concat(source_file), COUNT(DISTINCT hex(body_sha256)) "
@@ -851,8 +913,7 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
                 f"GROUP BY record_tag, editor_id_norm HAVING COUNT(DISTINCT source_file) > 1 "
                 f"AND COUNT(DISTINCT hex(body_sha256)) > 1 ORDER BY record_tag, editor_id_norm",
                 ready).fetchall()
-        deployment_state = _read_deployment_state(manager_dir)
-        deployment_state["deployments"].append({
+        deployment = {
             "deployed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "masters": ready,
             "archives": [Path(item["source"]).name for item in operations
@@ -860,12 +921,18 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
             "registered_archives": registered_archives,
             "operations": operations,
             "moves": moves,
-        })
-        _write_deployment_state(manager_dir, deployment_state)
+        }
+        if progress:
+            progress("MWMANAGER-STAGE: Verifying deployed files for rollback journal…")
         import mwmanager_journal
         mwmanager_journal.Journal(manager_dir / "journal").record_deployment(
             data_dir.parent, operations, moves=moves, tool="major_master_deploy.py", tag="major-master-deployment",
-            inputs={"masters": ready, "include_assets": include_assets})
+            inputs={"masters": ready, "include_assets": include_assets}, progress=progress)
+        deployment_state = _read_deployment_state(manager_dir)
+        deployment_state["deployments"].append(deployment)
+        _write_deployment_state(manager_dir, deployment_state)
+        if progress:
+            progress("Deployment ownership recorded; finishing transaction…")
         tx.commit()
     except Exception:
         tx.rollback()
