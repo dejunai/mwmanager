@@ -1,5 +1,5 @@
 {
-  "Description": "The user's mw* MWSE Lua suite as it is in the Steam Morrowind install, copied byte for byte. mwespreplacements is excluded (user's personal load-order patches).",
+  "Description": "The user's mw* MWSE Lua suite as it is in the Steam Morrowind install, copied byte for byte. dejespreplacements (formerly mwespreplacements) is excluded (user's personal load-order patches).",
   "CopiedAt": "2026-11-15 (America/Los_Angeles); reviewed late Lua suite refresh",
   "Files": [
     {
@@ -145,8 +145,8 @@
     {
       "Path": "mods/mwguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwguard\\main.lua",
-      "SHA256": "b1fcff3a812744628d2a46c22ee41d3d1c8079ed552fff52e341c5abd40b0470",
-      "Length": 15187,
+      "SHA256": "e71944a7c4116f4f14beea59ac174abd95be98a908ca848772d4782a07816e78",
+      "Length": 15166,
       "SourceModified": "2026-11-14T10:56:52"
     },
     {

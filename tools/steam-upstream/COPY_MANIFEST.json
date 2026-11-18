@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-17 (America/Los_Angeles); refreshed to 1798bd2",
+  "SyncedAt": "2026-11-17 (America/Los_Angeles); refreshed to e11b6ba",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -7,8 +7,8 @@
   "Files": [
     {
       "RelativePath": ".gitignore",
-      "Bytes": 1282,
-      "SHA256": "ba63d5d51c7074e965f7ab742d01c44bfbb47febc880579b4258317206cfc7f7",
+      "Bytes": 1284,
+      "SHA256": "c27193f8a84d6d836b707cc671039ff8b94bc20708fffb5abda69510df16d529",
       "Source": "<Steam Morrowind>\\.gitignore"
     },
     {
@@ -171,8 +171,8 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwguard\\main.lua",
-      "Bytes": 15202,
-      "SHA256": "74a1be76d35f996d711673594b3173cf5a874729b92ad8504b520c486041a542",
+      "Bytes": 15181,
+      "SHA256": "a8087f066c7a972a635779e167230ca64ed6c59432bffa4332ae6f197169f358",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwguard\\main.lua",
       "SourceModified": "2026-11-14T10:56:52"
     },
@@ -658,8 +658,8 @@
     },
     {
       "RelativePath": "MWDIALOG_REFACTOR2.md",
-      "Bytes": 15375,
-      "SHA256": "1e6ac9dc59221ca4542c346621cd45d432bb271e3c916da101f4d56d48cd23d5",
+      "Bytes": 15178,
+      "SHA256": "ddeb2af090b31f97f38c4893710e0067e35551284c8e5761ea39604b39432d36",
       "Source": "<Steam Morrowind>\\MWDIALOG_REFACTOR2.md",
       "SourceModified": "2026-11-14T11:09:55"
     },

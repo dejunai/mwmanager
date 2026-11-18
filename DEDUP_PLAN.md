@@ -109,7 +109,7 @@ automatically, and nothing MWManager-specific in the Steam tools beyond hook nam
 
 - Pushing from this machine: `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never git push https://dejunai@github.com/dejunai/<repo> <branch>`
   (two stored credential accounts make a plain push hang).
-- `mwespreplacements` (in the Steam MWSE mods) is the user's personal mod: never copy it into either repo.
+- `dejespreplacements` (formerly mwespreplacements) (in the Steam MWSE mods) is the user's personal mod: never copy it into either repo.
 - No fixed Morrowind.exe addresses in Lua.
 - Edit Python with the Edit tool or a Python script file; bash heredocs mangle backslashes (`\`, `\n`) in replacement
   text and have broken edits several times.

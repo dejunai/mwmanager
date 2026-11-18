@@ -243,7 +243,7 @@ Behaviour changes:
   Changed: mwsaveguard (a rejected save is quarantined, not deleted; the options menu stays shut while a save is
   deferred), mwwarnsuppression (patch sites are found in the running executable, so GOG, Steam and code-patched
   builds are handled or left alone), mwguard, and the settings saving of mwteleportguard, mwmouseguard,
-  mweffectinspector and mwpluginpatches. `mwespreplacements` is the user's own replacement for plugins in one
+  mweffectinspector and mwpluginpatches. `dejespreplacements` (formerly mwespreplacements) is the user's own replacement for plugins in one
   load order: it was removed from the public repo (@f094ef6) and from the upstream snapshot, it is not in MWManager's suite, and
   `--init` does not install it.
 - One Mod Config Menu entry. `reference\mwmanager-menu\` holds MWManager's own `mwmanagermenu` mod. It loads
@@ -265,7 +265,7 @@ Behaviour changes:
   mwwarnsuppression Lua files and the three changed metadata files in both `tools/steam-upstream/` and
   `reference/mwse-lua-guards/`; both manifests carry the new hashes.
 - Added the reviewed `mwpluginpatches` modules `mabrDist.lua` and `personalEffectsFix.lua`. Every changed or
-  added Lua file parses under the bundled LuaJIT. `mwespreplacements` and mutable Steam configuration/state
+  added Lua file parses under the bundled LuaJIT. `dejespreplacements` and mutable Steam configuration/state
   remain excluded for the reasons above.
 
 ## Late Steam refresh — 2026-11-15 (Pacific)

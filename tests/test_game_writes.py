@@ -416,8 +416,7 @@ class LuaSuiteIsTheUsersCopy(unittest.TestCase):
         main = (self.SUITE / "mods" / "mwguard" / "main.lua").read_text("utf-8")
         block = main[main.index("exemptMods"):]
         block = block[:block.index("}")]
-        # mwguard also exempts mwespreplacements, the user's own load-order patches: not part of MWManager's suite
-        self.assertEqual(set(re.findall(r'"([^"]+)"', block)) - {"mwespreplacements"}, names)
+        self.assertEqual(set(re.findall(r'"([^"]+)"', block)), names)
 
     def test_no_quickfixes_or_consolidated_package_left(self):
         self.assertFalse((self.SUITE / "mods" / "MWManager").exists())
