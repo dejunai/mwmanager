@@ -1,5 +1,6 @@
 """Batch step 1: chosen options that need a mod that isn't installed or staged are kept as waiting on it."""
 import os
+import struct
 import json
 import sys
 import tempfile
@@ -164,6 +165,40 @@ class ReuseSavedAnswersTests(unittest.TestCase):
             window = mock.Mock(side_effect=AssertionError("the option window opened"))
             run(window, {"MWMANAGER_REUSE_FOMOD": "1"})
             window.assert_not_called()
+
+
+
+class AssetOnlyOptionTests(unittest.TestCase):
+    CONFIG = ('<config><moduleName>OAAB_Data</moduleName><installSteps order="Explicit">'
+              '<installStep name="Install Options"><optionalFileGroups order="Explicit">'
+              '<group name="Mod Compatibility Patches" type="SelectAny"><plugins order="Explicit">'
+              '<plugin name="Epic Plants"><description>Install if you use Epic Plants. Makes plants match.'
+              '</description><files><folder source="09 Epic Plants Patch\meshes" destination="meshes"/></files>'
+              '<typeDescriptor><type name="Optional"/></typeDescriptor></plugin>'
+              '</plugins></group></optionalFileGroups></installStep></installSteps></config>')
+
+    def records(self, staged_sibling):
+        with tempfile.TemporaryDirectory() as tmp:
+            stage = Path(tmp) / "stage"
+            mod = stage / "OAAB_Data 49042"
+            put(mod / "OAAB_Data.esm", struct.pack("<4sIII", b"TES3", 0, 0, 0))
+            put(mod / "09 Epic Plants Patch/meshes/a.nif", b"nif")
+            put(mod / "fomod/ModuleConfig.xml", self.CONFIG.encode("utf-8"))
+            if staged_sibling:
+                (stage / "Epic Plants-46886-2-0").mkdir()
+            installed = set()
+            return mock_fomod._discover_fomod(mod, installed), installed
+
+    def test_an_asset_patch_waits_for_the_mod_it_names(self):
+        records, _installed = self.records(False)
+        (item,) = [r for r in records if r["label"] == "Epic Plants"]
+        self.assertEqual(item["missing_masters"], ["epic plants (mod)"])
+
+    def test_it_is_ready_when_that_mod_is_staged(self):
+        records, installed = self.records(True)
+        (item,) = [r for r in records if r["label"] == "Epic Plants"]
+        self.assertEqual(item["missing_masters"], [])
+        self.assertIn("epic plants (mod)", installed)
 
 
 if __name__ == "__main__":

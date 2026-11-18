@@ -387,6 +387,12 @@ def _discover_fomod(mod_dir: Path, installed: set[str]) -> list[dict]:
                 option_plugins = [src for src in payload.values() if src.suffix.casefold() in PLUGIN_EXTS]
                 masters = set().union(*(_plugin_masters(path) for path in option_plugins)) if option_plugins else set()
                 targets = masters - BASE_GAME_MASTERS
+                if not targets:                 # asset-only patch: the mod it needs is only named in the text
+                    needed = _needed_mod(fomod_description)
+                    if needed:
+                        if _mod_is_staged(needed, mod_dir):
+                            installed.add(needed.casefold())
+                        targets = {needed.casefold()}
                 missing = sorted(targets - installed)
                 compatible = sorted(targets & installed)
                 docs = _relevant_doc_excerpt(
@@ -819,6 +825,33 @@ def _available_staged_plugins(mod_dir: Path) -> set[str]:
             found.update(name.casefold() for name in files
                          if Path(name).suffix.casefold() in {".esm", ".esp"})
     return found
+
+
+_NOT_MODS = {"mge xe", "mwse", "openmw", "mge xe and mwse", "mwse and mge xe"}   # setup choices, not mods
+
+
+def _needed_mod(description: str) -> str | None:
+    """The mod an asset-only option is for, from its text ("Install if you use Epic Plants. ...")."""
+    match = (re.search(r"\b(?:install|select|use)\s+(?:this\s+)?if\s+you\s+(?:use|have)\s+([^.;:()]+?)(?:[.;:(]|$)",
+                       description or "", re.I)
+             or re.search(r"\bmatch(?:es)?\s+those\s+(?:in|from)\s+([^.;:()]+?)(?:[.;:(]|$)", description or "", re.I))
+    if not match:
+        return None
+    name = " ".join(match.group(1).split()).strip(" ,'\"")
+    return None if not name or name.casefold() in _NOT_MODS else f"{name} (mod)"
+
+
+def _mod_is_staged(needed: str, mod_dir: Path) -> bool:
+    """A package of that name is staged next to this one (its folder name starts with the mod's name)."""
+    def norm(text):
+        return " ".join(re.sub(r"[^a-z0-9]+", " ", text.casefold()).split())
+    want = norm(needed.removesuffix(" (mod)"))
+    roots = {mod_dir.parent, mod_dir.parent.parent}
+    try:
+        return any(norm(p.name).startswith(want) for root in roots if root.is_dir() for p in root.iterdir()
+                   if p.is_dir() and p != mod_dir)
+    except OSError:
+        return False
 
 
 def _installed_plugins(data_files: Path, prior: set[str]) -> set[str]:
