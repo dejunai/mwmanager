@@ -162,7 +162,25 @@ class BackendProbes(unittest.TestCase):
             (data / "Textures/a.dds").write_bytes(b"user's in-place edit")
             result = deploy.remove_deployed(package.parent, data, root)
             self.assertGreater(result["pending"], 0)
+            self.assertEqual(result["edited"], [str((data / "Textures/a.dds").resolve())])
             self.assertEqual((data / "Textures/a.dds").read_bytes(), b"user's in-place edit")
+            saved = deploy.save_altered(result["edited"], data.parent, root)
+            self.assertEqual((saved / "Data Files/Textures/a.dds").read_bytes(), b"user's in-place edit")
+            # the user answers Yes: the edited file goes too, and nothing is left pending
+            result = deploy.remove_deployed(package.parent, data, root, remove_edited=True)
+            self.assertEqual(result["pending"], 0)
+            self.assertFalse((data / "Textures/a.dds").exists())
+
+    def test_unedited_files_are_removed_without_hashing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package, data = prepare_deployment(root)
+            with mock.patch.object(sys, "path", list(sys.path)), mock.patch.dict(sys.modules):
+                deploy.deploy(package.parent, data, root, ["A.esm"])
+            with mock.patch.object(deploy, "sha256", side_effect=AssertionError("hashed")):
+                result = deploy.remove_deployed(package.parent, data, root)
+            self.assertEqual((result["pending"], result["edited"]), (0, []))
+            self.assertFalse((data / "Textures/a.dds").exists())
 
     def test_deploy_reports_package_scan_link_and_catalog_phases(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -246,6 +246,9 @@ class DurableTransaction:
                          "sha256": str(source_sha256) if source_sha256 else None,
                          "original_sha256": (str(target_sha256 or digest(target))
                                               if target_exists else None)}
+            # a hardlink shares size and mtime with its source: removal compares these instead of hashing
+            stat = source.stat()
+            operation["size"], operation["mtime_ns"] = stat.st_size, stat.st_mtime_ns
             if not target_exists:
                 operation["verification"] = "hardlink"
             elif not operation["sha256"]:

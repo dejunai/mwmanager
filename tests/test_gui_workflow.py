@@ -257,6 +257,23 @@ class WorkflowGuiTests(unittest.TestCase):
         journal.finish_run.assert_called_once()
         self.assertTrue((self.g.disabled_plugins_dir() / "Extra.esp").is_file())
 
+    def test_edited_master_files_are_deleted_only_on_yes(self):
+        jobs = []
+        self.app._run_progress_job = lambda title, initial, worker, complete: jobs.append(complete)
+        self.app.remove_master_button = mock.Mock()
+        self.app._remove_masters_job(Path("staging"), Path("data"))
+        result = {"masters": ["A.esm"], "removed": 5, "restored": 0, "registrations": 0,
+                  "pending": 1, "edited": ["data/Textures/a.dds"]}
+        with mock.patch("mwmanager_dialogs.askyesno", side_effect=[True, True]) as ask, \
+                mock.patch("major_master_deploy.save_altered", return_value=Path("saved")) as save, \
+                mock.patch.object(self.app, "refresh"), \
+                mock.patch.object(self.app, "_remove_masters_job") as again:
+            jobs[0](result, None)
+        self.assertEqual(ask.call_args_list[0].args[0], "Save Altered Files?")
+        self.assertIn("no longer match the originals", ask.call_args_list[0].args[1])
+        save.assert_called_once()
+        again.assert_called_once_with(Path("staging"), Path("data"), remove_edited=True)
+
     def stage(self):
         self.app.major_masters = ["Selected.esm", "Unselected.esm"]
         self.app.selected_major_masters = {"selected.esm"}

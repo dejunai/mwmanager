@@ -4084,11 +4084,15 @@ class ManagerGUI(tk.Tk):
                 "unregister archives it added to Morrowind.ini, and clear these masters from its catalog. "
                 "Staged masters and their BSAs will remain available for redeployment.", parent=self):
             return
+        self._remove_masters_job(staging, data_dir)
+
+    def _remove_masters_job(self, staging, data_dir, remove_edited=False):
+        import mwmanager_dialogs as messagebox
         self.remove_master_button.state(["disabled"])
 
         def worker(progress):
             from major_master_deploy import remove_deployed
-            return remove_deployed(staging, data_dir, APP_DIR, progress=progress)
+            return remove_deployed(staging, data_dir, APP_DIR, progress=progress, remove_edited=remove_edited)
 
         def completed(result, error):
             if error:
@@ -4107,6 +4111,28 @@ class ManagerGUI(tk.Tk):
                 f"Preserved files restored: {result['restored']:,}\n"
                 f"Archive registrations removed: {result['registrations']:,}\n\n"
                 "Staged masters and BSAs remain ready for deployment.")
+            edited = result.get("edited") or []
+            if edited:
+                shown = "\n".join(edited[:10]) + (f"\n… and {len(edited) - 10:,} more" if len(edited) > 10 else "")
+                if messagebox.askyesno(
+                        "Save Altered Files?",
+                        detail + f"\n\n{len(edited):,} deployed file(s) no longer match the originals. It is "
+                        "assumed you edited them after deployment, perhaps long ago:\n\n" + shown +
+                        "\n\nSave copies of them? They go to MWManager's altered_files folder, which removal "
+                        "and rollback never touch, so your edits are kept.", parent=self):
+                    from major_master_deploy import save_altered
+                    try:
+                        folder = save_altered(edited, data_dir.parent, APP_DIR)
+                        self.status.set(f"Saved {len(edited):,} altered file(s) to {folder}")
+                    except OSError as exc:
+                        messagebox.showerror("Could not save altered files", str(exc), parent=self)
+                        return
+                if messagebox.askyesno(
+                        "Delete edited files?",
+                        f"Delete the {len(edited):,} altered file(s) from the game too? "
+                        "No leaves them in place.", parent=self):
+                    self._remove_masters_job(staging, data_dir, remove_edited=True)
+                    return
             if result.get("pending"):
                 messagebox.showwarning(
                     "Some files need review",

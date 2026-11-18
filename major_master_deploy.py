@@ -613,7 +613,18 @@ def _remove_firemoth_selected(manager_dir: Path, package: Path) -> bool:
     return False
 
 
-def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=None) -> dict:
+def save_altered(paths, game_dir: Path, manager_dir: Path) -> Path:
+    """Copy hand-edited deployed files, keeping their game-relative paths, where removal and rollback never look."""
+    game_dir = Path(game_dir).resolve()
+    folder = Path(manager_dir) / "altered_files" / time.strftime("%Y%m%d-%H%M%S")
+    for path in map(Path, paths):
+        target = folder / Path(path).resolve().relative_to(game_dir)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+    return folder
+
+
+def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=None, *, remove_edited=False) -> dict:
     staging, data_dir, manager_dir = (Path(p).resolve() for p in (staging, data_dir, manager_dir))
     with mutation_lock(manager_dir, Path(data_dir).parent):
         recover_deployment(manager_dir, Path(data_dir).parent, staging)
@@ -621,7 +632,7 @@ def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=N
                                 [manager_dir, data_dir.parent, staging]).begin()
         try:
             _snapshot_metadata(tx, manager_dir, data_dir)
-            result = _remove_deployed(staging, data_dir, manager_dir, progress, tx=tx)
+            result = _remove_deployed(staging, data_dir, manager_dir, progress, tx=tx, remove_edited=remove_edited)
             changed = {Path(op[key]) for op in tx.state["operations"] for key in ("source", "target")
                        if Path(op[key]).is_relative_to(data_dir.parent)}
             if changed:
@@ -641,17 +652,17 @@ def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=N
             raise
 
 
-def _remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=None, *, tx) -> dict:
+def _remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=None, *, tx, remove_edited=False) -> dict:
     """Remove only tracked MWManager links, restore overwritten files, and undo registrations/indexing."""
     staging, data_dir, manager_dir = staging.resolve(), data_dir.resolve(), manager_dir.resolve()
     state = _read_deployment_state(manager_dir)
     deployments = state["deployments"]
     if not deployments:
-        return {"masters": [], "removed": 0, "restored": 0, "archives": [], "registrations": 0, "pending": 0}
+        return {"masters": [], "removed": 0, "restored": 0, "archives": [], "registrations": 0, "pending": 0, "edited": []}
     if os.path.splitdrive(str(staging))[0].casefold() != os.path.splitdrive(str(data_dir))[0].casefold():
         raise ValueError("Major-master staging and Data Files must be on the same drive.")
     removed = restored = registrations = 0
-    all_masters, all_archives, pending_deployments = [], [], []
+    all_masters, all_archives, pending_deployments, edited = [], [], [], []
     ini_path = data_dir.parent / "Morrowind.ini"
     for deployment in reversed(deployments):
         all_masters.extend(deployment.get("masters", []))
@@ -682,7 +693,14 @@ def _remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=
                     source_matches = os.path.samefile(source, target)
                 except OSError:
                     pass
-            if source_matches and operation.get("sha256"):
+            if source_matches and "mtime_ns" in operation:
+                stat = target.stat()
+                if (stat.st_size, stat.st_mtime_ns) != (operation["size"], operation["mtime_ns"]) \
+                        and not remove_edited:
+                    edited.append(str(target))          # changed since deployment: the user decides
+                    pending_operations.append(operation)
+                    continue
+            elif source_matches and operation.get("sha256"):   # older records: no size/mtime saved
                 source_matches = sha256(target) == operation["sha256"]
             # Legacy records have no installed hash: preserve uncertain edits.
             elif source_matches and operation.get("verification") != "hardlink":
@@ -732,7 +750,7 @@ def _remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=
     state["deployments"] = list(reversed(pending_deployments))
     _write_deployment_state(manager_dir, state)
     return {"masters": list(dict.fromkeys(all_masters)), "removed": removed, "restored": restored,
-            "archives": list(dict.fromkeys(all_archives)), "registrations": registrations,
+            "archives": list(dict.fromkeys(all_archives)), "registrations": registrations, "edited": edited,
             "pending": sum(len(item.get("operations", [])) + len(item.get("moves", []))
                             for item in pending_deployments)}
 
