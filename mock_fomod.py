@@ -313,6 +313,8 @@ def _fomod_payload(mod_dir: Path, plugin: ET.Element, payload_root: Path | None 
             # Documentation is read for descriptions, never installed as game payload.
             if source.suffix.casefold() in DOC_EXTS or (parts and parts[0].casefold() == "docs"):
                 continue
+            if parts and parts[-1].casefold() == source.name.casefold():
+                parts = parts[:-1]      # a file's destination usually names the file itself
             relative = Path(*parts, source.name) if parts else Path(source.name)
             if relative.parts and relative.parts[0].casefold() == "sounds":
                 relative = Path("Sound", *relative.parts[1:])
@@ -356,6 +358,20 @@ def _discover_fomod(mod_dir: Path, installed: set[str]) -> list[dict]:
         mod_dir, config, module_image_node.attrib.get("path") if module_image_node is not None else None)
     steps = _xml_local(root, "installStep")
     records = []
+    source_root = config.parent.parent if config.parent.name.casefold() == "fomod" else config.parent
+    for block in _xml_local(root, "requiredInstallFiles"):
+        payload = _fomod_payload(mod_dir, block, source_root)
+        if not payload:
+            continue
+        plugins = [src for src in payload.values() if src.suffix.casefold() in PLUGIN_EXTS]
+        targets = set().union(*(_plugin_masters(path) for path in plugins)) - BASE_GAME_MASTERS if plugins else set()
+        records.append({"key": "fomod:required", "group_key": "fomod:required", "group_label": "Required files",
+                        "selection_type": "SelectAll", "path": config.parent, "number": -1,
+                        "label": "Core files", "required": True, "recommended": False,
+                        "targets": sorted(targets), "compatible": sorted(targets & installed),
+                        "missing_masters": sorted(targets - installed), "docs": "", "fomod_description": "",
+                        "image_path": module_image, "all_payload_files": payload, "payload_files": payload,
+                        "option_type": "Required", "has_plugin_payload": bool(plugins), "mod_dir": mod_dir})
     for step_index, step in enumerate(steps):
         step_name = step.attrib.get("name", f"Install step {step_index + 1}")
         for group_index, group in enumerate(_xml_local(step, "group")):

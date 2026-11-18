@@ -240,5 +240,30 @@ class AssetOnlyOptionTests(unittest.TestCase):
         self.assertIn("epic plants (mod)", installed)
 
 
+class RequiredInstallFilesTests(unittest.TestCase):
+    CONFIG = ('<config><moduleName>TOTSP</moduleName><requiredInstallFiles>'
+              '<folder source="000 Core\\Meshes" destination="meshes"/>'
+              '<file source="000 Core\\TOTSP.esm" destination="TOTSP.esm"/></requiredInstallFiles>'
+              '<installSteps order="Explicit"><installStep name="Addons"><optionalFileGroups order="Explicit">'
+              '<group name="Addons" type="SelectAny"><plugins order="Explicit"><plugin name="Helms">'
+              '<files><folder source="201 Helms\\meshes" destination="meshes"/></files>'
+              '<typeDescriptor><type name="Optional"/></typeDescriptor></plugin></plugins></group>'
+              '</optionalFileGroups></installStep></installSteps></config>')
+
+    def test_required_install_files_are_a_locked_choice_and_not_an_optional_nested_plugin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mod = Path(tmp) / "TOTSP"
+            pkg = mod / "Extras/totsp"
+            put(pkg / "000 Core/TOTSP.esm", struct.pack("<4sIII", b"TES3", 0, 0, 0))
+            put(pkg / "000 Core/Meshes/a.nif", b"nif")
+            put(pkg / "201 Helms/meshes/h.nif", b"nif")
+            put(pkg / "fomod/ModuleConfig.xml", self.CONFIG.encode("utf-8"))
+            records = mock_fomod._discover_fomod(mod, set())
+            (core,) = [r for r in records if r["required"]]
+            self.assertEqual(sorted(core["payload_files"]), ["TOTSP.esm", os.path.join("meshes", "a.nif")])
+            nested = mock_fomod._discover_plugin_choices(mod, set(), mock_fomod._represented_option_sources(records))
+            self.assertEqual(nested, [])
+
+
 if __name__ == "__main__":
     unittest.main()
