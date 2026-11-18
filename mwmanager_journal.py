@@ -774,8 +774,11 @@ class Journal:
         originals = self._originals(entries)
         steps, prerequisite_steps, refuse, used_backups = [], [], list(problems), []
         rollback_checkpoint = self.checkpoint_state(True)
-        for k, original in sorted(originals.items(), key=lambda kv: -max(e["seq"] for e in entries
-                                                                          if key(e["path"]) == kv[0])):
+        last_seq = {}                               # one pass: a per-path scan of the ledger was O(n^2)
+        for e in entries:
+            k = key(e["path"])
+            last_seq[k] = max(last_seq.get(k, e["seq"]), e["seq"])
+        for k, original in sorted(originals.items(), key=lambda kv: -last_seq[kv[0]]):
             if k == "morrowind.ini":
                 continue                         # the whole baseline INI is authoritative, including old ledgers
             rel = original["path"]
