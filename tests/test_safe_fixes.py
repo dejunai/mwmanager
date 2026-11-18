@@ -105,6 +105,26 @@ class ForkHelperTests(unittest.TestCase):
         self.assertIn(steam / "steamapps" / "common" / "Morrowind", roots)
         self.assertIn(lib / "steamapps" / "common" / "Morrowind", roots)
 
+    def test_steam_lua_differences_are_shown_and_imported_only_on_yes(self):
+        # REMOVE BEFORE SHIPPING: tests the developer-machine Steam Lua import
+        import plugin_install as pi
+        with tempfile.TemporaryDirectory() as tmp:
+            steam_mods = Path(tmp) / "steam" / "Data Files" / "MWSE" / "mods"
+            package = Path(tmp) / "pkg"
+            for root, text in ((steam_mods, "return 2\n"), (package / "MWSE" / "mods", "return 1\n")):
+                (root / "x").mkdir(parents=True)
+                (root / "x" / "main.lua").write_text(text)
+                (root / "x" / "same.lua").write_text("same\n")
+            staged = package / "MWSE" / "mods" / "x" / "main.lua"
+            asked = []
+            with mock.patch.object(pi, "steam_lua_root", return_value=steam_mods):
+                self.assertEqual(pi.pull_updated_steam_luas(package, lambda t, m: asked.append(m) or False), [])
+                self.assertEqual(staged.read_text(), "return 1\n")       # No: left as staged
+                self.assertEqual(len(asked), 1)                          # identical files are not asked about
+                self.assertIn("+return 2", asked[0])                     # the diff is shown
+                pi.pull_updated_steam_luas(package, lambda t, m: True)
+            self.assertEqual(staged.read_text(), "return 2\n")           # Yes: imported
+
     def test_catalog_needs_game_dir_and_keeps_db_beside_manager(self):
         sys.path.insert(0, str(ROOT / "database"))
         import catalog

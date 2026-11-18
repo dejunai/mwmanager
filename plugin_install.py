@@ -1375,8 +1375,11 @@ def steam_lua_root() -> Path | None:
     return None
 
 
-def pull_updated_steam_luas(package: Path) -> list[str]:
-    """Refresh packaged Lua files from matching Steam MWSE paths; archive remains the backup."""
+# REMOVE BEFORE SHIPPING: developer-machine workaround (the user's Steam install holds their luafix-edited Lua).
+def pull_updated_steam_luas(package: Path, ask) -> list[str]:
+    """Developer machine only: for each staged Lua that differs from the Steam install's copy at the same MWSE path,
+    show the diff and import the Steam copy only when ask(title, text) says yes. The archive remains the backup."""
+    import difflib
     steam_root = steam_lua_root()
     if not steam_root:
         return []
@@ -1390,19 +1393,23 @@ def pull_updated_steam_luas(package: Path) -> list[str]:
             rel = source.relative_to(package)
             parts = list(rel.parts)
             lower = [part.casefold() for part in parts]
-            try:
-                marker = lower.index("mwse")
+            try:            # the path under MWSE\mods, which is what steam_lua_root() points at
+                marker = lower.index("mods")
                 lua_rel = Path(*parts[marker + 1:])
             except ValueError:
-                try:
-                    marker = lower.index("mods")
-                    lua_rel = Path(*parts[marker + 1:])
-                except ValueError:
-                    continue
+                continue
             if not lua_rel.parts:
                 continue
             candidate = steam_root / lua_rel
-            if not candidate.is_file():
+            if not candidate.is_file() or candidate.read_bytes() == source.read_bytes():
+                continue
+            diff = "".join(difflib.unified_diff(
+                source.read_text("utf-8", errors="replace").splitlines(keepends=True),
+                candidate.read_text("utf-8", errors="replace").splitlines(keepends=True),
+                f"staged/{lua_rel.as_posix()}", f"steam/{lua_rel.as_posix()}"))
+            if not ask("Lua differs from the Steam install",
+                       f"{lua_rel} in {package.name} differs from the Steam install's copy.\n\n{diff}\n"
+                       "Import the Steam copy into this package?"):
                 continue
             # Update the staged copy before linking so deployment payload tracking remains exact.
             shutil.copy2(candidate, source)

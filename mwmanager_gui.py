@@ -624,6 +624,11 @@ def read_settings() -> dict:
         data[ALWAYS_BSA_SETTING] = ini.getboolean("Staging", ALWAYS_BSA_SETTING, fallback=False)
     except ValueError:
         data[ALWAYS_BSA_SETTING] = False
+    # REMOVE BEFORE SHIPPING: developer machine only, set by hand: diff staged mod Lua against the Steam copies
+    try:
+        data["compare_steam_lua"] = ini.getboolean("Dev", "compare_steam_lua", fallback=False)
+    except ValueError:
+        data["compare_steam_lua"] = False
     detected_exe = vortex_install_path()
     data["vortex_detected"] = bool(detected_exe or vortex_registered())
     data["vortex_exe"] = str(detected_exe) if detected_exe else ""
@@ -2577,9 +2582,11 @@ class ManagerGUI(tk.Tk):
                     for package, label in pending:
                         progress(f"Deploying {label}…")
                         item = pending_items[str(package)]
-                        refreshed = pull_updated_steam_luas(package)
-                        if refreshed:
-                            progress(f"Refreshed {len(refreshed)} MWSE Lua file(s) from the Steam install for {label}.")
+                        # REMOVE BEFORE SHIPPING: [Dev] compare_steam_lua, developer machine only
+                        if self.settings.get("compare_steam_lua"):
+                            imported = pull_updated_steam_luas(package, progress.ask_yes_no)
+                            if imported:
+                                progress(f"Imported {len(imported)} Lua file(s) from the Steam install for {label}.")
                         linked, _skipped, operations = deploy_package(
                             package, data_dir, label, APP_DIR / "protected_replacer_textures.json",
                             transaction=transaction)
