@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-17 (America/Los_Angeles); refreshed to e11b6ba",
+  "SyncedAt": "2026-11-17 (America/Los_Angeles); refreshed to 143ad96",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -455,8 +455,8 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 510430,
-      "SHA256": "8ccddf4dc696db225e22706dccdc1f9325979c136555290598461b0c3ffbb79b",
+      "Bytes": 510902,
+      "SHA256": "f8b8f64c38a72d4d375af464aae8efd0722dbdad0cd7b3e72cd0a7e2110f179f",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
       "SourceModified": "2026-11-17T13:45:35-08:00"
     },
@@ -546,8 +546,8 @@
     },
     {
       "RelativePath": "mwdialog_luafix.py",
-      "Bytes": 133643,
-      "SHA256": "aec73597abe48677b782d768226416dcdb288f1f4d4373c6acaca585d1741178",
+      "Bytes": 131084,
+      "SHA256": "2794fedeacc3e590fc4d21fe9f23eef3afa57d630d5a74cba6ed9e44cf011e89",
       "Source": "<Steam Morrowind>\\mwdialog_luafix.py",
       "SourceModified": "2026-11-15T06:55:58"
     },
@@ -1090,6 +1090,12 @@
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwexitguard\\mcm.lua",
       "Bytes": 2391,
       "SHA256": "2f2383f055622b03609d5b878110831d4982121e36f856f0b74ff5b167f7a710"
+    },
+    {
+      "RelativePath": "Data Files\\MWSE\\mods\\mwquicktoggle\\main.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwquicktoggle\\main.lua",
+      "Bytes": 3236,
+      "SHA256": "7c7d570f531c661d58d866d5176637c19d0375ab4b9b42bae3d18adb981712e4"
     }
   ]
 }

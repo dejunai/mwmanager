@@ -49,6 +49,7 @@ class Composition(unittest.TestCase):
             for per in m.module_state_names(tmp).values():
                 names.update(per)
             names.update(m.tidy_state_names(tmp))
+            self.assertIn("DOOR_OWNERS_LIST", names)     # upstream writes it next to the game otherwise
             for key, value in names.items():
                 if isinstance(value, str) and os.path.isabs(value):
                     self.assertTrue(os.path.normcase(value + os.sep).startswith(own), (key, value))

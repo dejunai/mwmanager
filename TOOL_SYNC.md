@@ -277,3 +277,15 @@ Behaviour changes:
 - Refreshed `noAccidentalTheftBookFix.lua`, `personalEffectsFix.lua`, and `mwsaveguard\main.lua` in both the
   upstream snapshot and the distributable Lua reference suite. The copy, suite-source, and utility manifests
   carry the new hashes.
+
+## Steam sync to morrowind-conflict-tools 143ad96 — 2026-11-17 (Pacific)
+
+- Refreshed `mwdialog_check.py` and `mwdialog_luafix.py` (root and `tools\steam-upstream\`), `UPSTREAM.json`, `COPY_MANIFEST.json`
+  and `utility_source_manifest.json`.
+- Ownership repair now runs in MWManager through the inherited check and `--fix` (`fix_cell_winners`): door owners copied
+  with a cloned door (public place: the owner comes off; a home's one resident: it is theirs) and containers/objects
+  in a home owned by someone from another town (given to the one resident; never taken off). Everything else is
+  reported only. The per-run list of changed and questionable owners is `outputs\mwmanager_door_owners.txt`
+  (`DOOR_OWNERS_LIST` in `mwmanager_state.py`); each change is also a line in the fix log.
+- New suite mod `mwquicktoggle` (a quick key unequips its item when already equipped; vanilla keys and QuickKeys
+  Hotbar Extended) in the snapshot and in `reference\mwse-lua-guards\`; luafix lists it as one of ours.

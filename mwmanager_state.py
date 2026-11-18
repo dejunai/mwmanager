@@ -90,6 +90,7 @@ def state_names(manager_dir):
         "NEW_CONFLICTS_FILE": os.path.join(out, "mwmanager_new_conflicts.txt"),
         "SHORT_MESH_RECORD": os.path.join(out, "mwmanager_short_meshes.txt"),
         "REDUNDANT_RECORD": os.path.join(out, "mwmanager_redundant.txt"),
+        "DOOR_OWNERS_LIST": os.path.join(out, "mwmanager_door_owners.txt"),   # per --fix: owners changed / left
         "MISSING_NORMALS_RECORD": os.path.join(out, "mwmanager_missing_normal_maps.txt"),
         "FULLSIZE_DIR": os.path.join(manager_dir, "backups", "fullsize_textures"),
     }
