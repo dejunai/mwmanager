@@ -23,6 +23,7 @@ from mwmanager_workflow import JobCancelled, JobControl, JobView, checkpoint, pr
 
 from mwmanager_theme import COLORS, FONTS, SPACE, apply_theme, center, tree_tags
 from bsa_pack import BSA_OFFER_SETTING, DEFAULT_THRESHOLD as DEFAULT_BSA_OFFER, MIN_THRESHOLD as MIN_BSA_OFFER
+ALWAYS_BSA_SETTING = "always_build_bsa"      # mwmanager.ini [Staging]; default off: ask per package
 
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_FILE = APP_DIR / "mwmanager_gui_settings.json"
@@ -619,6 +620,10 @@ def read_settings() -> dict:
     except ValueError:
         threshold = DEFAULT_BSA_OFFER
     data[BSA_OFFER_SETTING] = threshold if threshold >= MIN_BSA_OFFER else DEFAULT_BSA_OFFER
+    try:        # true: every package over the threshold gets its BSA without being asked
+        data[ALWAYS_BSA_SETTING] = ini.getboolean("Staging", ALWAYS_BSA_SETTING, fallback=False)
+    except ValueError:
+        data[ALWAYS_BSA_SETTING] = False
     detected_exe = vortex_install_path()
     data["vortex_detected"] = bool(detected_exe or vortex_registered())
     data["vortex_exe"] = str(detected_exe) if detected_exe else ""
@@ -658,12 +663,14 @@ def write_settings(settings: dict) -> None:
     except (TypeError, ValueError):
         threshold = DEFAULT_BSA_OFFER
     ini.set("Staging", BSA_OFFER_SETTING, str(threshold))
+    if ALWAYS_BSA_SETTING in settings:
+        ini.set("Staging", ALWAYS_BSA_SETTING, "true" if settings[ALWAYS_BSA_SETTING] else "false")
     stream = io.StringIO()
     ini.write(stream)
     _atomic_write(MWMANAGER_INI, stream.getvalue().encode("utf-8"))   # a crash mid-write never empties it
 
     preferences = {key: value for key, value in settings.items()
-                   if key not in PATH_SETTING_KEYS and key != BSA_OFFER_SETTING
+                   if key not in PATH_SETTING_KEYS and key not in (BSA_OFFER_SETTING, ALWAYS_BSA_SETTING)
                    and key not in RUNTIME_KEYS and key not in LEGACY_PREFERENCE_KEYS}
     _atomic_write(SETTINGS_FILE, (json.dumps(preferences, indent=2) + "\n").encode("utf-8"))
 
@@ -2674,7 +2681,7 @@ class ManagerGUI(tk.Tk):
                         bsa_offer = int(self.settings.get(BSA_OFFER_SETTING, DEFAULT_BSA_OFFER))
                         if eligible >= bsa_offer and len(install_plugins) == 1:
                             plugin_label = install_plugins[0]
-                            make_bsa = progress.ask_yes_no(
+                            make_bsa = bool(self.settings.get(ALWAYS_BSA_SETTING)) or progress.ask_yes_no(
                                 "Build a BSA?",
                                 f"{plugin_label} has {eligible:,} BSA-compatible assets after Tidy.\n\n"
                                 "Build and register a BSA before deployment? BSAPack may split it into multiple archives.")
@@ -3281,12 +3288,15 @@ class ManagerGUI(tk.Tk):
         self.order = names
         self.active_names = {n.casefold() for n in names}
         self.refresh()
-        self.status.set(f"Saved {len(names)} active plugins; moved {len(moved)} disabled plugin(s) to MWManager's disabled_plugins folder.")
+        total_disabled = len(read_disabled_plugins())
+        self.status.set(f"Saved {len(names)} active plugins; {total_disabled} plugin(s) disabled"
+                        + (" (Show Disabled lists them)." if total_disabled else "."))
 
     def show_disabled_plugins(self):
         """List disabled plugin records and restore selected files into the active load order."""
         data_dir = Path(self.settings["game_dir"]) / "Data Files"
-        off_dirs = (disabled_plugins_dir(), data_dir / "Off" / "Disabled Plugins")   # new place, then the old one
+        off_dirs = (disabled_plugins_dir(), data_dir / "Off" / "Disabled Plugins",   # new place, then the old one
+                    data_dir / "Off" / "Official Add-Ons")       # an add-on a master replaces (Siege at Firemoth)
         entries = read_disabled_plugins()
         for off_dir in off_dirs:
             if off_dir.is_dir():
@@ -3994,6 +4004,12 @@ class ManagerGUI(tk.Tk):
                 self._complete_init()                # setup's major-master step ends with the deployment
             self.active_names.update(name.casefold() for name in result["ready"])
             self.selected_major_masters.update(name.casefold() for name in result["ready"])
+            firemoth = data_dir / "Off" / "Official Add-Ons" / "Siege at Firemoth.esp"
+            if firemoth.is_file() and not (data_dir / firemoth.name).exists():      # set aside by the deployment
+                disabled = read_disabled_plugins()
+                disabled.setdefault(firemoth.name, "conflicts with Tamriel Rebuilt (deployed without Remove Firemoth)")
+                write_disabled_plugins(disabled)
+                self.active_names.discard(firemoth.name.casefold())
             major_keys = {name.casefold() for name in self.major_masters}
             # plugins deployed with the masters were chosen in their installer (TR_Factions.esp): keep them
             # active, or save() below moves them straight back out of Data Files
@@ -4026,6 +4042,9 @@ class ManagerGUI(tk.Tk):
             messagebox.showinfo("Major masters deployed", "\n".join(detail), parent=self)
             if result.get("conflicts"):
                 self._resolve_major_master_conflicts(result["conflicts"])
+            view = getattr(self, "_job_view", None)
+            if view is not None and hasattr(view, "stage"):
+                view.stage.set("Deployment complete. You can close this window now.")
 
         self._setup_begin("major_masters_deployed")
         self._run_progress_job("Deploy Major Masters", "Hardlinking selected masters and their assets…", worker, completed)
@@ -4858,7 +4877,7 @@ class ManagerGUI(tk.Tk):
                 from major_master_deploy import count_bsa_eligible
                 eligible_assets = count_bsa_eligible(staging, group_masters)
                 if eligible_assets >= int(self.settings.get(BSA_OFFER_SETTING, DEFAULT_BSA_OFFER)):
-                    if progress.ask_yes_no(
+                    if self.settings.get(ALWAYS_BSA_SETTING) or progress.ask_yes_no(
                             f"Build a BSA for {PLUGIN_NAME}?",
                             f"{PLUGIN_NAME} has {eligible_assets:,} BSA-compatible assets after Tidy and FOMOD selection.\n\n"
                             "Build its BSA archive(s) now? BSAPack will split archives before they reach 2 GB. "

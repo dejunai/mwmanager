@@ -1196,15 +1196,9 @@ def run_plan(args):
     if getattr(args, "_write_plan", True):
         PF.write_atomic(PLAN, args._moves_text)
     print("\n".join(head))
-    # 00 Core content always unpacks: one count, not a line per file (the plan file still lists every one)
-    core = sum(1 for ln in lines if "unpack 00 Core" in ln or "unpack required 00 Core" in ln)
-    shown = [ln for ln in lines if "unpack 00 Core" not in ln and "unpack required 00 Core" not in ln]
-    if core:
-        print(f"  {core:,} file(s) unpacked from 00 Core content (each is listed in {PLAN})")
-    print("\n".join(shown[:200]))
-    if len(shown) > 200:
-        print(f"... ({len(shown) - 200} more lines in {PLAN})")
-    print(f"\nFull plan: {PLAN}")
+    # the player can't act on single planned moves: a count here, every move in the plan file
+    planned = sum(1 for ln in lines if "  ->  " in ln)
+    print(f"  {planned:,} planned move(s); each is listed in {PLAN}")
     update_omwaddon_masters(args.staging, apply_changes=False)
     game_data_files = args.game_data_files or os.environ.get("MWMANAGER_DATA_FILES")
     align_master_versions(args.staging, game_data_files, apply_changes=False)

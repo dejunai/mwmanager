@@ -714,7 +714,8 @@ def legacy_disabled_plugin_path(data_dir, name):
 
 
 def find_disabled_plugin(data_dir, name):
-    for path in (disabled_plugin_path(data_dir, name), legacy_disabled_plugin_path(data_dir, name)):
+    replaced_addon = os.path.join(os.path.abspath(data_dir), "Off", "Official Add-Ons", os.path.basename(name))
+    for path in (disabled_plugin_path(data_dir, name), legacy_disabled_plugin_path(data_dir, name), replaced_addon):
         if os.path.isfile(path):
             return path
     return None

@@ -1,4 +1,5 @@
 """Batch step 1: chosen options that need a mod that isn't installed or staged are kept as waiting on it."""
+import os
 import json
 import sys
 import tempfile
@@ -142,6 +143,27 @@ class HeldOptionTests(unittest.TestCase):
             self.assertEqual(act.call_args.args[3], {"01 Epic Plants"})
             entry = json.loads((out / "mwmanager_compatibility_journal.json").read_text(encoding="utf-8"))["mods"]["oaab"]
             self.assertEqual((entry["held"], entry["selected"]), ([], ["01 Epic Plants"]))
+
+
+class ReuseSavedAnswersTests(unittest.TestCase):
+    def test_saved_answers_install_without_the_window_when_switched_on(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "stage" / "OAAB_Data"
+            put(package / "Extras/01 Epic Plants/Textures/a.dds", b"optional")
+            data = root / "game" / "Data Files"
+            data.mkdir(parents=True)
+            record = {"key": "option:1", "path": package / "Extras/01 Epic Plants", "label": "Epic Plants",
+                      "targets": [], "number": 1}
+
+            def run(selector, env):
+                with mock.patch("nexus_updates.check_and_offer_update", return_value=False),                         mock.patch.object(mock_fomod, "_has_fomod", return_value=False),                         mock.patch.object(mock_fomod, "_discover", return_value=[record]),                         mock.patch.object(mock_fomod, "_discover_plugin_choices", return_value=[]),                         mock.patch.object(mock_fomod, "_show_selector", selector),                         mock.patch.dict(os.environ, env):
+                    mock_fomod.process_staging(package.parent, data, root / "outputs", reopen_existing=True)
+
+            run(mock.Mock(return_value={"option:1"}), {"MWMANAGER_REUSE_FOMOD": "0"})
+            window = mock.Mock(side_effect=AssertionError("the option window opened"))
+            run(window, {"MWMANAGER_REUSE_FOMOD": "1"})
+            window.assert_not_called()
 
 
 if __name__ == "__main__":

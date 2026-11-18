@@ -166,6 +166,13 @@ class ArchiveSettingsTests(unittest.TestCase):
         self.g.MWMANAGER_INI.write_text("[Staging]\noffer_bsa_when_assets_found = 49\n")
         self.assertEqual(self.g.read_settings()["offer_bsa_when_assets_found"], 10000)
 
+    def test_always_build_bsa_is_off_by_default_and_kept_in_ini(self):
+        self.g.MWMANAGER_INI.write_text("[Staging]\noffer_bsa_when_assets_found = 10000\n")
+        self.assertFalse(self.g.read_settings()["always_build_bsa"])
+        self.g.write_settings({"game_dir": str(self.game), "always_build_bsa": True})
+        self.assertIn("always_build_bsa = true", self.g.MWMANAGER_INI.read_text())
+        self.assertTrue(self.g.read_settings()["always_build_bsa"])
+
     def test_new_key_wins_over_old(self):
         other = Path(self.tmp.name) / "old"
         self.g.MWMANAGER_INI.write_text(f"[Paths]\ndownloads_dir = {other}\narchive_downloads_dir = "

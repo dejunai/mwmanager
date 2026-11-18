@@ -2324,6 +2324,19 @@ def _legacy_answer_groups(records: list[dict]) -> set[str]:
     return {item.get("group_key", f"bain:{item.get('number', 0):02d}") for item in records}
 
 
+def _reuse_saved_answers() -> bool:
+    """mwmanager.ini [Install] reuse_fomod_answers = true (or MWMANAGER_REUSE_FOMOD=1): a package whose every
+    option group was answered before installs with those answers, without opening the option window."""
+    if os.environ.get("MWMANAGER_REUSE_FOMOD") == "1":
+        return True
+    ini = configparser.ConfigParser()
+    try:
+        ini.read(Path(__file__).with_name("mwmanager.ini"), encoding="utf-8")
+        return ini.getboolean("Install", "reuse_fomod_answers", fallback=False)
+    except (configparser.Error, ValueError, OSError):
+        return False
+
+
 def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
                     output_dir: str | os.PathLike, *, only: list[str] | None = None,
                     reopen_existing: bool = False) -> None:
@@ -2476,7 +2489,11 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             previous = set(entry.get("selected", []))
             saved_selections[selection_identity] = sorted(previous)
             answered_groups = _legacy_answer_groups(records)
-        chosen = _show_selector(mod_dir.name, records, previous, installed, answered_groups)
+        if answer is not None and _reuse_saved_answers() and _legacy_answer_groups(records) <= answered_groups:
+            chosen = sorted(previous)       # every group already answered and nothing new: no window
+            print(f"{mod_dir.name}: saved installer choices applied")
+        else:
+            chosen = _show_selector(mod_dir.name, records, previous, installed, answered_groups)
         if chosen is None:
             raise OptionsCancelled(f"Option selection cancelled for {mod_dir.name}; this package is not ready.")
         prior_activation = (entry.get("activation", {}) if reopen_existing

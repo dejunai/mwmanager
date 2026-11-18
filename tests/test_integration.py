@@ -401,7 +401,7 @@ class TidySteps(unittest.TestCase):
             mk(path, b"metadata")
         rc, out = self.run_tidy()
         self.assertEqual(rc, 0, out)
-        self.assertIn("remove platform packaging metadata", out)
+        self.assertIn("remove platform packaging metadata", Path(self.t.PLAN).read_text(encoding="utf-8"))  # the plan file, not the window
         rc, out = self.run_tidy("--apply", "--yes")
         self.assertEqual(rc, 0, out)
         self.assertTrue(all(not path.exists() for path in debris))
