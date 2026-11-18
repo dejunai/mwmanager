@@ -1,5 +1,6 @@
 """Workflow tests use a temporary fake game, never the user's installation."""
 import sys
+import json
 import os
 import shutil
 import struct
@@ -256,6 +257,21 @@ class WorkflowGuiTests(unittest.TestCase):
         self.assertIn("Extra.esp", moved)
         journal.finish_run.assert_called_once()
         self.assertTrue((self.g.disabled_plugins_dir() / "Extra.esp").is_file())
+
+    def test_distant_land_notice_opens_mge_until_regeneration_is_confirmed(self):
+        game = Path(self.app.settings["game_dir"])
+        (game / "MGEXEgui.exe").write_bytes(b"MZ")
+        status = self.g.APP_DIR / "outputs" / "distant_land_status.json"
+        status.parent.mkdir(parents=True, exist_ok=True)
+        status.write_text(json.dumps({"regeneration_required": True, "game_dir": str(game.resolve())}), "utf-8")
+        with mock.patch("mwmanager_dialogs.askyesno", side_effect=[False, True]), \
+                mock.patch.object(self.g, "_ShellProgram") as opened:
+            self.app._acknowledge_distant_land()                 # not finished yet: MGE XE opens
+        opened.assert_called_once_with(game / "MGEXEgui.exe")
+        self.assertTrue(json.loads(status.read_text("utf-8"))["regeneration_required"])
+        with mock.patch("mwmanager_dialogs.askyesno", return_value=True):
+            self.app._acknowledge_distant_land()                 # finished: the notice goes
+        self.assertFalse(json.loads(status.read_text("utf-8"))["regeneration_required"])
 
     def test_generate_patches_says_how_it_finished(self):
         summary = ["--full summary", "=" * 70,

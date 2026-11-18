@@ -2069,16 +2069,30 @@ class ManagerGUI(tk.Tk):
             self.distant_land_notice.pack_forget()
 
     def _acknowledge_distant_land(self):
-        if messagebox.askyesno("Distant land regeneration",
-                               "Have you loaded the MWManager override and regenerated distant land in MGE XE?",
-                               parent=self):
-            from workflow_safety import atomic_json, mutation_lock
-            with mutation_lock(APP_DIR, self.settings["game_dir"]):
-                path = APP_DIR / "outputs" / "distant_land_status.json"
-                state = json.loads(path.read_text(encoding="utf-8"))
-                state["regeneration_required"] = False
-                atomic_json(path, state)
-            self._refresh_distant_land_notice()
+        if not messagebox.askyesno("Distant land regeneration",
+                                   "Have you finished regenerating distant land in MGE XE (with the MWManager "
+                                   "override loaded)?", default="no", parent=self):
+            mge = Path(self.settings["game_dir"]) / "MGEXEgui.exe"
+            if not mge.is_file():
+                messagebox.showwarning("Distant land regeneration",
+                                       f"MGEXEgui.exe was not found in {mge.parent}. Install MGE XE, then "
+                                       "regenerate distant land from its Distant Land tab.", parent=self)
+            elif messagebox.askyesno("Distant land regeneration",
+                                     "Open MGE XE now? In its Distant Land tab, load the MWManager override and "
+                                     "generate distant land. Click this notice again when it has finished.",
+                                     parent=self):
+                try:
+                    _ShellProgram(mge)          # its own folder, elevated if Windows asks; MWManager keeps running
+                except OSError as exc:
+                    messagebox.showerror("Could not open MGE XE", str(exc), parent=self)
+            return
+        from workflow_safety import atomic_json, mutation_lock
+        with mutation_lock(APP_DIR, self.settings["game_dir"]):
+            path = APP_DIR / "outputs" / "distant_land_status.json"
+            state = json.loads(path.read_text(encoding="utf-8"))
+            state["regeneration_required"] = False
+            atomic_json(path, state)
+        self._refresh_distant_land_notice()
 
     def refresh(self):
         self._refresh_distant_land_notice()
