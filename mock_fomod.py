@@ -2042,6 +2042,59 @@ def _close_nexus_browser_after_dialog():
         return None
 
 
+def _companion_records(mod_dir: Path) -> list[dict]:
+    """A staged master's companion downloads (HD and voice packs, from core_addons.find_companions), offered
+    unselected in its option window. Nothing is extracted unless one is chosen."""
+    try:
+        marker = json.loads((mod_dir / ".mwmanager-stage.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return []
+    records = []
+    for order, companion in enumerate(marker.get("companions") or []):
+        archive = Path(companion["archive"])
+        docs = (f"Separate download: {archive.name} ({int(companion.get('size_bytes') or 0) / 1048576:,.0f} MB). "
+                f"Extracted and installed over {companion.get('master') or mod_dir.name} only if you choose it.")
+        badges = [companion["label"]]
+        if companion.get("warning"):
+            badges.append("Older than the master")
+            docs += "\n\nWarning: " + companion["warning"]
+        records.append({"key": "companion:" + archive.name, "path": None, "number": 950 + order,
+                        "label": f"{companion['label']}: {companion.get('name') or archive.stem}",
+                        "required": False, "core_bundle": False, "has_plugin_payload": False,
+                        "has_master_payload": False, "informational_utility": False, "targets": [],
+                        "compatible": [], "missing_masters": [], "docs": docs, "mod_dir": mod_dir,
+                        "badges": badges, "outputs": set(), "group_label": "Companion downloads",
+                        "companion": companion})
+    return records
+
+
+def _data_root(folder: Path) -> Path:
+    """Step through wrapper folders ("Tamriel Data Part 1/Sound/...") to the folder holding game folders."""
+    while True:
+        children = [p for p in folder.iterdir() if not p.name.startswith(".")]
+        if len(children) != 1 or not children[0].is_dir() or children[0].name.casefold() in GAME_DIRS:
+            return folder
+        folder = children[0]
+
+
+def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str]) -> None:
+    """Extract each chosen companion to staging/companions (outside the master staging that Tidy treats as
+    packages, and outside the package, so it is not deployed as is); its record gets the payload to activate."""
+    from plugin_install import extract_archive
+    for record in records:
+        companion = record.get("companion")
+        if not companion or record["key"] not in chosen or "payload_files" in record:
+            continue
+        archive = Path(companion["archive"])
+        target = mod_dir.parent.parent / "companions" / re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .")
+        if not target.is_dir():
+            extract_archive({"archive": str(archive)}, target, Path(__file__).resolve().parent)
+        record["path"] = _data_root(target)
+        record["payload_files"] = _payload_files({"path": record["path"]})
+        if companion.get("warning"):
+            print(f"  {mod_dir.name}: {companion['warning']}")
+
+
 def _payload_files(option: dict) -> dict[str, Path]:
     if "payload_files" in option:
         return dict(option["payload_files"])
@@ -2420,6 +2473,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         records = (_discover_fomod(mod_dir, installed) if _has_fomod(mod_dir)
                    else _discover(mod_dir, installed))
         records.extend(_discover_plugin_choices(mod_dir, installed, _represented_option_sources(records)))
+        records.extend(_companion_records(mod_dir))
         held = set(entry.get("held", []))
         pending = [r for r in records if set(r["targets"]) & newly_relevant and r["key"] not in selected]
         ready = {r["key"] for r in pending if r["key"] in held} - held_options(records, held, installed)
@@ -2450,6 +2504,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             if chosen is not None:
                 still = held_options(records, chosen, installed)
                 backup_root = _option_backup_root(output_dir, identity)
+                _materialize_companions(mod_dir, records, chosen - still)
                 applied = _activate(mod_dir, entry.get("plugin", mod_dir.name), records, chosen - still,
                                     entry.get("activation", {}), backup_root)
                 _apply_plugin_choices(mod_dir, records, chosen - still)
@@ -2488,6 +2543,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             # an optional installer choice. Mark it required so it is activated
             # automatically and _show_selector can return without opening a window.
             records[0]["required"] = True
+        records.extend(_companion_records(mod_dir))
         if not records:
             continue
         plugin = next((p.name for p in sorted(mod_dir.iterdir(), key=lambda x: x.name.casefold())
@@ -2531,6 +2587,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
                             and entry.get("selection_identity") == selection_identity else {})
         backup_root = _option_backup_root(output_dir, selection_identity)
         held = held_options(records, set(chosen), installed)      # chosen, but what it needs isn't here yet
+        _materialize_companions(mod_dir, records, set(chosen) - held)
         applied = _activate(mod_dir, plugin, records, set(chosen) - held, prior_activation, backup_root)
         changed_plugins = _apply_plugin_choices(mod_dir, records, set(chosen) - held)
         targets = sorted({target for item in records for target in item["targets"]})

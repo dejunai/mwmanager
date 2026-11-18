@@ -63,6 +63,249 @@ def master_mod_id(master: str, archive_name: str = "") -> int | None:
     if variants:
         return variants["HD" if re.search(r"(?<![a-z])hd(?![a-z])", archive_name.casefold()) else "SD"]
     return NEXUS_MOD_IDS.get(master.casefold())
+
+
+_FILE_CATEGORIES = {"main", "optional", "update", "miscellaneous", "old_version", "archived", "deleted"}
+
+
+def vortex_downloads(path: str | os.PathLike | None = None, game: str = "morrowind") -> dict[str, dict]:
+    """{archive name, casefolded: {"mod_id", "category", "name", "version"}} from Vortex's hourly state backup.
+    Empty when Vortex isn't installed. Older downloads carry the file category ("MAIN") where newer ones carry the
+    mod's; those get the mod category's name from another download of the same category id."""
+    path = Path(path) if path else (Path(os.environ.get("APPDATA", "")) / "Vortex" / "temp"
+                                    / "state_backups_full" / "hourly.json")
+    try:
+        files = json.loads(path.read_text(encoding="utf-8"))["persistent"]["downloads"]["files"]
+    except (OSError, ValueError, KeyError, TypeError):
+        return {}
+    rows, category_names = [], {}
+    for entry in files.values() if isinstance(files, dict) else ():
+        if not isinstance(entry, dict) or game not in (entry.get("game") or [game]):
+            continue
+        nexus = (entry.get("modInfo") or {}).get("nexus") or {}
+        info, mod = nexus.get("fileInfo") or {}, nexus.get("modInfo") or {}
+        category = str(info.get("category_name") or "")
+        if category and category.casefold() not in _FILE_CATEGORIES and mod.get("category_id") is not None:
+            category_names[mod["category_id"]] = category
+        rows.append((entry, nexus, info, mod, category))
+    result = {}
+    for entry, nexus, info, mod, category in rows:
+        if not entry.get("localPath"):
+            continue
+        if not category or category.casefold() in _FILE_CATEGORIES:
+            category = category_names.get(mod.get("category_id"), "")
+        mod_id = (nexus.get("ids") or {}).get("modId")
+        result[str(entry["localPath"]).casefold()] = {
+            "mod_id": int(mod_id) if str(mod_id or "").isdigit() else None, "category": category,
+            "name": str(info.get("name") or "").strip(), "version": str(info.get("version") or "").strip()}
+    return result
+
+
+def _archive_mod_id(archive: Path) -> int | None:
+    from plugin_install import _nexus_ids_from_archive_name
+    mod_id = _nexus_ids_from_archive_name(archive)[0]
+    return int(mod_id) if mod_id else None
+
+
+def find_companions(plan: dict, downloads_dir: str | os.PathLike, manager_dir: str | os.PathLike, *,
+                    vortex: dict | None = None) -> dict:
+    """Downloads that go with a found master but are never masters themselves (no ESM): its HD pack (same Nexus
+    mod) and voice packs (Nexus category Audio, named like the master). Each master's plan item gets a
+    "companions" list for its option window; a file of the master's own mod older than it carries a warning."""
+    from needed_mods import names_mod
+    vortex = vortex_downloads() if vortex is None else vortex
+    try:
+        archives = sorted((p for p in Path(downloads_dir).iterdir()
+                           if p.is_file() and p.suffix.lower() in ARCHIVE_EXTENSIONS), key=lambda p: p.name.casefold())
+    except OSError:
+        return plan
+    keywords = _config_masters(Path(manager_dir))
+    known = {Path(item["archive"]).name.casefold(): item
+             for item in plan.get("archives", []) + plan.get("superseded_archives", [])}
+    seven_zip, esm = _seven_zip(Path(manager_dir)), {}
+
+    def has_esm(path: Path) -> bool:
+        if path.name.casefold() not in esm:
+            item = known.get(path.name.casefold())
+            if item is not None and not item.get("inspection_error"):
+                plugins = item.get("plugins", [])
+            else:
+                names, error = _members(path, seven_zip)
+                plugins = ["unreadable.esm"] if error else names      # unreadable: never offered
+            esm[path.name.casefold()] = any(str(p).casefold().endswith(".esm") for p in plugins)
+        return esm[path.name.casefold()]
+
+    for item in plan.get("archives", []):
+        master_archive = Path(item["archive"])
+        companions = []
+        for master in item.get("core_masters", []):
+            master_id = master_mod_id(master, master_archive.name)
+            master_version = _archive_version(master_archive)
+            names = (Path(master).stem, *keywords.get(master.casefold(), ()))
+            for path in archives:
+                if path.name.casefold() == master_archive.name.casefold():
+                    continue
+                info = vortex.get(path.name.casefold()) or {}
+                mod_id = info.get("mod_id") or _archive_mod_id(path)
+                title = info.get("name") or path.stem
+                if master_id and mod_id == master_id:
+                    kind = "hd" if re.search(r"(?<![a-z])hd(?![a-z])", title.casefold()) else "extra"
+                elif str(info.get("category", "")).casefold() == "audio" and any(names_mod(n, title) for n in names):
+                    kind = "voice"
+                else:
+                    continue
+                if has_esm(path):
+                    continue
+                version = _archive_version(path) or tuple(int(v) for v in re.findall(r"\d+", info.get("version", "")))
+                label = {"hd": "HD pack available", "extra": "Extra file from the same Nexus mod",
+                         "voice": "Voice pack available"}[kind]
+                companion = {"archive": str(path), "kind": kind, "label": label, "name": title, "master": master,
+                             "version": ".".join(map(str, version)) or None, "size_bytes": path.stat().st_size}
+                # a voice pack is versioned on its own; only a file of the master's own Nexus mod is comparable
+                if kind != "voice" and version and master_version and version < master_version:
+                    companion["warning"] = (
+                        f"{title} {companion['version']} is older than {master} "
+                        f"{'.'.join(map(str, master_version))}: it may overwrite newer files.")
+                companions.append(companion)
+        if companions:
+            item["companions"] = companions
+    return plan
+
+
+REQUIRED_BY_CACHE = "mwmanager_required_by_cache.json"
+REQUIRED_BY_MAX_AGE_DAYS = 7
+
+
+def _required_by_from_page(markup: str) -> int | None:
+    """Rows of the foldable "Mods requiring this file" table on a Nexus mod page."""
+    start = markup.casefold().find("mods requiring this file")
+    if start < 0:
+        return None
+    end = markup.casefold().find("</table>", start)
+    table = markup[start:end if end > 0 else None]
+    tbody = table.casefold().find("<tbody")
+    return len(re.findall(r"<tr[\s>]", table[tbody:] if tbody >= 0 else table, re.I))
+
+
+def _local_required_by(data_dir: Path, master: str) -> int:
+    """Offline: plugins in Data Files whose header names this master."""
+    from mock_fomod import _plugin_masters
+    try:
+        plugins = [p for p in Path(data_dir).iterdir() if p.suffix.casefold() in PLUGIN_EXTENSIONS]
+    except OSError:
+        return 0
+    return sum(master.casefold() in {m.casefold() for m in _plugin_masters(p)} for p in plugins)
+
+
+def nexus_required_by(mod_ids: dict[int, str], manager_dir: str | os.PathLike, *, data_dir=None,
+                      timeout: float = 8, refresh: bool = False) -> dict[int, dict]:
+    """{mod id: {"required_by", "category", "source", "fetched"}} for Nexus mods given as {mod id: master file}.
+    The Nexus v2 API's modsRequiringThisMod first, then the mod page's table; cached per mod id with its date.
+    Offline: the last cached count, else a count of the installed plugins naming the master (never cached)."""
+    from datetime import date, timedelta
+    from mwnexus_parse import html_to_text, is_challenge
+    path = Path(manager_dir) / REQUIRED_BY_CACHE
+    try:
+        cache = json.loads(path.read_text(encoding="utf-8"))
+        cache = cache if isinstance(cache, dict) else {}
+    except (OSError, ValueError):
+        cache = {}
+    oldest = (date.today() - timedelta(days=REQUIRED_BY_MAX_AGE_DAYS)).isoformat()
+    result, wanted, fetched = {}, [], {}
+    for mod_id in mod_ids:
+        entry = cache.get(str(mod_id))
+        if entry and not refresh and str(entry.get("fetched") or "") >= oldest:
+            result[mod_id] = entry
+        else:
+            wanted.append(mod_id)
+    if wanted:
+        try:
+            game_id = _nexus_query('query { game(domainName: "morrowind") { id } }', {}, timeout)["game"]["id"]
+            for start in range(0, len(wanted), 50):
+                batch = wanted[start:start + 50]
+                aliases = " ".join(f'm{i}: mod(modId: "{mod_id}", gameId: $gameId) {{ modCategory {{ name }} '
+                                   'modRequirements { modsRequiringThisMod(count: 1) { totalCount } } }'
+                                   for i, mod_id in enumerate(batch))
+                data = _nexus_query(f"query($gameId: ID!) {{ {aliases} }}", {"gameId": str(game_id)}, timeout)
+                for i, mod_id in enumerate(batch):
+                    mod = data.get(f"m{i}") or {}
+                    count = ((mod.get("modRequirements") or {}).get("modsRequiringThisMod") or {}).get("totalCount")
+                    if count is not None:
+                        fetched[mod_id] = {"required_by": int(count), "source": "nexus api",
+                                           "category": (mod.get("modCategory") or {}).get("name") or ""}
+        except Exception:
+            pass
+        for mod_id in (m for m in wanted if m not in fetched):
+            try:
+                request = urllib.request.Request(f"https://www.nexusmods.com/morrowind/mods/{mod_id}",
+                                                 headers={"User-Agent": "MWManager/0.1", "Accept": "text/html"})
+                with urllib.request.urlopen(request, timeout=timeout) as response:
+                    markup = response.read(4 * 1024 * 1024).decode("utf-8", "replace")
+                count = None if is_challenge("", html_to_text(markup)) else _required_by_from_page(markup)
+                if count is not None:
+                    fetched[mod_id] = {"required_by": count, "category": "", "source": "nexus page"}
+            except Exception:
+                pass
+    for mod_id, entry in fetched.items():
+        entry["fetched"] = date.today().isoformat()
+        cache[str(mod_id)] = result[mod_id] = entry
+    if fetched:
+        path.write_text(json.dumps(cache, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    for mod_id in wanted:
+        if mod_id not in result:
+            result[mod_id] = cache.get(str(mod_id)) or {
+                "required_by": _local_required_by(data_dir, mod_ids[mod_id]) if data_dir else 0,
+                "category": "", "source": "local", "fetched": None}
+    return result
+
+
+def suggest_masters(plan: dict, downloads_dir: str | os.PathLike, manager_dir: str | os.PathLike, *,
+                    data_dir=None, vortex: dict | None = None, timeout: float = 8) -> list[dict]:
+    """Downloaded mods that master_tier makes major or common masters (an ESM, a master category, enough mods
+    requiring them) but that are not configured: suggestions for the user to confirm, most required first.
+    Candidates are Vortex downloads in a master category and the scanned archives; only those the count
+    qualifies are opened to look for the ESM. A configured master is never suggested, and never removed."""
+    vortex = vortex_downloads() if vortex is None else vortex
+    manager, downloads = Path(manager_dir), Path(downloads_dir)
+    configured = {name.casefold() for name in _config_masters(manager)}
+    shipped_ids = set(NEXUS_MOD_IDS.values()) | {i for v in MASTER_VARIANTS.values() for i in v.values()}
+    known = {Path(item["archive"]).name.casefold(): item for item in plan.get("archives", [])}
+    candidates = {}                        # mod id: [archive name, category, first ESM if already known]
+    for name, info in vortex.items():
+        if info.get("mod_id") and str(info.get("category", "")).casefold() in MASTER_CATEGORIES:
+            candidates.setdefault(info["mod_id"], [name, info["category"], ""])
+    for name, item in known.items():
+        mod_id = (vortex.get(name) or {}).get("mod_id") or _archive_mod_id(Path(item["archive"]))
+        esms = [p for p in item.get("plugins", []) if p.casefold().endswith(".esm")]
+        if mod_id and esms:
+            candidates[mod_id] = [name, (vortex.get(name) or {}).get("category", ""), esms[0]]
+    candidates = {k: v for k, v in candidates.items() if k not in shipped_ids}
+    if not candidates:
+        return []
+    counts = nexus_required_by({mod_id: esm for mod_id, (_n, _c, esm) in candidates.items()}, manager,
+                               data_dir=data_dir, timeout=timeout)
+    seven_zip, suggestions = _seven_zip(manager), []
+    for mod_id, (name, category, esm) in candidates.items():
+        found = counts.get(mod_id) or {}
+        category = found.get("category") or category
+        if not master_tier(category, int(found.get("required_by") or 0), True):
+            continue
+        item = known.get(name)
+        if item is not None and not item.get("inspection_error"):
+            plugins = item.get("plugins", [])
+        else:
+            members, error = _members(downloads / name, seven_zip)
+            plugins = [] if error else [Path(m.replace("\\", "/")).name for m in members]
+        esms = [p for p in plugins if p.casefold().endswith(".esm")]
+        if not esms or any(p.casefold() in configured for p in esms):
+            continue                       # no ESM: not a master; a configured one: already handled
+        suggestions.append({"master": esms[0], "mod_id": mod_id, "category": category,
+                            "tier": master_tier(category, int(found.get("required_by") or 0), True),
+                            "required_by": found.get("required_by"), "source": found.get("source"),
+                            "archive": name})
+    return sorted(suggestions, key=lambda s: -int(s["required_by"] or 0))
+
+
 NEXUS_GRAPHQL = "https://api.nexusmods.com/v2/graphql"
 ARCHIVE_EXTENSIONS = {".zip", ".7z", ".rar"}
 PLUGIN_EXTENSIONS = {".esm", ".esp"}
@@ -1433,6 +1676,7 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
             "archive_origin": str(source_archive),
             "processing_version": PACKAGE_PROCESSING_VERSION,
             "selected_masters": package_masters,
+            "companions": item.get("companions", []),          # offered in the package's option window
         }
         _write_stage_marker(destination, {**base_marker, "steps": steps})
         begin_package_step(destination, "extracted")

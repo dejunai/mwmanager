@@ -2957,10 +2957,12 @@ class ManagerGUI(tk.Tk):
             env = os.environ.copy()
             env["MWMANAGER_GUI"] = "1"
             recent = []
+            summary = []            # the run's own end-of-run summary, shown when the job window has closed
 
             def run_full_pass(label):
                 checkpoint(report)
                 report(label)
+                summary.clear()
                 process = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
                                            errors="replace", bufsize=1, env=env, **quiet)
@@ -2971,6 +2973,13 @@ class ManagerGUI(tk.Tk):
                     if message:
                         recent.append(message)
                         del recent[:-80]
+                        if message == "--full summary":
+                            summary[:] = [message]                      # --full: its closing summary block
+                        elif summary[:1] == ["--full summary"]:
+                            summary.append(line.strip())                # raw: the step columns are space-aligned
+                            del summary[40:]
+                        elif re.match(r"Found \d+ ERROR", message):     # --all: its last report count
+                            summary[:] = [message]
                         report(_display_line(line))
                 result = process.wait()
                 if result:
@@ -3041,7 +3050,7 @@ class ManagerGUI(tk.Tk):
                 run_full_pass(f"Applying saved choices and rebuilding patches with --{mode}…")
             else:
                 report("MWMANAGER-STAGE: 3 of 4 — No new cell conflicts; finishing")
-            return True
+            return {"summary": list(summary)}
 
         def completed(_result, error):
             if error:
@@ -3056,6 +3065,11 @@ class ManagerGUI(tk.Tk):
                     self._show_report("MWManager report", report_path)
                 else:
                     messagebox.showerror("Generate Patches failed", str(error), parent=self)
+                log = APP_DIR / "outputs" / "mwmanager_status.log"
+                if log.is_file() and messagebox.askyesno(
+                        "Generate Patches failed", "Open the full log of this run to see where it stopped?",
+                        parent=self):
+                    self._show_report("MWManager status log", log)
                 self._update_action_buttons()
                 return
             self.order = read_order()
@@ -3067,10 +3081,28 @@ class ManagerGUI(tk.Tk):
             write_gui_state(self.gui_state)
             self.refresh()
             self.status.set("Plugin checks and patch generation completed. Play is ready.")
+            if not on_success:                  # setup runs report through the setup window instead
+                self._report_generation(_result, report_path)
             if on_success:
                 self.after(100, on_success)
 
         self._run_progress_job("Generate Patches", "Checking plugins and generating patches…", worker, completed)
+
+    def _report_generation(self, result, report_path: Path) -> None:
+        """After the job window closes: did it finish cleanly, which steps reported issues, and the report."""
+        lines = (result or {}).get("summary", []) if isinstance(result, dict) else []
+        issues = [re.sub(r"\s{2,}.*$", "", line) for line in lines
+                  if re.search(r"\s{2,}(issues reported|failed|stopped|skipped)\b", line)]
+        active = next((line for line in lines if line.startswith("Active plugins now")), "")
+        clean = any("finished with no errors" in line or re.match(r"Found 0 ERROR", line) for line in lines)
+        text = ("Finished with no errors." if clean else "Finished.") + (f" {active}." if active else "")
+        if issues:
+            text += "\n\nSteps that reported issues (nothing was left broken):\n" + "".join(f"  • {s}\n" for s in issues)
+            if report_path.is_file() and messagebox.askyesno("Generate Patches finished",
+                                                             text + "\nOpen the report?", parent=self):
+                self._show_report("MWManager report", report_path)
+            return
+        messagebox.showinfo("Generate Patches finished", text, parent=self)
 
     def play_game(self):
         self._update_action_buttons()
@@ -4065,6 +4097,9 @@ class ManagerGUI(tk.Tk):
             if result["archives"]:
                 detail += ["", "Registered BSA archives:"] + [f"  • {name}" for name in result["archives"]]
             messagebox.showinfo("Major masters deployed", "\n".join(detail), parent=self)
+            view = getattr(self, "_job_view", None)
+            if view is not None and getattr(view, "setup", False) and view.window.winfo_exists():
+                view.window.withdraw()          # deployment is done: the conflict review and --full follow alone
             if result.get("conflicts"):
                 self._resolve_major_master_conflicts(result["conflicts"])
             def offer_full():
@@ -4072,11 +4107,8 @@ class ManagerGUI(tk.Tk):
                                        "order now? It rebuilds the patches and may take a while.", parent=self):
                     self.generate_patches(mode="full", force=True)
 
-            view = getattr(self, "_job_view", None)
             if view is not None and getattr(view, "setup", False):
-                # the setup window settles after this callback: it shows this line, then offers --full
-                view.final_stage = "Deployment complete. You can close this window now."
-                view.then = offer_full
+                view.then = offer_full          # offered once this job has fully settled
             else:
                 offer_full()
 
@@ -5102,8 +5134,9 @@ class ManagerGUI(tk.Tk):
             self.open_options()
             return
         try:
-            from core_addons import (prepare_core_master_review, review_core_master_install, scan_downloads,
-                                     stage_core_master_archives, verify_nexus_versions)
+            from core_addons import (edit_master_config, find_companions, prepare_core_master_review,
+                                     review_core_master_install, scan_downloads, stage_core_master_archives,
+                                     suggest_masters, verify_nexus_versions)
 
             def scanned(plan, error):
                 if error:
@@ -5115,6 +5148,31 @@ class ManagerGUI(tk.Tk):
                     self._initializing_manager = False
                     messagebox.showerror("Could not scan downloads",
                                          plan.get("error") or "The downloads folder could not be scanned.", parent=self)
+                    return
+                # the required-by count only suggests: the user confirms each, and nothing configured is removed
+                declined = set(self.gui_state.get("declined_master_suggestions", []))
+                added = []
+                for suggestion in plan.pop("_master_suggestions", []):
+                    if suggestion["tier"] != "major" or str(suggestion["mod_id"]) in declined:
+                        continue       # common masters go in the normal batches; nothing to add here
+                    if messagebox.askyesno(
+                            "Add a major master?",
+                            f"{suggestion['master']} ({suggestion['category']}) is required by "
+                            f"{suggestion['required_by']} mods on Nexus, which makes it a major master.\n\n"
+                            "Add it to the major masters? No is remembered.", parent=self):
+                        stem = Path(suggestion["master"]).stem.casefold()
+                        edit_master_config(APP_DIR, add=suggestion["master"],
+                                           keywords=sorted({stem, stem.replace("_", " ")}))
+                        added.append(suggestion["master"])
+                    else:
+                        declined.add(str(suggestion["mod_id"]))
+                self.gui_state["declined_master_suggestions"] = sorted(declined)
+                write_gui_state(self.gui_state)
+                if added:
+                    self.major_masters = configured_major_masters()
+                    self._clear_major_master_scan_cache()
+                    self.status.set(f"Added {', '.join(added)}; rescanning downloads…")
+                    self.after(100, lambda: self.stage_major_masters(force_scan=True))
                     return
                 selected = review_core_master_install(APP_DIR, game_dir, plan, parent=self,
                                                        prepared=plan.pop("_prepared_review", None))
@@ -5233,6 +5291,11 @@ class ManagerGUI(tk.Tk):
                     progress_callback=checked)
                 checkpoint(progress)
                 if not plan.get("error") and not plan.get("missing_directory"):
+                    checked("Looking for HD and voice packs that go with the masters…")
+                    find_companions(plan, downloads, APP_DIR)
+                    checked("Checking Nexus for other masters many mods require…")
+                    plan["_master_suggestions"] = suggest_masters(plan, downloads, APP_DIR,
+                                                                  data_dir=Path(game_dir) / "Data Files")
                     plan["_prepared_review"] = prepare_core_master_review(APP_DIR, game_dir, plan, progress=checked)
                 return plan
             self._run_progress_job(

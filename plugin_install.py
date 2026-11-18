@@ -422,7 +422,9 @@ def _nexus_ids_from_archive_name(archive: Path) -> tuple[str | None, str | None]
         stem,
     )
     if not match:
-        return None, None
+        # Newer Nexus names: "<name> <mod id> <version> <upload time> <tag>", with no file id
+        match = re.search(r"\s(?P<modid>\d{3,})\s\S+\s\d{4}-\d{2}-\d{2}T\d{2}-\d{2}Z(?:\s|$)", stem)
+        return (match.group("modid"), None) if match else (None, None)
     return match.group("modid"), match.group("fileid")
 
 

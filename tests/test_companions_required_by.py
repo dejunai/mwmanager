@@ -1,0 +1,211 @@
+"""Companion packs (HD and voice packs offered in a master's option window) and the Nexus "mods requiring this
+file" count that suggests new masters. Vortex state and Nexus are mocked; temporary folders only."""
+import json
+import struct
+import sys
+import tempfile
+import unittest
+import zipfile
+from pathlib import Path
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+import core_addons  # noqa: E402
+import mock_fomod  # noqa: E402
+import plugin_install  # noqa: E402
+
+MASTER = "OAAB_Data 49042 2.7.5 2026-11-05T04-50Z sZJEZCNJ.zip"
+HD = "OAAB_Data (HD) 49042 2.7.0 2026-09-25T18-23Z AbOYby57.zip"
+VOICE = "OAAB Data 60274 4 2026-11-02T08-23Z 8MahMSPa.zip"
+OTHER_VOICE = "Morrowind Tribunal Bloodmoon 60274 10 2026-10-30T20-45Z uFetFX3x.zip"
+
+
+def tes3(masters=()):
+    def sub(n, d):
+        return n.encode() + struct.pack("<I", len(d)) + d
+    body = sub("HEDR", struct.pack("<fI", 1.3, 0) + b"\0" * 288 + struct.pack("<I", 0))
+    for m in masters:
+        body += sub("MAST", m.encode() + b"\0") + sub("DATA", struct.pack("<Q", 1))
+    return b"TES3" + struct.pack("<III", len(body), 0, 0) + body
+
+
+def make_zip(path, members):
+    with zipfile.ZipFile(path, "w") as zf:
+        for name, data in members.items():
+            zf.writestr(name, data)
+
+
+def vortex_entry(local, mod_id, category, name, version, category_id=17):
+    return {"localPath": local, "game": ["morrowind"], "modInfo": {"nexus": {
+        "ids": {"modId": mod_id}, "modInfo": {"category_id": category_id},
+        "fileInfo": {"category_name": category, "name": name, "version": version}}}}
+
+
+class VortexAndNames(unittest.TestCase):
+    def test_vortex_downloads_reads_ids_and_categories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = Path(tmp) / "hourly.json"
+            state.write_text(json.dumps({"persistent": {"downloads": {"files": {
+                "a": vortex_entry(VOICE, 60274, "Audio", "OAAB Data", "4", 25),
+                "b": vortex_entry("Old Voice-1234-1-0.zip", 1234, "MAIN", "Old", "1", 25),   # file category
+                "c": vortex_entry("skyrim.zip", 5, "Audio", "x", "1") | {"game": ["skyrimse"]}}}}}),
+                encoding="utf-8")
+            found = core_addons.vortex_downloads(state)
+        self.assertEqual(found[VOICE.casefold()], {"mod_id": 60274, "category": "Audio", "name": "OAAB Data",
+                                                   "version": "4"})
+        self.assertEqual(found["old voice-1234-1-0.zip"]["category"], "Audio")    # by the category id
+        self.assertNotIn("skyrim.zip", found)
+        self.assertEqual(core_addons.vortex_downloads(Path(tmp) / "missing.json"), {})
+
+    def test_mod_id_from_newer_nexus_archive_names(self):
+        self.assertEqual(plugin_install._nexus_ids_from_archive_name(Path(HD)), ("49042", None))
+        self.assertEqual(plugin_install._nexus_ids_from_archive_name(Path("Mod-12345-1-0-1700000000.zip")),
+                         ("12345", "1700000000"))
+        self.assertEqual(plugin_install._nexus_ids_from_archive_name(Path("plain.zip")), (None, None))
+
+
+class Companions(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.downloads = self.root / "downloads"
+        self.downloads.mkdir()
+        make_zip(self.downloads / MASTER, {"OAAB_Data.esm": tes3(), "textures/a.dds": b"new"})
+        make_zip(self.downloads / HD, {"OAAB_Data (HD)/Textures/a.dds": b"hd"})
+        make_zip(self.downloads / VOICE, {"Sound/Vo/oaab/hello.mp3": b"v"})
+        make_zip(self.downloads / OTHER_VOICE, {"Sound/Vo/x.mp3": b"v"})
+        make_zip(self.downloads / "OAAB_Data 49042 2.6.0 2026-01-01T00-00Z old.zip", {"OAAB_Data.esm": tes3()})
+        self.plan = {"archives": [{"archive": str(self.downloads / MASTER), "plugins": ["OAAB_Data.esm"],
+                                   "core_masters": ["oaab_data.esm"]}]}
+        self.vortex = {VOICE.casefold(): {"mod_id": 60274, "category": "Audio", "name": "OAAB Data", "version": "4"},
+                       OTHER_VOICE.casefold(): {"mod_id": 60274, "category": "Audio",
+                                                "name": "Morrowind Tribunal Bloodmoon", "version": "10"}}
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def companions(self, vortex):
+        with mock.patch("needed_mods.vortex_mod_titles", return_value={}):
+            core_addons.find_companions(self.plan, self.downloads, self.root, vortex=vortex)
+        return {c["kind"]: c for c in self.plan["archives"][0].get("companions", [])}
+
+    def test_hd_pack_and_voice_pack_are_found_and_an_older_hd_pack_warns(self):
+        found = self.companions(self.vortex)
+        self.assertEqual(set(found), {"hd", "voice"})       # the older full archive has an ESM: not a companion
+        self.assertEqual(found["hd"]["label"], "HD pack available")
+        self.assertIn("2.7.0 is older than oaab_data.esm 2.7.5", found["hd"]["warning"])
+        self.assertEqual(found["voice"]["label"], "Voice pack available")
+        self.assertNotIn("warning", found["voice"])         # a voice pack's own version is not comparable
+
+    def test_without_vortex_the_hd_pack_is_found_by_the_id_in_its_name(self):
+        self.assertEqual(set(self.companions({})), {"hd"})
+
+    def test_option_window_offers_companions_and_extracts_only_a_chosen_one(self):
+        staging = self.root / "staging" / "major_masters"
+        package = staging / "OAAB_Data"
+        package.mkdir(parents=True)
+        (package / "textures").mkdir()
+        (package / "textures" / "a.dds").write_bytes(b"new")
+        found = self.companions(self.vortex)
+        (package / ".mwmanager-stage.json").write_text(json.dumps({"companions": list(found.values())}),
+                                                       encoding="utf-8")
+        records = mock_fomod._companion_records(package)
+        self.assertEqual(sorted(r["label"].split(":")[0] for r in records),
+                         ["HD pack available", "Voice pack available"])
+        hd, voice = sorted(records, key=lambda r: r["label"])
+        self.assertIn("Older than the master", hd["badges"])
+        self.assertIn("may overwrite newer files", hd["docs"])
+        self.assertFalse(hd["required"])
+
+        mock_fomod._materialize_companions(package, records, {hd["key"]})
+        self.assertTrue((staging.parent / "companions").is_dir())
+        self.assertNotIn("payload_files", voice)        # not chosen: never extracted
+        self.assertEqual(set(hd["payload_files"]), {str(Path("Textures/a.dds"))})
+        applied = mock_fomod._activate(package, "OAAB_Data.esm", records, {hd["key"]}, {}, self.root / "backup")
+        self.assertEqual((package / "Textures" / "a.dds").read_bytes(), b"hd")
+        self.assertEqual(applied["selected"], [hd["key"]])
+
+
+class RequiredBy(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def api(self, counts):
+        def query(document, variables, timeout=8):
+            if "game(" in document:
+                return {"game": {"id": "100"}}
+            return {f"m{i}": {"modCategory": {"name": category},
+                              "modRequirements": {"modsRequiringThisMod": {"totalCount": count}}}
+                    for i, (category, count) in enumerate(counts)}
+        return query
+
+    def test_api_count_is_cached_per_mod_id_with_its_date(self):
+        with mock.patch.object(core_addons, "_nexus_query", side_effect=self.api([("New Lands", 12)])):
+            first = core_addons.nexus_required_by({51776: "Dr_Data.esm"}, self.root)
+        self.assertEqual(first[51776]["required_by"], 12)
+        self.assertEqual(first[51776]["source"], "nexus api")
+        cache = json.loads((self.root / core_addons.REQUIRED_BY_CACHE).read_text(encoding="utf-8"))
+        self.assertTrue(cache["51776"]["fetched"])
+        with mock.patch.object(core_addons, "_nexus_query", side_effect=AssertionError("network")):
+            again = core_addons.nexus_required_by({51776: "Dr_Data.esm"}, self.root)
+        self.assertEqual(again[51776]["required_by"], 12)
+
+    def test_mod_page_table_when_the_api_fails(self):
+        page = (b"<h3>Mods requiring this file</h3><table><thead><tr><th>Mod</th></tr></thead><tbody>"
+                b"<tr><td>a</td></tr><tr><td>b</td></tr><tr class='x'><td>c</td></tr></tbody></table>")
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = page
+        with mock.patch.object(core_addons, "_nexus_query", side_effect=OSError("down")), \
+                mock.patch.object(core_addons.urllib.request, "urlopen", return_value=response):
+            found = core_addons.nexus_required_by({1: "X.esm"}, self.root)
+        self.assertEqual((found[1]["required_by"], found[1]["source"]), (3, "nexus page"))
+
+    def test_offline_counts_installed_plugins_that_name_the_master(self):
+        data = self.root / "Data Files"
+        data.mkdir()
+        (data / "a.esp").write_bytes(tes3(["Morrowind.esm", "Dr_Data.esm"]))
+        (data / "b.esp").write_bytes(tes3(["Morrowind.esm"]))
+        with mock.patch.object(core_addons, "_nexus_query", side_effect=OSError("offline")), \
+                mock.patch.object(core_addons.urllib.request, "urlopen", side_effect=OSError("offline")):
+            found = core_addons.nexus_required_by({51776: "Dr_Data.esm"}, self.root, data_dir=data)
+        self.assertEqual((found[51776]["required_by"], found[51776]["source"]), (1, "local"))
+        self.assertFalse((self.root / core_addons.REQUIRED_BY_CACHE).exists())
+
+    def test_count_only_suggests_new_masters_and_never_a_shipped_one(self):
+        downloads = self.root / "downloads"
+        downloads.mkdir()
+        make_zip(downloads / "Big-111-1-0-1700000000.zip", {"Big_Data.esm": tes3()})
+        make_zip(downloads / "Mid-222-1-0-1700000000.zip", {"Mid.esm": tes3()})
+        make_zip(downloads / "NoEsm-333-1-0-1700000000.zip", {"x.esp": tes3()})
+        vortex = {"big-111-1-0-1700000000.zip": {"mod_id": 111, "category": "Modders Resources and Tutorials"},
+                  "mid-222-1-0-1700000000.zip": {"mod_id": 222, "category": "Patches"},
+                  "noesm-333-1-0-1700000000.zip": {"mod_id": 333, "category": "Overhauls"},
+                  "quest-444-1-0-1700000000.zip": {"mod_id": 444, "category": "Quests"},
+                  "oaab.zip": {"mod_id": 49042, "category": "Modders Resources and Tutorials"}}
+        asked = []
+
+        def query(document, variables, timeout=8):
+            if "game(" in document:
+                return {"game": {"id": "100"}}
+            asked.append(document)
+            return {"m0": {"modCategory": {"name": "Modders Resources and Tutorials"},
+                           "modRequirements": {"modsRequiringThisMod": {"totalCount": 40}}},
+                    "m1": {"modCategory": {"name": "Patches"},
+                           "modRequirements": {"modsRequiringThisMod": {"totalCount": 12}}},
+                    "m2": {"modCategory": {"name": "Overhauls"},
+                           "modRequirements": {"modsRequiringThisMod": {"totalCount": 90}}}}
+        with mock.patch.object(core_addons, "_nexus_query", side_effect=query):
+            found = core_addons.suggest_masters({"archives": []}, downloads, self.root, vortex=vortex)
+        self.assertEqual([(s["master"], s["tier"], s["required_by"]) for s in found],
+                         [("Big_Data.esm", "major", 40), ("Mid.esm", "common", 12)])
+        self.assertNotIn("49042", asked[0])                  # shipped masters are not even asked about
+        self.assertNotIn("444", asked[0])                    # Quests never qualify
+
+
+if __name__ == "__main__":
+    unittest.main()

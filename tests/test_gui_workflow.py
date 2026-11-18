@@ -257,6 +257,26 @@ class WorkflowGuiTests(unittest.TestCase):
         journal.finish_run.assert_called_once()
         self.assertTrue((self.g.disabled_plugins_dir() / "Extra.esp").is_file())
 
+    def test_generate_patches_says_how_it_finished(self):
+        summary = ["--full summary", "=" * 70,
+                   "turn back on what earlier runs turned off                      ok                    0s",
+                   "clean and fix with the asset check (no Multipatch yet)         issues reported     235s",
+                   "Active plugins now: 26", "--full finished with no errors."]
+        with tempfile.TemporaryDirectory() as tmp:
+            report = Path(tmp) / "report.txt"
+            report.write_text("report", encoding="utf-8")
+            with mock.patch("mwmanager_dialogs.askyesno", return_value=True) as ask, \
+                    mock.patch.object(self.app, "_show_report") as shown:
+                self.app._report_generation({"summary": summary}, report)
+            text = ask.call_args.args[1]
+            self.assertIn("Finished with no errors. Active plugins now: 26.", text)
+            self.assertIn("• clean and fix with the asset check (no Multipatch yet)", text)
+            self.assertNotIn("turn back on", text)
+            shown.assert_called_once_with("MWManager report", report)
+            with mock.patch("mwmanager_dialogs.showinfo") as info:          # nothing to look at: just the result
+                self.app._report_generation({"summary": ["Found 0 ERROR, 2 WARN, 0 INFO."]}, report)
+            self.assertEqual(info.call_args.args[1], "Finished with no errors.")
+
     def test_edited_master_files_are_deleted_only_on_yes(self):
         jobs = []
         self.app._run_progress_job = lambda title, initial, worker, complete: jobs.append(complete)
