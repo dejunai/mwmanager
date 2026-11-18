@@ -53,6 +53,26 @@ class PendingOptionsTests(unittest.TestCase):
             saved = json.loads((root / "outputs" / mock_fomod.PENDING_FILE).read_text(encoding="utf-8"))
             self.assertEqual(saved["OAAB_Data"]["option:1"]["needs"], ["Epic Plants.esp"])
 
+    def test_answers_survive_a_failed_companion_extraction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "stage" / "TR"
+            put(package / "Extras/01 Factions/TR_Factions.esp")
+            data = root / "game" / "Data Files"
+            data.mkdir(parents=True)
+            record = {"key": "option:1", "path": package / "Extras/01 Factions", "label": "Factions",
+                      "targets": [], "number": 1}
+            with mock.patch("nexus_updates.check_and_offer_update", return_value=False), \
+                    mock.patch.object(mock_fomod, "_has_fomod", return_value=False), \
+                    mock.patch.object(mock_fomod, "_discover", return_value=[record]), \
+                    mock.patch.object(mock_fomod, "_discover_plugin_choices", return_value=[]), \
+                    mock.patch.object(mock_fomod, "_show_selector", return_value={"option:1"}), \
+                    mock.patch.object(mock_fomod, "_materialize_companions", side_effect=PermissionError(5, "denied")):
+                with self.assertRaises(PermissionError):
+                    mock_fomod.process_staging(package.parent, data, root / "outputs")
+            saved = list((root / "outputs").rglob("*.json"))
+            self.assertTrue(any('"option:1"' in p.read_text(encoding="utf-8") for p in saved))
+
     def test_masters_later_in_the_install_batch_count_as_available(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

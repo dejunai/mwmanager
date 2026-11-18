@@ -2611,6 +2611,8 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
                             and entry.get("selection_identity") == selection_identity else {})
         backup_root = _option_backup_root(output_dir, selection_identity)
         held = held_options(records, set(chosen), installed)      # chosen, but what it needs isn't here yet
+        # Keep the answers even if a long companion extraction below fails.
+        _save_answer_file(output_dir, selection_identity, set(chosen), records, answer)
         _materialize_companions(mod_dir, records, set(chosen) - held)
         applied = _activate(mod_dir, plugin, records, set(chosen) - held, prior_activation, backup_root)
         changed_plugins = _apply_plugin_choices(mod_dir, records, set(chosen) - held)
