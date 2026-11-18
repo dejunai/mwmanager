@@ -4045,6 +4045,9 @@ class ManagerGUI(tk.Tk):
             view = getattr(self, "_job_view", None)
             if view is not None and hasattr(view, "stage"):
                 view.stage.set("Deployment complete. You can close this window now.")
+            if messagebox.askyesno("Run --full?", "The load order changed. Run --full against the new load "
+                                   "order now? It rebuilds the patches and may take a while.", parent=self):
+                self.generate_patches(mode="full", force=True)
 
         self._setup_begin("major_masters_deployed")
         self._run_progress_job("Deploy Major Masters", "Hardlinking selected masters and their assets…", worker, completed)

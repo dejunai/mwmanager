@@ -276,8 +276,12 @@ class WorkflowGuiTests(unittest.TestCase):
                                                          "Extras\\Optional.esp"]}
         with mock.patch.object(self.app, "save") as save, mock.patch.object(self.app, "refresh"), \
                 mock.patch.object(self.g, "write_gui_state"), mock.patch("mwmanager_dialogs.showinfo"), \
-                mock.patch.object(self.g.messagebox, "showinfo"):
+                mock.patch.object(self.g.messagebox, "showinfo"), \
+                mock.patch("mwmanager_dialogs.askyesno", return_value=True) as ask, \
+                mock.patch.object(self.app, "generate_patches") as full:
             jobs[0](result, None)
+        self.assertIn("--full", ask.call_args.args[1])
+        full.assert_called_once_with(mode="full", force=True)
         save.assert_called_once()
         self.assertIn("companion.esp", self.app.active_names)
         self.assertIn("Companion.esp", self.app.order)
