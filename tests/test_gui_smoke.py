@@ -346,7 +346,7 @@ class GuiSmokeTests(unittest.TestCase):
             "archive": "x.7z", "sha256": "", "selected_masters": ["Tamriel_Data.esm"],
             "steps": {"extracted": done, "tidied": done, "bsa_checked": done}}), encoding="utf-8")
         deployed = []
-        self.app.deploy_major_masters = lambda: deployed.append(True)
+        self.app.deploy_major_masters = lambda **kw: deployed.append(kw.get("_accept_assets"))
         self.app._run_progress_job = lambda _title, _description, _worker, completed: completed(True, None)
         with mock.patch.object(self.g.messagebox, "askyesno", return_value=True) as deploy_prompt:
             self.app.stage_major_masters()

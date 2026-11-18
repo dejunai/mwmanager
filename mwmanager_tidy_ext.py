@@ -1101,21 +1101,36 @@ def drop_covered_moves(res):
 
 @contextmanager
 def _long_phase_heartbeat(message, interval=30):
-    """Keep long silent scans visibly active; the caller writes exact progress when available."""
+    """A long scan that prints nothing for `interval` seconds says it is working; any other output resets the wait,
+    so the line only appears when the window would otherwise be silent."""
     stop = threading.Event()
+    real = sys.stdout
+    last = [time.monotonic()]
+
+    class Watched:                                  # stdout that remembers when something was last written
+        def write(self, text):
+            last[0] = time.monotonic()
+            return real.write(text)
+
+        def __getattr__(self, name):
+            return getattr(real, name)
 
     def pulse():
-        while not stop.wait(interval):
-            print(f"MWMANAGER-PROGRESS: {message} — still working; this tool is active, not hung.",
-                  flush=True)
+        while not stop.wait(1):
+            if time.monotonic() - last[0] >= interval:
+                real.write(f"MWMANAGER-PROGRESS: {message}: Working... please be patient\n")
+                real.flush()
+                last[0] = time.monotonic()
 
+    sys.stdout = Watched()
     thread = threading.Thread(target=pulse, name="MWManager Tidy heartbeat", daemon=True)
     thread.start()
     try:
         yield
     finally:
         stop.set()
-        thread.join(timeout=1)
+        thread.join(timeout=2)
+        sys.stdout = real
 
 
 def run_plan(args):
@@ -1181,9 +1196,14 @@ def run_plan(args):
     if getattr(args, "_write_plan", True):
         PF.write_atomic(PLAN, args._moves_text)
     print("\n".join(head))
-    print("\n".join(lines[:200]))
-    if len(lines) > 200:
-        print(f"... ({len(lines) - 200} more lines in {PLAN})")
+    # 00 Core content always unpacks: one count, not a line per file (the plan file still lists every one)
+    core = sum(1 for ln in lines if "unpack 00 Core" in ln or "unpack required 00 Core" in ln)
+    shown = [ln for ln in lines if "unpack 00 Core" not in ln and "unpack required 00 Core" not in ln]
+    if core:
+        print(f"  {core:,} file(s) unpacked from 00 Core content (each is listed in {PLAN})")
+    print("\n".join(shown[:200]))
+    if len(shown) > 200:
+        print(f"... ({len(shown) - 200} more lines in {PLAN})")
     print(f"\nFull plan: {PLAN}")
     update_omwaddon_masters(args.staging, apply_changes=False)
     game_data_files = args.game_data_files or os.environ.get("MWMANAGER_DATA_FILES")
@@ -1502,8 +1522,16 @@ def apply(moves, staging, progress=None, head_extra=None):
     with open(JOURNAL, "a", encoding="utf-8") as j:
         j.write(json.dumps(head) + "\n")
         j.flush()
+        moved_dirs = []                      # (old, new) folders moved earlier in this run
         for i, (src, dst, why) in enumerate(moves):
             try:
+                if not os.path.lexists(src):
+                    # planned at its old place, but a folder holding it moved first ("00 Core" into Extras)
+                    key = os.path.normcase(os.path.abspath(src))
+                    for old, new in moved_dirs:
+                        if key.startswith(os.path.normcase(old) + os.sep):
+                            src = new + os.path.abspath(src)[len(old):]
+                            break
                 if dst is None:
                     if why.startswith("identical duplicate from "):
                         target = why.removeprefix("identical duplicate from ")
@@ -1560,6 +1588,8 @@ def apply(moves, staging, progress=None, head_extra=None):
                 j.flush()
                 os.fsync(j.fileno())
                 os.rename(src, dst)          # staging stays on one drive, so moves are cheap
+                if os.path.isdir(dst):
+                    moved_dirs.append((os.path.abspath(src), os.path.abspath(dst)))
                 if PACKING_MARK in why:
                     packing.setdefault(_path_plugin(src, staging), []).append((src, dst, why))
                 done += 1
@@ -1574,7 +1604,10 @@ def apply(moves, staging, progress=None, head_extra=None):
         # dirs list still includes children removed earlier in the same walk.
         _prune_empty_directories(staging, j)
     _write_packing_reports(staging, packing)
-    print(f"Moved {done} item(s). Journal: {JOURNAL} (each entry names its package: --undo --only <package> "
+    # the progress line counts every plan entry; say what became of each, so the numbers add up
+    rest = total - done - len(failed)
+    print(f"Tidy changes: {done:,} of {total:,} applied" + (f", {len(failed):,} failed" if failed else "")
+          + (f", {rest:,} already in place" if rest else "") + f". Journal: {JOURNAL} (--undo --only <package> "
           f"puts back that package's changes from every run, --undo alone the whole last run).")
     if total and last_reported != total - 1:
         mark(total - 1, force=True, record=False)
@@ -2003,6 +2036,20 @@ def _rebase_data_dir(name):
 for _name in ("texture_index", "lua_check", "assets_check"):
     _rebase_data_dir(_name)
 del _name
+
+_upstream_lua_check = lua_check
+
+
+def lua_check(args):
+    """Upstream's Lua check without its plan in the status window (noise for a player): the plan file keeps every
+    finding; the window gets one line."""
+    import contextlib
+    import io
+    with contextlib.redirect_stdout(io.StringIO()):
+        result = _upstream_lua_check(args)
+    if result:
+        print(f"Lua check: {result.get('n_ok', 0)} file(s) to patch (details in {PLAN})")
+    return result
 
 
 # ---- command line ----------------------------------------------------------------------------------------------

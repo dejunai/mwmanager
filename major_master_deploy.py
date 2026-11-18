@@ -112,11 +112,11 @@ def _package_roots(staging: Path, configured: list[str]) -> list[tuple[Path, lis
             continue
         package = next((parent for parent in esm.parents if parent.parent == staging), esm.parent)
         result.setdefault(package, set()).add(esm.name)
-    # Process lowest UI priority first so higher-priority packages replace them last.
+    # The configured order is the community load order, and it is also the conflict resolution: link in that
+    # order, so a later master's file replaces an earlier one's, as its records do (Patch for Purists, 01, loses).
     return sorted(((package, sorted(names, key=lambda n: priority.get(n.casefold(), 99999)))
                    for package, names in result.items()),
-                  key=lambda item: min((priority.get(name.casefold(), 99999) for name in item[1]), default=99999),
-                  reverse=True)
+                  key=lambda item: min((priority.get(name.casefold(), 99999) for name in item[1]), default=99999))
 
 
 def _bsa_files(package: Path) -> list[Path]:

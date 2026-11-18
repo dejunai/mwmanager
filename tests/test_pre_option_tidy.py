@@ -331,5 +331,38 @@ class SoundsFolderTests(unittest.TestCase):
                       + os.path.join("Sound", "dr", "a.wav"), report)
 
 
+class ApplyAfterFolderMove(unittest.TestCase):
+    def test_a_file_planned_inside_a_folder_moved_earlier_still_moves(self):
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name).resolve() / "staging"
+        mod = staging / "AATL Data"
+        (mod / "00 Core" / "Meshes").mkdir(parents=True)
+        (mod / "00 Core" / "Meshes" / "desktop.ini").write_bytes(b"x")
+        plan = [(str(mod / "00 Core"), str(mod / "Extras" / "00 Core"), "keep the 00 folder under Extras"),
+                (str(mod / "00 Core" / "Meshes" / "desktop.ini"), str(mod / "Off" / "desktop.ini"), "metadata")]
+        out = io.StringIO()
+        with mwmanager_upstream.use_manager_dir(tmp.name), contextlib.redirect_stdout(out):
+            os.makedirs(os.path.dirname(ext.JOURNAL), exist_ok=True)
+            self.assertEqual(ext.apply(plan, str(staging)), [])
+        self.assertTrue((mod / "Off" / "desktop.ini").is_file())
+        self.assertIn("2 of 2 applied", out.getvalue())
+
+
+class Heartbeat(unittest.TestCase):
+    def test_it_speaks_only_after_silence(self):
+        import time
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            with ext._long_phase_heartbeat("Scanning", interval=2):
+                for _ in range(3):              # output every second: never silent long enough
+                    print("progress")
+                    time.sleep(1)
+                time.sleep(3)                   # silent: one heartbeat
+        text = out.getvalue()
+        self.assertEqual(text.count("Working... please be patient"), 1)
+        self.assertNotIn("hung", text)
+
+
 if __name__ == "__main__":
     unittest.main()

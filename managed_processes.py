@@ -117,7 +117,7 @@ def run(command, *, progress=None, timeout=7200, heartbeat_label=None, **kwargs)
                 raise subprocess.TimeoutExpired(command, timeout)
             if progress and time.monotonic() >= next_heartbeat:
                 label = heartbeat_label or Path(command[0]).name
-                progress(f"{label}: still working; the process is active and has not hung.")
+                progress(f"{label}: Working... please be patient")
                 next_heartbeat = time.monotonic() + 30
             try:
                 stdout, stderr = process.communicate(timeout=0.2)

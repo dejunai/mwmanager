@@ -445,7 +445,7 @@ class GuiProbes(unittest.TestCase):
         self.assertEqual(ca.unfinished_packages(package.parent), [])
         self.assertEqual(self.app._unfinished_master_stages(["A.esm"]), [])
         with mock.patch.object(self.g.messagebox, "showwarning") as warning, \
-                mock.patch.object(self.g.messagebox, "askyesnocancel", return_value=None):
+                mock.patch.object(self.g.messagebox, "askyesno", return_value=False):
             self.app.deploy_major_masters()
         warning.assert_not_called()
 

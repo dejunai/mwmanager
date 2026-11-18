@@ -245,7 +245,7 @@ class WorkflowGuiTests(unittest.TestCase):
 
     def test_deploy_cancel_precedes_preflight(self):
         self.stage()
-        with mock.patch.object(self.g.messagebox, "askyesnocancel", return_value=None), \
+        with mock.patch.object(self.g.messagebox, "askyesno", return_value=False), \
                 mock.patch.object(self.app, "_run_progress_job") as job:
             self.app.deploy_major_masters()
         job.assert_not_called()
@@ -255,7 +255,7 @@ class WorkflowGuiTests(unittest.TestCase):
         self.app._preflight_signature = preflight_signature(self.app.settings["game_dir"])
         jobs = []
         self.app._run_progress_job = lambda title, initial, worker, complete: jobs.append((title, worker))
-        with mock.patch.object(self.g.messagebox, "askyesnocancel", return_value=True), \
+        with mock.patch.object(self.g.messagebox, "askyesno", return_value=True), \
                 mock.patch("plugin_install.check_deploy_path_lengths"), \
                 mock.patch("major_master_deploy.deploy", return_value={}) as deploy:
             self.app.deploy_major_masters()
@@ -263,6 +263,49 @@ class WorkflowGuiTests(unittest.TestCase):
             jobs[0][1](lambda _line: None)
         self.assertEqual(deploy.call_args.kwargs["selected"], ["Selected.esm"])
         self.assertEqual(deploy.call_args.args[3], ["Selected.esm", "Unselected.esm"])
+
+    def test_plugins_deployed_with_a_master_stay_active(self):
+        self.stage()
+        self.app._preflight_signature = preflight_signature(self.app.settings["game_dir"])
+        jobs = []
+        self.app._run_progress_job = lambda title, initial, worker, complete: jobs.append(complete)
+        with mock.patch.object(self.g.messagebox, "askyesno", return_value=True):
+            self.app.deploy_major_masters()
+        result = {"ready": ["Selected.esm"], "backed_up": [], "skipped_identical": [], "archives": [],
+                  "conflicts": [], "linked":["Selected.esm", "Companion.esp", "Textures\\x.dds",
+                                                         "Extras\\Optional.esp"]}
+        with mock.patch.object(self.app, "save") as save, mock.patch.object(self.app, "refresh"), \
+                mock.patch.object(self.g, "write_gui_state"), mock.patch("mwmanager_dialogs.showinfo"), \
+                mock.patch.object(self.g.messagebox, "showinfo"):
+            jobs[0](result, None)
+        save.assert_called_once()
+        self.assertIn("companion.esp", self.app.active_names)
+        self.assertIn("Companion.esp", self.app.order)
+        self.assertNotIn("optional.esp", self.app.active_names)       # only Data Files' root is deployed as a plugin
+
+    def test_master_conflicts_ask_before_any_review_window(self):
+        conflicts = [("CELL", "Vivec", [], []), ("NPC_", "fargoth", [], []), ("GMST", "x", [], [])]
+        with mock.patch("mwmanager_dialogs.askyesno", return_value=False) as ask, \
+                mock.patch.object(self.g.tk, "Toplevel") as window:
+            self.app._resolve_major_master_conflicts(conflicts)
+        text = ask.call_args.args[1]
+        self.assertIn("3 conflicts", text)
+        self.assertIn("Extreme: 1", text)
+        window.assert_not_called()
+
+    def test_status_window_lines_are_kept_in_a_file(self):
+        from mwmanager_workflow import JobView
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "status.log"
+            log.write_text("last session\n", encoding="utf-8")
+            Path(tmp, "status.prev.log").write_text("older session\n", encoding="utf-8")
+            view = JobView.__new__(JobView)
+            view.status_log = log
+            view._record("Staging master 1 of 2: A.esm")
+            view._record("could not move x: [WinError 3]")
+            self.assertEqual(log.read_text(encoding="utf-8").splitlines(),
+                             ["Staging master 1 of 2: A.esm", "could not move x: [WinError 3]"])
+            self.assertEqual(Path(tmp, "status.prev.log").read_text(encoding="utf-8"), "last session\n")
 
     def test_incomplete_stage_never_deploys(self):
         self.stage()

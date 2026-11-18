@@ -5,7 +5,9 @@ in the middle of a journaled file operation. No game files are written here.
 """
 from __future__ import annotations
 
+import os
 import re
+import time
 import threading
 import tkinter as tk
 from pathlib import Path
@@ -150,7 +152,27 @@ class JobView:
         if self.follow.get():
             self.log.see("end")
 
+    status_log = None           # the GUI sets outputs\mwmanager_status.log: everything the window shows, kept
+    _fresh_logs = set()         # logs already started by this MWManager session
+
+    def _record(self, text):
+        if not self.status_log:
+            return
+        try:
+            log = Path(self.status_log)
+            log.parent.mkdir(parents=True, exist_ok=True)
+            key = os.path.normcase(str(log.resolve()))
+            if key not in JobView._fresh_logs:                       # a new session: a new log, the last one kept
+                JobView._fresh_logs.add(key)
+                if log.is_file():
+                    os.replace(log, log.with_suffix(".prev.log"))
+            with open(log, "a", encoding="utf-8") as f:
+                f.write(text.rstrip() + "\n")
+        except OSError:
+            pass                                                     # the window still shows it
+
     def begin(self, title, description, control):
+        self._record(f"\n==== {time.strftime('%Y-%m-%d %H:%M:%S')}  {title} ====")
         self.control = control
         self.title.set(title)
         self.description.set(description)
@@ -194,6 +216,7 @@ class JobView:
 
     def append(self, message):
         text = str(message)
+        self._record(text)
         stopping = self.control is not None and self.control.cancelled.is_set()
         if text.startswith("MWMANAGER-STAGE:"):
             if not stopping:

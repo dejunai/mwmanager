@@ -3910,17 +3910,16 @@ class ManagerGUI(tk.Tk):
             return
         # Ask before hashing or network work. Keep this policy local to this
         # invocation so a cancelled preflight cannot leak it into a later click.
+        # A master always deploys whole (plugins, archives and loose assets); only ask when nothing confirmed it yet.
         accept_assets = _accept_assets
         if accept_assets is None:
-            accept_assets = messagebox.askyesnocancel(
-                "Deploy selected major masters?",
-                "Selected masters, in priority order:\n\n" + "\n".join(ready) +
-                "\n\nYes: deploy plugins, archives and loose assets.\n"
-                "No: deploy plugins and archives only.\nCancel: leave the game unchanged.\n\n"
-                "Replaced loose assets are preserved under the staged package's Off folder.",
-                parent=self)
-            if accept_assets is None:
+            if not messagebox.askyesno(
+                    "Deploy selected major masters?",
+                    "Selected masters, in load order:\n\n" + "\n".join(ready) +
+                    "\n\nReplaced loose assets are preserved under the staged package's Off folder.",
+                    parent=self):
                 return
+            accept_assets = True
 
         if not _preflight_done:
             cached_preflight = getattr(self, "_preflight_signature", None)
@@ -3996,6 +3995,14 @@ class ManagerGUI(tk.Tk):
             self.active_names.update(name.casefold() for name in result["ready"])
             self.selected_major_masters.update(name.casefold() for name in result["ready"])
             major_keys = {name.casefold() for name in self.major_masters}
+            # plugins deployed with the masters were chosen in their installer (TR_Factions.esp): keep them
+            # active, or save() below moves them straight back out of Data Files
+            companions = [Path(rel).name for rel in result.get("linked", [])
+                          if len(Path(rel).parts) == 1 and Path(rel).suffix.lower() in (".esp", ".esm")
+                          and Path(rel).name.casefold() not in major_keys]
+            self.active_names.update(name.casefold() for name in companions)
+            known = {name.casefold() for name in self.order}
+            self.order += [name for name in companions if name.casefold() not in known]
             other = [name for name in self.order
                      if name.casefold() not in major_keys and name.casefold() not in {c.casefold() for c in CORE}]
             installed_active = [name for name in self.major_masters
@@ -4099,6 +4106,14 @@ class ManagerGUI(tk.Tk):
         for level in severity_order:
             examples.extend((level, f"{tag} ({editor_id or 'no editor ID'})")
                             for tag, editor_id, _sources, _versions in grouped[level][:3])
+        by_degree = "\n".join(f"  {level}: {counts[level]:,}" for level in severity_order if counts[level])
+        if not messagebox.askyesno(
+                "Major-master conflicts",
+                "Major masters are expected to conflict with each other. The agreed community load order is the "
+                f"resolution order.\n\nThere are {len(conflicts):,} conflicts:\n{by_degree}\n\n"
+                "It is strongly recommended to let the load order resolve them. You may edit the resolution if you "
+                "choose.\n\nReview conflicts?", parent=self):
+            return
 
         dialog = tk.Toplevel(self)
         dialog.title("Major-master record conflicts")
@@ -4240,6 +4255,7 @@ class ManagerGUI(tk.Tk):
             if in_setup:
                 self._setup_view = view
         self._job_view = view
+        view.status_log = APP_DIR / "outputs" / "mwmanager_status.log"
         dialog = view.window
         if title == "Deploy Major Masters":
             description = ("MWManager will hardlink the selected staged files into Data Files, register any BSA archives, "
@@ -4632,7 +4648,7 @@ class ManagerGUI(tk.Tk):
         self._set_staging_run(None)
         self._setup_complete("major_masters_staged")
         if self._staged_major_master_names() and messagebox.askyesno("Deploy staged major masters?", prompt, parent=self):
-            self.after(100, self.deploy_major_masters)
+            self.after(100, lambda: self.deploy_major_masters(_accept_assets=True))    # already confirmed
             return
         if initializing:
             self._initializing_manager = False
