@@ -2461,6 +2461,12 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
     for entry in mods.values():
         if entry.get("mod_dir"):
             installed.update(_available_staged_plugins(Path(entry["mod_dir"])))
+    # Masters later in this install batch (TR, PC, SHotN, ...) are not staged yet but will be installed.
+    try:
+        plan = json.loads((output_dir / "mwmanager_core_addon_plan.json").read_text(encoding="utf-8"))
+        installed.update(m.casefold() for m in plan.get("ordered_install_masters", []))
+    except (OSError, ValueError, AttributeError):
+        pass
     eligible = []
     for p in sorted(staging.iterdir(), key=lambda x: x.name.casefold()):
         if p.name.startswith("."):

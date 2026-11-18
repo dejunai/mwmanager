@@ -53,6 +53,25 @@ class PendingOptionsTests(unittest.TestCase):
             saved = json.loads((root / "outputs" / mock_fomod.PENDING_FILE).read_text(encoding="utf-8"))
             self.assertEqual(saved["OAAB_Data"]["option:1"]["needs"], ["Epic Plants.esp"])
 
+    def test_masters_later_in_the_install_batch_count_as_available(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "stage" / "Wares"
+            put(package / "Wares-base.esm")
+            data = root / "game" / "Data Files"
+            data.mkdir(parents=True)
+            out = root / "outputs"
+            out.mkdir()
+            (out / "mwmanager_core_addon_plan.json").write_text(json.dumps(
+                {"ordered_install_masters": ["Wares-base.esm", "TR_Mainland.esm"]}), encoding="utf-8")
+            seen = []
+            with mock.patch("nexus_updates.check_and_offer_update", return_value=False), \
+                    mock.patch.object(mock_fomod, "_has_fomod", return_value=False), \
+                    mock.patch.object(mock_fomod, "_discover", side_effect=lambda _d, inst: seen.append(set(inst)) or []), \
+                    mock.patch.object(mock_fomod, "_discover_plugin_choices", return_value=[]):
+                mock_fomod.process_staging(package.parent, data, out)
+            self.assertIn("tr_mainland.esm", seen[0])
+
 
 class ArrivedModOfferTests(unittest.TestCase):
     def run_offer(self, answer):
