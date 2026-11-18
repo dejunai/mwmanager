@@ -2088,7 +2088,25 @@ def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str]
         archive = Path(companion["archive"])
         target = mod_dir.parent.parent / "companions" / re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .")
         if not target.is_dir():
-            extract_archive({"archive": str(archive)}, target, Path(__file__).resolve().parent)
+            size_mb = archive.stat().st_size / 1048576
+            print(f"  {mod_dir.name}: extracting {record['label']} ({size_mb:,.0f} MB); "
+                  "a large pack can take several minutes…", flush=True)
+            started, failure = time.monotonic(), []
+
+            def extract():
+                try:
+                    extract_archive({"archive": str(archive)}, target, Path(__file__).resolve().parent)
+                except BaseException as exc:          # re-raised on this thread below
+                    failure.append(exc)
+            worker = threading.Thread(target=extract, daemon=True)
+            worker.start()
+            while worker.join(30) or worker.is_alive():      # a heartbeat every 30 s while 7-Zip works
+                print(f"  {mod_dir.name}: still extracting {archive.name} "
+                      f"({int(time.monotonic() - started) // 60} min {int(time.monotonic() - started) % 60} s)…",
+                      flush=True)
+            if failure:
+                raise failure[0]
+            print(f"  {mod_dir.name}: extracted {archive.name} in {int(time.monotonic() - started)} s.", flush=True)
         record["path"] = _data_root(target)
         record["payload_files"] = _payload_files({"path": record["path"]})
         if companion.get("warning"):

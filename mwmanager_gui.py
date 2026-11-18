@@ -2209,7 +2209,9 @@ class ManagerGUI(tk.Tk):
         self.status.set(f"Enabled {len(new_plugins)} newly detected plugin(s). Generate Patches to run the checks.")
 
     def _show_blocked_archive_warning(self, items):
-        """Show unsafe archive contents as a readable, formatted list."""
+        """Show unsafe archive contents as a readable, formatted list; returns the archives the user allows.
+        Blocked by default: binaries and scripts usually mean an engine injector or something for the game folder,
+        but now and then a normal mod ships a modder's utility."""
         dialog = tk.Toplevel(self)
         dialog.title("Archives blocked from installation")
         dialog.transient(self)
@@ -2217,8 +2219,10 @@ class ManagerGUI(tk.Tk):
         dialog.minsize(620, 360)
         ttk.Label(
             dialog,
-            text=(f"{len(items)} archive(s) contain executable, library, or script files and are blocked. "
-                  "They remain marked BLOCKED in the archive list."),
+            text=(f"{len(items)} archive(s) contain executable, library, or script files and are blocked: these "
+                  "usually belong to an engine extension or the game folder, not Data Files. If one is a normal mod "
+                  "that just ships a modder's utility, tick Allow to install it with those files. The rest stay "
+                  "marked BLOCKED in the archive list."),
             wraplength=780,
         ).pack(anchor="w", padx=12, pady=(12, 8))
         body = ttk.Frame(dialog)
@@ -2230,21 +2234,34 @@ class ManagerGUI(tk.Tk):
         scrollbar.pack(side="right", fill="y")
         text.tag_configure("archive", font=FONTS["bold"])
         text.tag_configure("payload", font=(FONTS["body"][0], 10, "italic"))
+        allow = []
         for index, item in enumerate(items):
             if index:
                 text.insert("end", "\n")
-            text.insert("end", "— " + Path(item["archive"]).name + "\n", "archive")
+            allow.append(tk.BooleanVar(dialog, value=False))
+            text.window_create("end", window=ttk.Checkbutton(text, text="Allow", variable=allow[-1]))
+            text.insert("end", "  " + Path(item["archive"]).name + "\n", "archive")
             payloads = item.get("blocked_payloads", [])
             for payload in payloads[:4]:
                 text.insert("end", "    " + str(payload) + "\n", "payload")
             if len(payloads) > 4:
                 text.insert("end", f"    … {len(payloads) - 4} additional files\n", "payload")
         text.configure(state="disabled")
-        ttk.Button(dialog, text="OK", command=dialog.destroy).pack(anchor="e", padx=12, pady=12)
+        chosen = []
+
+        def allow_ticked():
+            chosen.extend(item for item, var in zip(items, allow) if var.get())
+            dialog.destroy()
+        buttons = ttk.Frame(dialog)
+        buttons.pack(fill="x", padx=12, pady=12)
+        ttk.Button(buttons, text="Allow ticked", command=allow_ticked).pack(side="right")
+        keep = ttk.Button(buttons, text="Keep all blocked", command=dialog.destroy)
+        keep.pack(side="right", padx=(0, 6))
         dialog.protocol("WM_DELETE_WINDOW", dialog.destroy)
         dialog.grab_set()
-        dialog.focus_set()
+        keep.focus_set()
         self.wait_window(dialog)
+        return chosen
 
     def _show_report(self, title: str, path: Path) -> None:
         """Display a generated text report inside MWManager."""
@@ -2323,7 +2340,13 @@ class ManagerGUI(tk.Tk):
                             "Required major master(s) must be deployed first: " + ", ".join(missing_major))))
             unsafe_items = [item for item in items if item.get("blocked_payloads")]
             if unsafe_items:
-                self._show_blocked_archive_warning(unsafe_items)
+                allowed = self._show_blocked_archive_warning(unsafe_items)
+                if allowed:
+                    from plugin_install import allow_payloads
+                    for item in allowed:
+                        allow_payloads(APP_DIR, item["archive"], item["blocked_payloads"])
+                    run_scan()                  # rescans only the allowed archives; the rest come from the cache
+                    return
             if not items:
                 messagebox.showinfo("No plugin archives", "No supported archives were found.", parent=self)
                 return

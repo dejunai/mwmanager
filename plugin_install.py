@@ -97,6 +97,26 @@ def _blocked_archive_payloads(names: list[str]) -> list[str]:
     )
 
 
+ALLOWED_PAYLOADS_FILE = "mwmanager_allowed_payloads.json"
+
+
+def allowed_payloads(manager: Path) -> dict[str, list[str]]:
+    """{archive file name, casefolded: [member paths]} the user chose to install although they are executables,
+    libraries or scripts (a modder's utility shipped inside an otherwise normal mod)."""
+    try:
+        data = json.loads((Path(manager) / ALLOWED_PAYLOADS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def allow_payloads(manager: Path, archive: str | Path, payloads: list[str]) -> None:
+    data = allowed_payloads(manager)
+    data[Path(archive).name.casefold()] = sorted(set(data.get(Path(archive).name.casefold(), [])) | set(payloads),
+                                                  key=str.casefold)
+    (Path(manager) / ALLOWED_PAYLOADS_FILE).write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 def _risk_finding(severity: str, code: str, message: str, **details) -> dict:
     finding = {"severity": severity, "code": code, "message": message}
     finding.update(details)
@@ -152,7 +172,8 @@ def analyze_archive(item: dict, manager: Path) -> dict:
                     for message in collisions)
 
     if not item.get("trusted_prerequisite"):
-        for payload in _blocked_archive_payloads(names):
+        allowed = {name.casefold() for name in item.get("allowed_payloads") or ()}
+        for payload in (p for p in _blocked_archive_payloads(names) if p.casefold() not in allowed):
             findings.append(_risk_finding(
                 "high", "suspicious_payload",
                 f"Archive contains executable, library, or script payload: {payload}",
@@ -514,11 +535,14 @@ def scan_archives(downloads: Path, manager: Path, progress=None,
     found = []
     old_cache = {} if refresh_cache else _read_archive_scan_cache(manager)
     new_cache = {}
+    allowed_by_archive = allowed_payloads(manager)
     for index, archive in enumerate(archives, 1):
         cache_key = str(archive.resolve()).casefold()
         fingerprint = _scan_cache_fingerprint(archive)
         cached = old_cache.get(cache_key)
-        if cached and cached.get("fingerprint") == fingerprint and isinstance(cached.get("item"), dict):
+        allowed = allowed_by_archive.get(archive.name.casefold(), [])
+        if (cached and cached.get("fingerprint") == fingerprint and isinstance(cached.get("item"), dict)
+                and cached["item"].get("allowed_payloads", []) == allowed):
             if progress:
                 progress(f"Using cached scan {index} of {len(archives)}: {archive.name}")
             item = cached["item"]
@@ -528,12 +552,13 @@ def scan_archives(downloads: Path, manager: Path, progress=None,
             continue
         if progress:
             progress(f"Inspecting archive {index} of {len(archives)}: {archive.name}")
-        risk = analyze_archive({"archive": str(archive)}, manager)
+        risk = analyze_archive({"archive": str(archive), "allowed_payloads": allowed}, manager)
         names = risk["member_names"]
         error = "; ".join(finding["message"] for finding in risk["findings"]
                           if finding["code"] == "archive_inspection_error") or None
         normalized = [name.replace("\\", "/").lstrip("/") for name in names]
-        blocked_payloads = _blocked_archive_payloads(names)
+        blocked_payloads = [p for p in _blocked_archive_payloads(names)
+                            if p.casefold() not in {a.casefold() for a in allowed}]
         archive_plugins = sorted({Path(name).name for name in normalized
                                   if Path(name).suffix.casefold() in {".esp", ".esm"}}, key=str.casefold)
         plugin_masters = {}
@@ -573,7 +598,7 @@ def scan_archives(downloads: Path, manager: Path, progress=None,
                 "has_mwse": has_mwse,
                 "has_fomod": has_fomod, "has_bain": bool(bain_dirs), "replacer": replacer,
                 "utility_route": utility[0] if utility else None,
-                "blocked_payloads": blocked_payloads,
+                "blocked_payloads": blocked_payloads, "allowed_payloads": allowed,
                 "archive_risk": risk,
                 "blocked": bool(risk["blocked"] or utility),
                 "problem": "; ".join(filter(None, [

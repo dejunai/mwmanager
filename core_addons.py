@@ -62,7 +62,8 @@ def master_mod_id(master: str, archive_name: str = "") -> int | None:
     variants = MASTER_VARIANTS.get(master.casefold())
     if variants:
         return variants["HD" if re.search(r"(?<![a-z])hd(?![a-z])", archive_name.casefold()) else "SD"]
-    return NEXUS_MOD_IDS.get(master.casefold())
+    # a master the user added has no built-in ID: its archive's own ("Mod-46810-2-3-0-….7z")
+    return NEXUS_MOD_IDS.get(master.casefold()) or (_archive_mod_id(Path(archive_name)) if archive_name else None)
 
 
 _FILE_CATEGORIES = {"main", "optional", "update", "miscellaneous", "old_version", "archived", "deleted"}
@@ -105,6 +106,14 @@ def _archive_mod_id(archive: Path) -> int | None:
     from plugin_install import _nexus_ids_from_archive_name
     mod_id = _nexus_ids_from_archive_name(archive)[0]
     return int(mod_id) if mod_id else None
+
+
+def _starts_with_name(title: str, name: str) -> bool:
+    """A voice pack is named after its master first ("OAAB Data - Voices"); a title that names another mod first
+    ("Django's Dialogue Patch for Purists") is that mod's patch, not the master's voice pack."""
+    words = lambda s: re.findall(r"[a-z0-9]+", s.casefold())
+    want = words(name)
+    return bool(want) and words(title)[:len(want)] == want
 
 
 def find_companions(plan: dict, downloads_dir: str | os.PathLike, manager_dir: str | os.PathLike, *,
@@ -150,7 +159,8 @@ def find_companions(plan: dict, downloads_dir: str | os.PathLike, manager_dir: s
                 title = info.get("name") or path.stem
                 if master_id and mod_id == master_id:
                     kind = "hd" if re.search(r"(?<![a-z])hd(?![a-z])", title.casefold()) else "extra"
-                elif str(info.get("category", "")).casefold() == "audio" and any(names_mod(n, title) for n in names):
+                elif str(info.get("category", "")).casefold() == "audio" and any(
+                        names_mod(n, title) and _starts_with_name(title, n) for n in names):
                     kind = "voice"
                 else:
                     continue

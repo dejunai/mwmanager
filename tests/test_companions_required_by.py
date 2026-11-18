@@ -58,6 +58,11 @@ class VortexAndNames(unittest.TestCase):
         self.assertNotIn("skyrim.zip", found)
         self.assertEqual(core_addons.vortex_downloads(Path(tmp) / "missing.json"), {})
 
+    def test_a_master_the_user_added_takes_its_mod_id_from_its_archive(self):
+        archive = "Solstheim Tomb of the Snow Prince-46810-2-3-0-1731263823.7z"
+        self.assertEqual(core_addons.master_mod_id("Solstheim Tomb of The Snow Prince.esm", archive), 46810)
+        self.assertIsNone(core_addons.master_mod_id("Solstheim Tomb of The Snow Prince.esm"))
+
     def test_mod_id_from_newer_nexus_archive_names(self):
         self.assertEqual(plugin_install._nexus_ids_from_archive_name(Path(HD)), ("49042", None))
         self.assertEqual(plugin_install._nexus_ids_from_archive_name(Path("Mod-12345-1-0-1700000000.zip")),
@@ -97,6 +102,15 @@ class Companions(unittest.TestCase):
         self.assertIn("2.7.0 is older than oaab_data.esm 2.7.5", found["hd"]["warning"])
         self.assertEqual(found["voice"]["label"], "Voice pack available")
         self.assertNotIn("warning", found["voice"])         # a voice pack's own version is not comparable
+
+    def test_another_mods_patch_naming_the_master_last_is_no_voice_pack(self):
+        self.plan["archives"][0]["core_masters"] = ["Patch for Purists.esm"]
+        self.vortex[VOICE.casefold()]["name"] = "Django's Dialogue Patch for Purists"
+        self.vortex[OTHER_VOICE.casefold()]["name"] = "Patch for Purists - Voices"
+        found = self.companions(self.vortex)
+        self.assertEqual(found["voice"]["name"], "Patch for Purists - Voices")
+        self.assertEqual([c["name"] for c in self.plan["archives"][0]["companions"] if c["kind"] == "voice"],
+                         ["Patch for Purists - Voices"])
 
     def test_without_vortex_the_hd_pack_is_found_by_the_id_in_its_name(self):
         self.assertEqual(set(self.companions({})), {"hd"})

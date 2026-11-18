@@ -135,6 +135,27 @@ class PluginPathSafetyTests(unittest.TestCase):
             self.assertNotIn("suspicious_payload",
                              {finding["code"] for finding in report["findings"]})
 
+    def test_a_utility_the_user_allowed_unblocks_its_archive_and_survives_a_rescan(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            downloads = root / "downloads"
+            downloads.mkdir()
+            with zipfile.ZipFile(downloads / "Mod-123-1-0.zip", "w") as zf:
+                zf.writestr("Mod.esp", b"TES3")
+                zf.writestr("Tools/converter.exe", b"utility")
+            with mock.patch.object(plugin_install, "_archive_esm_masters", return_value=([], None)):
+                (item,) = plugin_install.scan_archives(downloads, root)
+                self.assertTrue(item["blocked"])
+                self.assertEqual(item["blocked_payloads"], ["Tools/converter.exe"])
+                plugin_install.allow_payloads(root, item["archive"], item["blocked_payloads"])
+                (item,) = plugin_install.scan_archives(downloads, root)        # the cached scan is redone
+            self.assertFalse(item["blocked"])
+            self.assertEqual(item["blocked_payloads"], [])
+            self.assertTrue(plugin_install.analyze_archive(item, root)["safe"])       # what extraction checks
+            with zipfile.ZipFile(downloads / "Mod-123-1-0.zip", "a") as zf:
+                zf.writestr("Tools/other.dll", b"new")               # a binary the user never saw stays blocked
+            self.assertFalse(plugin_install.analyze_archive(item, root)["safe"])
+
     def test_archive_analysis_detects_encryption_from_zip_flags(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
