@@ -162,6 +162,41 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         journal.execute_rollback(self.data.parent, plan)
         self.assertFalse(generated.exists())
 
+    def test_unused_original_that_is_needed_again_is_moved_back(self):
+        import mwmanager_journal
+        original = self.data / "Sound" / "Cr" / "kgout" / "moan2.wav"
+        original.parent.mkdir(parents=True, exist_ok=True)
+        original.write_bytes(b"RIFF vanilla")
+        journal = mwmanager_journal.Journal(self.manager / "journal")
+        journal.capture_baseline(self.data.parent)
+        kept = self.data / "Off" / "Original Install" / "Unused assets" / "Sound" / "Cr" / "kgout" / "moan2.wav"
+        kept.parent.mkdir(parents=True)
+        os.replace(original, kept)                     # what the unused-asset purge did before a master needed it
+        log = []
+        self.m.write_generated(str(self.data), str(self.game),
+                               [(os.path.join("Sound", "cr", "kgout", "moan2.wav"), "sound record", None, "TR.esm")], log)
+        self.assertEqual(original.read_bytes(), b"RIFF vanilla")   # the original, not a silent stand-in
+        self.assertFalse(kept.exists())
+        self.assertIn("moved the original back", log[0][2])
+
+    def test_missing_asset_is_copied_from_staging_else_built_never_stops(self):
+        import mwmanager_journal
+        vanilla = self.data / "Sound" / "gone.wav"            # a baseline file with no copy anywhere
+        vanilla.parent.mkdir(parents=True, exist_ok=True)
+        vanilla.write_bytes(b"RIFF")
+        mwmanager_journal.Journal(self.manager / "journal").capture_baseline(self.data.parent)
+        vanilla.unlink()
+        staged = self.manager / "staging" / "major_masters" / "TD" / "Extras" / "00 Data Files" / "Icons" / "m" / "x.dds"
+        staged.parent.mkdir(parents=True)
+        staged.write_bytes(b"real icon")
+        log = []
+        self.m.write_generated(str(self.data), str(self.game),
+                               [(os.path.join("Icons", "m", "x.dds"), "book icon", None, "Cyr.esm"),
+                                (os.path.join("Sound", "gone.wav"), "sound record", None, "TR.esm")], log)
+        self.assertEqual((self.data / "Icons" / "m" / "x.dds").read_bytes(), b"real icon")
+        self.assertTrue(staged.exists())                      # copied, the staged file stays
+        self.assertTrue(vanilla.is_file())                    # a stand-in, not a stop
+
     def test_repaired_asset_is_logged_and_restored_by_rollback(self):
         import mwmanager_journal
         asset = self.data / "textures" / "repaired.dds"

@@ -461,12 +461,58 @@ def silent_audio(ext):
             struct.pack("<IHHIIHH", 16, 1, 1, rate, rate * 2, 2, 16) + b"data" + struct.pack("<I", len(data)) + data)
 
 
+def _kept_asset_finder(data_dir):
+    """find(rel) -> a real copy of Data Files\\<rel> kept somewhere MWManager put files: Data Files\\Off (unused,
+    replaced or packed originals) or MWManager's staging (mods' own folders). Unused-asset originals come first,
+    then the rest of Off, then staging. Matched case-insensitively on the path's tail; indexed on first use."""
+    roots = [os.path.join(data_dir, "Off"), os.path.join(MANAGER_DIR, "staging")]
+    index = None
+
+    def build():
+        found = {}
+        for rank, root in enumerate(roots):
+            for base, dirs, files in os.walk(root):
+                dirs[:] = [d for d in dirs if not d.startswith(".mwmanager-pack-work")]
+                for name in files:
+                    path = os.path.join(base, name)
+                    unused = os.sep + "unused assets" + os.sep in path.casefold()
+                    found.setdefault(name.casefold(), []).append((0 if unused else rank + 1, path))
+        return found
+
+    def find(rel):
+        nonlocal index
+        if index is None:
+            index = build()
+        tail = os.sep + os.path.normpath(rel).casefold()
+        hits = sorted(c for c in index.get(os.path.basename(rel).casefold(), [])
+                      if c[1].casefold().endswith(tail))
+        return hits[0] if hits else None
+    return find
+
+
 def write_generated(data_dir, game_dir, items, log):
-    """Create stand-ins and record them for both --remove-generated and install rollback."""
+    """Put missing files in place: the real file kept in Off or staging when there is one, else a stand-in.
+    Records them for both --remove-generated and install rollback; never stops --full."""
     rec_path = output_file(GENERATED_RECORD)
     made = []
     owner = {}
     pending = []
+    find = _kept_asset_finder(data_dir)
+    resolved = []
+    for item in items:
+        rel, why, source = (item + (None,))[:3]
+        if not source and not os.path.exists(os.path.join(data_dir, rel)):
+            hit = find(rel)
+            if hit and hit[0] == 0:                          # an original the unused-asset purge moved aside
+                full = os.path.join(data_dir, rel)
+                os.makedirs(os.path.dirname(full), exist_ok=True)
+                os.replace(hit[1], full)                     # undoes a journaled move; rollback sees it in place
+                log.append(("Data Files", f"'{rel}' is needed again", f"moved the original back from {hit[1]}"))
+                continue
+            if hit:
+                item = (rel, why, hit[1]) + tuple(item[3:])  # copied below, recorded like any generated file
+        resolved.append(item)
+    items = resolved
     for item in items:
         rel, _why, source = (item + (None,))[:3]
         full = os.path.join(data_dir, rel)
@@ -478,11 +524,6 @@ def write_generated(data_dir, game_dir, items, log):
         install_ledger = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
         if not install_ledger.has_baseline():
             raise RuntimeError("generated files require an install baseline so rollback can remove them")
-        baseline = {mwmanager_journal.key(rel) for rel in install_ledger.baseline().get("files", {})}
-        for _rel, full in pending:
-            game_rel = mwmanager_journal.rel_of(Path(game_dir), Path(full))
-            if mwmanager_journal.key(game_rel) in baseline:
-                raise RuntimeError(f"refusing to replace missing baseline file with a generated stand-in: {game_rel}")
         ledger_run = install_ledger.start_run("mwmanager.py", {"operation": "generate missing assets"})
     for item in items:
         rel, why, source = (item + (None,))[:3]

@@ -258,6 +258,7 @@ class JobView:
         self.cancel.pack_forget()
         self.force.pack_forget()
         self.control = None
+        self.window.grab_release()      # the job is over: begin()'s input grab must not outlive it
         self.refresh_phases()
         self.stage.set("Paused. Resume setup when ready." if error else "Step complete. Continuing setup...")
         self.window.protocol("WM_DELETE_WINDOW", self.window.withdraw)

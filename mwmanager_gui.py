@@ -4057,12 +4057,18 @@ class ManagerGUI(tk.Tk):
             messagebox.showinfo("Major masters deployed", "\n".join(detail), parent=self)
             if result.get("conflicts"):
                 self._resolve_major_master_conflicts(result["conflicts"])
+            def offer_full():
+                if messagebox.askyesno("Run --full?", "The load order changed. Run --full against the new load "
+                                       "order now? It rebuilds the patches and may take a while.", parent=self):
+                    self.generate_patches(mode="full", force=True)
+
             view = getattr(self, "_job_view", None)
-            if view is not None and hasattr(view, "stage"):
-                view.stage.set("Deployment complete. You can close this window now.")
-            if messagebox.askyesno("Run --full?", "The load order changed. Run --full against the new load "
-                                   "order now? It rebuilds the patches and may take a while.", parent=self):
-                self.generate_patches(mode="full", force=True)
+            if view is not None and getattr(view, "setup", False):
+                # the setup window settles after this callback: it shows this line, then offers --full
+                view.final_stage = "Deployment complete. You can close this window now."
+                view.then = offer_full
+            else:
+                offer_full()
 
         self._setup_begin("major_masters_deployed")
         self._run_progress_job("Deploy Major Masters", "Hardlinking selected masters and their assets…", worker, completed)
@@ -4630,7 +4636,12 @@ class ManagerGUI(tk.Tk):
         if self._active_job or not view.window.winfo_exists():
             return
         view.refresh_phases()
-        view.stage.set(self.status.get())
+        final = getattr(view, "final_stage", None)       # a job's own last word wins over the status bar
+        view.final_stage = None
+        view.stage.set(final or self.status.get())
+        then, view.then = getattr(view, "then", None), None
+        if then:                                         # the next job starts once this one has fully settled
+            self.after_idle(then)
         if self.settings.get("init_complete", 0) != 1:
             view.resume.pack(side="right", padx=6)
         else:
