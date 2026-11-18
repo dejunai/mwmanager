@@ -288,4 +288,5 @@ Behaviour changes:
   reported only. The per-run list of changed and questionable owners is `outputs\mwmanager_door_owners.txt`
   (`DOOR_OWNERS_LIST` in `mwmanager_state.py`); each change is also a line in the fix log.
 - New suite mod `mwquicktoggle` (a quick key unequips its item when already equipped; vanilla keys and QuickKeys
-  Hotbar Extended) in the snapshot and in `reference\mwse-lua-guards\`; luafix lists it as one of ours.
+  Hotbar Extended) in the snapshot; luafix lists it as one of ours. Not yet in the shipped suite
+  (`reference\mwse-lua-guards\`): like mwexitguard, it first needs adding to mwguard's exempt list and the menu.
