@@ -21,6 +21,7 @@ MIN_THRESHOLD = 50
 BSA_OFFER_SETTING = "offer_bsa_when_assets_found"
 DEFAULT_UNSUPPORTED = {"sound", "fonts", "splash", "music"}
 PACKABLE_ROOTS = {"meshes", "textures", "icons"}
+from major_master_deploy import BSA_EXTENSIONS
 
 
 def configured_threshold(manager_dir: Path) -> int:
@@ -61,6 +62,8 @@ def packable_files(mod_dir: Path, unsupported: set[str]) -> list[tuple[Path, Pat
         if parts and parts[0].casefold() == "data files":
             parts = parts[1:]
         if not parts or parts[0].casefold() not in PACKABLE_ROOTS or parts[0].casefold() in unsupported:
+            continue
+        if path.suffix.casefold() not in BSA_EXTENSIONS:     # BSAPack aborts on any other type
             continue
         out.append((path, Path(*parts)))
     return sorted(out, key=lambda item: str(item[0]).casefold())

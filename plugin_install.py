@@ -20,7 +20,7 @@ from core_addons import (ARCHIVE_EXTENSIONS, _members, _member_preflight,
                          _quiet_subprocess_options, _seven_zip, stamped_backup_path)
 
 SKIP_DIRS = {"off", "bugreports", "fomod", "extras", "docs", "screenshots"}
-BSA_FOLDERS = {"bookart", "icons", "meshes", "textures", "video"}
+from major_master_deploy import BSA_EXTENSIONS, BSA_FOLDERS
 WINDOWS_MAX_PATH = 260  # MAX_PATH includes the terminating NUL; paths must stay below this length.
 PLUGIN_RENAMES = {"anthologysolstheim.esp": "AnthologySolstheimPatched.esp"}
 MASTER_RENAMES = {"tr_data.esm": "Tamriel_Data.esm"}
@@ -732,7 +732,8 @@ def count_bsa_assets(package: Path) -> int:
             parts.pop(0)
         dirs[:] = [d for d in dirs if d.casefold() not in SKIP_DIRS]
         if parts and parts[0].casefold() in BSA_FOLDERS:
-            count += sum(1 for name in files if not name.startswith("."))
+            count += sum(1 for name in files if not name.startswith(".")
+                         and Path(name).suffix.casefold() in BSA_EXTENSIONS)
     return count
 
 

@@ -19,7 +19,9 @@ from collections import deque
 from workflow_safety import DurableTransaction, mutation_lock, require_space
 import managed_processes
 
-BSA_FOLDERS = {"bookart", "icons", "meshes", "textures", "video"}
+# What BSAPack accepts; anything else (png, wav, bik, ...) stays loose or BSAPack aborts the whole pack.
+BSA_FOLDERS = {"bookart", "icons", "meshes", "splash", "textures"}
+BSA_EXTENSIONS = {".nif", ".kf", ".dds", ".tga", ".bmp"}
 SKIP_FOLDERS = {"off", "bugreports", "fomod", "extras", ".mwmanager-pack"}
 GAME_ROOT_FOLDERS = {"mge3"}          # a package's top-level folders that belong beside Morrowind.exe, not in Data Files
 
@@ -98,7 +100,7 @@ def count_bsa_eligible(staging: Path, masters: list[str]) -> int:
             dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS and not d.startswith(".")]
             if not rel.parts or rel.parts[0].casefold() not in BSA_FOLDERS:
                 continue
-            count += sum(1 for f in files if not f.startswith(".")
+            count += sum(1 for f in files if not f.startswith(".") and Path(f).suffix.casefold() in BSA_EXTENSIONS
                          and (rel / f).as_posix().casefold() not in keep_loose)
     return count
 
@@ -155,7 +157,7 @@ def _pack_assets_locked(package, plugin_name, tool, progress):
         rel = _data_relative(package, Path(base))
         if rel.parts and rel.parts[0].casefold() in BSA_FOLDERS:
             for name in names:
-                if name.startswith("."):
+                if name.startswith(".") or Path(name).suffix.casefold() not in BSA_EXTENSIONS:
                     continue
                 source = Path(base) / name
                 if source.is_symlink():

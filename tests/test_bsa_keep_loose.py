@@ -42,6 +42,16 @@ class KeepLuaImagesLooseTests(unittest.TestCase):
         files = [relative.as_posix() for _source, relative in bsa_pack.packable_files(self.package, set())]
         self.assertEqual(files, ["textures/rock.dds"])
 
+    def test_types_bsapack_rejects_stay_loose(self):
+        # Tamriel Data HD ships textures\bm\c\bm_c_ring_unitylove.png; BSAPack aborts the whole pack on it.
+        for rel in ("textures/bm/stray.png", "video/intro.bik", "meshes/readme.txt"):
+            (self.package / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.package / rel).write_bytes(b"x")
+        files = [relative.as_posix() for _source, relative in bsa_pack.packable_files(self.package, set())]
+        self.assertEqual(files, ["textures/rock.dds"])
+        self.test_deploy_packer_leaves_them_out_and_loose()
+        self.assertTrue((self.package / "textures" / "bm" / "stray.png").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()
