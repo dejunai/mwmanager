@@ -2207,7 +2207,11 @@ def _activate(mod_dir: Path, plugin: str, records: list[dict], chosen: set[str],
             desired.update(_payload_files(option))      # ascending number: higher groups win overlaps
     new_state = {}
     kept_in_extras = None
-    for rel, source in desired.items():
+    last_report = time.monotonic()
+    for done, (rel, source) in enumerate(desired.items()):
+        if time.monotonic() - last_report >= 15:          # voice packs add tens of thousands of files
+            print(f"  {mod_dir.name}: adding option files {done:,} of {len(desired):,}…", flush=True)
+            last_report = time.monotonic()
         destination = mod_dir / rel
         destination.parent.mkdir(parents=True, exist_ok=True)
         backup_rel = reusable.get(rel)

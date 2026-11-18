@@ -1,5 +1,6 @@
 """Companion packs (HD and voice packs offered in a master's option window) and the Nexus "mods requiring this
 file" count that suggests new masters. Vortex state and Nexus are mocked; temporary folders only."""
+import io
 import json
 import struct
 import sys
@@ -139,6 +140,11 @@ class Companions(unittest.TestCase):
         applied = mock_fomod._activate(package, "OAAB_Data.esm", records, {hd["key"]}, {}, self.root / "backup")
         self.assertEqual((package / "Textures" / "a.dds").read_bytes(), b"hd")
         self.assertEqual(applied["selected"], [hd["key"]])
+        clock = iter(range(0, 10_000, 20))                       # 20 s pass between file copies
+        with mock.patch.object(mock_fomod.time, "monotonic", side_effect=lambda: next(clock)), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            mock_fomod._activate(package, "OAAB_Data.esm", records, {hd["key"]}, {}, self.root / "backup2")
+        self.assertIn("adding option files 0 of 1", out.getvalue())
 
 
 class RequiredBy(unittest.TestCase):
