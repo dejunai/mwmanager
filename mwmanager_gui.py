@@ -4961,7 +4961,9 @@ class ManagerGUI(tk.Tk):
             """Tidy with the option installer, then the BSA check. Each step is recorded in the package's marker
             as it starts and completes; a step already completed is not run again."""
             steps = package_steps(mod_dir) or {}
-            from major_master_deploy import assert_package_disposable, restore_packed_assets
+            from major_master_deploy import assert_package_disposable, restore_packed_assets, staged_masters
+            if group_masters and not {m.casefold() for m in group_masters} <= set(staged_masters(staging, list(group_masters))):
+                steps = {}      # marked done, but its master never reached the package: run the steps again
             assert_package_disposable(mod_dir, staging, game_data_files, APP_DIR, self.major_masters,
                                       check_dependencies=False)
             if not (steps.get("tidied") or {}).get("completed_at"):
