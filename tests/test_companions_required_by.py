@@ -133,7 +133,9 @@ class Companions(unittest.TestCase):
         self.assertIn("may overwrite newer files", hd["docs"])
         self.assertFalse(hd["required"])
 
-        mock_fomod._materialize_companions(package, records, {hd["key"]})
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as said:
+            mock_fomod._materialize_companions(package, records, {hd["key"]})
+        self.assertNotIn("large pack", said.getvalue())          # a small archive gets no large-pack note
         self.assertTrue((staging.parent / "companions").is_dir())
         self.assertNotIn("payload_files", voice)        # not chosen: never extracted
         self.assertEqual(set(hd["payload_files"]), {str(Path("Textures/a.dds"))})

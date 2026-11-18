@@ -2080,7 +2080,7 @@ def _data_root(folder: Path) -> Path:
 def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str]) -> None:
     """Extract each chosen companion to staging/companions (outside the master staging that Tidy treats as
     packages, and outside the package, so it is not deployed as is); its record gets the payload to activate."""
-    from plugin_install import extract_archive
+    from plugin_install import LARGE_ARCHIVE_BYTES, extract_archive
     for record in records:
         companion = record.get("companion")
         if not companion or record["key"] not in chosen or "payload_files" in record:
@@ -2088,9 +2088,9 @@ def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str]
         archive = Path(companion["archive"])
         target = mod_dir.parent.parent / "companions" / re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .")
         if not target.is_dir():
-            size_mb = archive.stat().st_size / 1048576
-            print(f"  {mod_dir.name}: extracting {record['label']} ({size_mb:,.0f} MB); "
-                  "a large pack can take several minutes…", flush=True)
+            size = archive.stat().st_size
+            note = "; a large pack can take several minutes…" if size >= LARGE_ARCHIVE_BYTES else "…"
+            print(f"  {mod_dir.name}: extracting {record['label']} ({size / 1048576:,.0f} MB){note}", flush=True)
             started, failure = time.monotonic(), []
 
             def extract():
