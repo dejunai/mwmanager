@@ -230,6 +230,26 @@ class PluginPathSafetyTests(unittest.TestCase):
                 plugin_install.extract_archive({"archive": str(archive)}, destination, root)
             self.assertFalse(destination.exists())
 
+    def test_extraction_retries_a_rename_a_scanner_briefly_blocks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "voices.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("Sound/Vo/a.mp3", b"mp3")
+            destination = root / "staging"
+            real_replace, calls = os.replace, []
+
+            def flaky(src, dst):
+                calls.append(dst)
+                if len(calls) == 1:
+                    raise PermissionError(5, "Access is denied")
+                real_replace(src, dst)
+
+            with mock.patch.object(plugin_install.os, "replace", side_effect=flaky), \
+                    mock.patch.object(plugin_install.time, "sleep"):
+                plugin_install.extract_archive({"archive": str(archive)}, destination, root)
+            self.assertTrue((destination / "Sound/Vo/a.mp3").is_file())
+
     def test_regular_scan_does_not_open_payloads_after_high_risk_finding(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

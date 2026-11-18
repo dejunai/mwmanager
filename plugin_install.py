@@ -10,6 +10,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import time
 import uuid
 import zipfile
 from datetime import datetime
@@ -855,7 +856,15 @@ def extract_archive(item: dict, destination: Path, manager: Path) -> Path:
                 raise RuntimeError((result.stderr or result.stdout or
                                     f"7-Zip exited {result.returncode}")[-3000:])
         _assert_no_links(temporary)
-        os.replace(temporary, destination)
+        # Defender or the indexer can still hold freshly extracted files; renaming the folder then fails.
+        for attempt in range(10):
+            try:
+                os.replace(temporary, destination)
+                break
+            except PermissionError:
+                if attempt == 9:
+                    raise
+                time.sleep(1 + attempt)
     except BaseException:
         shutil.rmtree(temporary, ignore_errors=True)
         raise
