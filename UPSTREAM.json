@@ -1,7 +1,7 @@
 {
   "repository": "https://github.com/dejunai/morrowind-conflict-tools",
-  "commit": "ae97758",
-  "commit_subject": "Merge pull request #1 from dejunai/code-review-fixes",
+  "commit": "1798bd2",
+  "commit_subject": "luafix L1/M1/V1 rules, door-owner check, mwexitguard, Lua bug notes",
   "vendored_copy": "tools/steam-upstream/ (file list and SHA-256: tools/steam-upstream/COPY_MANIFEST.json)",
   "run_from_root": "every mwdialog_*.py and vortex_tidy.py in the repository root is a byte-identical copy of the same file in tools/steam-upstream/ (tests/test_game_writes.py checks the hashes)",
   "rule": "never edit the upstream files here; MWManager behaviour lives in the mwmanager_* extension modules"
