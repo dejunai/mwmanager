@@ -39,8 +39,10 @@
   "run_reenable",
   "save_pending_cell_conflicts",
   "write_bug_reports",
+  "write_collide_data",
   "write_ghost_statics",
-  "write_plugin_bytes"
+  "write_plugin_bytes",
+  "write_stranded_data"
  ],
  "mwmanager_state.py": [
   "ADDED_MASTERS_RECORD",

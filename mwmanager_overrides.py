@@ -103,6 +103,40 @@ def activate_generated_patches(args, plugins, patch_path, place_built, game_dir)
     print(f"\nGenerated patch order saved to {LOAD_ORDER_FILE}; Morrowind.ini will be synced when this run finishes.")
 
 
+def _journal_mwse_data(args, filename, write):
+    """Run an upstream writer of Data Files\\MWSE\\config\\<filename> and journal the file, so rollback can
+    explain and remove it (mwcollide_data.json, mwstranded_data.json: rebuilt by every --full)."""
+    import mwmanager_journal
+    game_dir = Path(args.data_dir).resolve().parent
+    target = Path(args.data_dir).resolve() / "MWSE" / "config" / filename
+    ledger = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
+    if not ledger.has_baseline():
+        return write()
+    original = ledger.preserve_original(game_dir, target)
+    run = ledger.start_run("mwmanager.py", {"operation": "write MWSE data", "path": filename})
+    try:
+        result = write()
+    finally:
+        if target.is_file():
+            ledger.record(run["run"], mwmanager_journal.rel_of(game_dir, target),
+                          "replace" if original["kind"] != "absent" else "create",
+                          mwmanager_journal.sha256_file(target), original, tag="mwse-data")
+        ledger.finish_run(run)
+    return result
+
+
+_upstream_write_collide_data = write_collide_data
+_upstream_write_stranded_data = write_stranded_data
+
+
+def write_collide_data(args, *rest):
+    return _journal_mwse_data(args, COLLIDE_DATA, lambda: _upstream_write_collide_data(args, *rest))
+
+
+def write_stranded_data(args, *rest):
+    return _journal_mwse_data(args, STRANDED_DATA, lambda: _upstream_write_stranded_data(args, *rest))
+
+
 _upstream_write_plugin_bytes = write_plugin_bytes
 
 

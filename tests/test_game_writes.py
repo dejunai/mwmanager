@@ -162,6 +162,26 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         journal.execute_rollback(self.data.parent, plan)
         self.assertFalse(generated.exists())
 
+    def test_mwse_data_written_by_full_is_journaled_and_rolled_back(self):
+        import types
+        import mwmanager_journal
+        journal = mwmanager_journal.Journal(self.manager / "journal")
+        journal.capture_baseline(self.game)
+        target = self.data / "MWSE" / "config" / self.m.COLLIDE_DATA
+
+        def upstream(args, *rest):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text('{"cells": {}}', encoding="utf-8")
+        with mock.patch.object(self.m, "_upstream_write_collide_data", upstream):
+            self.m.write_collide_data(types.SimpleNamespace(data_dir=str(self.data)), [], {}, {}, {}, {}, {}, {})
+        entries, _problems = journal.entries()
+        self.assertEqual((entries[-1]["path"], entries[-1]["tag"]),
+                         ("Data Files/MWSE/config/mwcollide_data.json", "mwse-data"))
+        plan = journal.plan_rollback(self.game)
+        self.assertEqual(plan["unexplained"], [])
+        journal.execute_rollback(self.game, plan)
+        self.assertFalse(target.exists())
+
     def test_unused_original_that_is_needed_again_is_moved_back(self):
         import mwmanager_journal
         original = self.data / "Sound" / "Cr" / "kgout" / "moan2.wav"
