@@ -3240,6 +3240,12 @@ class ManagerGUI(tk.Tk):
             messagebox.showerror("Could not save load order", str(exc), parent=self)
             return
         moved = []
+        journal = run = None
+        if disabled_now:
+            import mwmanager_journal
+            journal = mwmanager_journal.Journal(APP_DIR / "journal")
+            if journal.has_baseline():                  # rollback can then explain and undo the move
+                run = journal.start_run("mwmanager_gui.py", {"operation": "disable plugins"})
         try:
             for name in disabled_now:
                 source = data_dir / name
@@ -3250,9 +3256,14 @@ class ManagerGUI(tk.Tk):
                 if target.exists():
                     raise FileExistsError(f"Cannot disable {name}; a preserved copy already exists at {target}")
                 target.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(source, target)
+                if run:
+                    journal.move_original(data_dir.parent, source, target, run["run"], tag="disabled-plugin")
+                else:
+                    os.replace(source, target)
                 moved.append((source, target))
         except OSError as exc:
+            if run:
+                journal.finish_run(run)
             for source, target in reversed(moved):
                 try:
                     if target.is_file() and not source.exists():
@@ -3261,6 +3272,8 @@ class ManagerGUI(tk.Tk):
                     pass
             messagebox.showerror("Could not disable plugin", str(exc), parent=self)
             return
+        if run:
+            journal.finish_run(run)
         disabled = read_disabled_plugins()
         for name in disabled_now:
             disabled[name] = "disabled in MWManager load-order panel"

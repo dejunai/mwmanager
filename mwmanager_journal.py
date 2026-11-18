@@ -816,9 +816,9 @@ class Journal:
         if ini_hash and (not ini.is_file() or sha256_file(ini) != ini_hash):
             steps.append({"op": "restore", "path": "Morrowind.ini", "from": ini_source})
         if not preserve_prerequisites:
+            base_by_key = {key(name): item for name, item in base["files"].items()}
             for rel, info in self.prerequisites()["files"].items():
-                baseline_info = base["files"].get(rel) or next(
-                    (item for name, item in base["files"].items() if key(name) == key(rel)), None)
+                baseline_info = base["files"].get(rel) or base_by_key.get(key(rel))
                 if baseline_info is None:
                     prerequisite_steps.append({"op": "delete", "path": rel})
                 elif baseline_info["sha256"] != info["sha256"]:
@@ -834,8 +834,7 @@ class Journal:
                 k = key(rel)
                 if k in planned or not classify(rel).startswith("prereq:"):
                     continue
-                baseline_info = base["files"].get(rel) or next(
-                    (item for name, item in base["files"].items() if key(name) == k), None)
+                baseline_info = base["files"].get(rel) or base_by_key.get(k)
                 if baseline_info is None:
                     prerequisite_steps.append({"op": "delete", "path": rel})
                 elif sha256_file(path) != baseline_info["sha256"]:
@@ -859,7 +858,11 @@ class Journal:
         if plan["refuse"]:
             raise RuntimeError("rollback refused: " + "; ".join(plan["refuse"]))
         game_dir = Path(game_dir).resolve()
-        for step in plan["steps"] + plan.get("prerequisite_steps", []):
+        steps = plan["steps"] + plan.get("prerequisite_steps", [])
+        for step in steps:                          # a damaged ledger line must not reach outside the install
+            if not (game_dir / step["path"]).resolve().is_relative_to(game_dir):
+                raise ValueError(f"rollback refused: {step['path']} is outside the game folder")
+        for step in steps:
             target = game_dir / step["path"]
             if step["op"] == "delete":
                 if target.is_file():
@@ -976,6 +979,12 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
         removed = journal.cleanup_used_backups(game_dir, plan, apply=True)
         archived = journal.archive_ledger()
         manager_dir = journal.root.parent
+        # plugins turned off in the GUI belong to the install that was just rolled back: keep them with its ledger
+        stamp = archived.stem if archived else f"install-{_dt.datetime.now():%Y%m%d-%H%M%S}"
+        for name in ("disabled_plugins", "mwmanager_disabled.txt"):
+            if (manager_dir / name).exists():
+                (journal.root / "history").mkdir(parents=True, exist_ok=True)
+                os.replace(manager_dir / name, journal.root / "history" / f"{stamp}-{name}")
         try:
             from workflow_safety import atomic_json
             atomic_json(manager_dir / "major_master_deployments.json", {"version": 1, "deployments": []})

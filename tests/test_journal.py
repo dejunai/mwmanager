@@ -223,6 +223,25 @@ class LedgerTests(Fixture):
         self.assertTrue(setup["steps"]["paths_confirmed"]["completed_at"])
         self.assertIsNone(setup["steps"]["preflight_complete"]["completed_at"])
 
+    def test_rollback_archives_plugins_turned_off_in_the_gui(self):
+        self.journal.capture_baseline(self.game)
+        write(self.manager / "disabled_plugins/Old.esp", b"old")
+        write(self.manager / "mwmanager_disabled.txt", "Old.esp\tdisabled\n")
+        rc = mj.main(["--game-dir", str(self.game), "--journal-dir", str(self.journal.root), "--rollback", "--gog-only"])
+        self.assertEqual(rc, 0)
+        self.assertFalse((self.manager / "disabled_plugins").exists())
+        self.assertFalse((self.manager / "mwmanager_disabled.txt").exists())
+        history = self.journal.root / "history"
+        self.assertTrue(list(history.glob("*-disabled_plugins/Old.esp")))
+        self.assertTrue(list(history.glob("*-mwmanager_disabled.txt")))
+
+    def test_rollback_never_reaches_outside_the_game_folder(self):
+        outside = write(self.game.parent / "outside.txt", b"keep")
+        with self.assertRaises(ValueError):
+            self.journal.execute_rollback(self.game, {"steps": [{"op": "delete", "path": "../outside.txt"}],
+                                                      "refuse": []})
+        self.assertTrue(outside.exists())
+
     def test_no_staging_clears_staging_only_after_verified_rollback(self):
         self.journal.capture_baseline(self.game)
         staged = write(self.manager / "staging/major_masters/Incomplete/file.txt", b"partial")

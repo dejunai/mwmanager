@@ -757,6 +757,7 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
     if not ready:
         raise ValueError("No staged, uninstalled major masters are ready to deploy.")
     package_info = _package_roots(staging, ready)
+    ready_keys = {name.casefold() for name in ready}
     selected_for_bsa = ({name.casefold() for name in ready} if build_bsa is True else
                         {str(name).casefold() for name in build_bsa} if build_bsa else set())
     if selected_for_bsa:
@@ -834,7 +835,7 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
                     if filename.casefold() == ".mwmanager-stage.json" or filename.startswith("."):
                         continue
                     # Only deploy configured masters; other plugin files in the same archive remain staged.
-                    if source.suffix.casefold() == ".esm" and filename.casefold() not in {n.casefold() for n in ready}:
+                    if source.suffix.casefold() == ".esm" and filename.casefold() not in ready_keys:
                         continue
                     if not include_assets and source.suffix.casefold() not in {".esm", ".bsa", ".esp"}:
                         continue
@@ -884,7 +885,8 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
         # Index after deployment. The catalog keeps full record bodies and BSA member provenance.
         catalog = manager_dir / "database"
         import sys
-        sys.path.insert(0, str(catalog))
+        if str(catalog) not in sys.path:
+            sys.path.insert(0, str(catalog))
         import catalog as catalog_module
         db_path = manager_dir / "game_catalog.sqlite3"
         with closing(sqlite3.connect(db_path)) as db, db:

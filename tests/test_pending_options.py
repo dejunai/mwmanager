@@ -173,7 +173,7 @@ class AssetOnlyOptionTests(unittest.TestCase):
               '<installStep name="Install Options"><optionalFileGroups order="Explicit">'
               '<group name="Mod Compatibility Patches" type="SelectAny"><plugins order="Explicit">'
               '<plugin name="Epic Plants"><description>Install if you use Epic Plants. Makes plants match.'
-              '</description><files><folder source="09 Epic Plants Patch\meshes" destination="meshes"/></files>'
+              '</description><files><folder source="09 Epic Plants Patch\\meshes" destination="meshes"/></files>'
               '<typeDescriptor><type name="Optional"/></typeDescriptor></plugin>'
               '</plugins></group></optionalFileGroups></installStep></installSteps></config>')
 

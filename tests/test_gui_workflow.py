@@ -229,6 +229,34 @@ class WorkflowGuiTests(unittest.TestCase):
         choose_paths.assert_not_called()
         self.assertTrue(self.app._setup_done("preflight_complete"))
 
+    def test_failed_save_puts_turned_off_plugins_back(self):
+        data = Path(self.app.settings["game_dir"]) / "Data Files"
+        (data / "Extra.esp").write_bytes(b"TES3")
+        self.app.active_names.discard("extra.esp")
+        before = self.g.read_disabled_plugins()
+        with mock.patch.object(self.g, "write_order", side_effect=OSError("disk full")), \
+                mock.patch.object(self.g.messagebox, "showerror") as error:
+            self.app.save()
+        error.assert_called_once()
+        self.assertTrue((data / "Extra.esp").is_file())
+        self.assertFalse((self.g.disabled_plugins_dir() / "Extra.esp").exists())
+        self.assertEqual(self.g.read_disabled_plugins(), before)
+
+    def test_turning_a_plugin_off_is_journaled(self):
+        data = Path(self.app.settings["game_dir"]) / "Data Files"
+        (data / "Extra.esp").write_bytes(b"TES3")
+        self.app.active_names.discard("extra.esp")
+        journal = mock.Mock()
+        journal.has_baseline.return_value = True
+        journal.start_run.return_value = {"run": "r1"}
+        journal.move_original.side_effect = lambda game, src, dst, run, tag: os.replace(src, dst)
+        with mock.patch("mwmanager_journal.Journal", return_value=journal):
+            self.app.save()
+        moved = [call.args[1].name for call in journal.move_original.call_args_list]
+        self.assertIn("Extra.esp", moved)
+        journal.finish_run.assert_called_once()
+        self.assertTrue((self.g.disabled_plugins_dir() / "Extra.esp").is_file())
+
     def stage(self):
         self.app.major_masters = ["Selected.esm", "Unselected.esm"]
         self.app.selected_major_masters = {"selected.esm"}
