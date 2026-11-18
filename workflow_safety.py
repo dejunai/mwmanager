@@ -285,15 +285,23 @@ class DurableTransaction:
         return operation
 
     def move(self, source, target, *, source_sha256=None):
-        source, target = self.safe(source), self.safe(target)
-        if target.exists():
-            raise FileExistsError(target)
-        operation = {"kind": "move", "source": str(source), "target": str(target),
-                     "sha256": str(source_sha256 or digest(source))}
-        self.record(operation)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        os.replace(source, target)
-        return operation
+        return self.move_many([(source, target)], source_sha256=source_sha256)[0]
+
+    def move_many(self, moves, *, source_sha256=None):
+        """Record a batch of moves with one flush, then apply them in order."""
+        operations = []
+        for source, target, *known in moves:             # (source, target) or (source, target, sha256)
+            source, target = self.safe(source), self.safe(target)
+            if target.exists():
+                raise FileExistsError(target)
+            operations.append({"kind": "move", "source": str(source), "target": str(target),
+                               "sha256": str((known and known[0]) or source_sha256 or digest(source))})
+        self.record_many(operations)
+        for operation in operations:
+            target = Path(operation["target"])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(operation["source"], target)
+        return operations
 
     def commit(self):
         self.state["phase"] = "committed"

@@ -1402,6 +1402,10 @@ def assets_apply(args, ares, moved_mods=()):
     def folder(root, fixes, module, current_game_dir, plugin_name, *positional, **keywords):
         operations = []
         keywords["journal_ops"] = operations
+        if fixes:       # upstream passes no progress callback, so the repairs would otherwise run silently
+            print(f"{len(fixes):,} asset(s) in {package_name(root)} found in need of repairs, beginning now…",
+                  flush=True)
+            keywords.setdefault("progress_callback", lambda line: print(line, flush=True))
         result = original_folder(root, fixes, module, current_game_dir, package_name(root), *positional, **keywords)
         by_plugin.setdefault(_path_plugin(root, args.staging), []).extend(operations)
         return result

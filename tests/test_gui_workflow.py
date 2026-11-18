@@ -338,6 +338,7 @@ class WorkflowGuiTests(unittest.TestCase):
                 mock.patch.object(self.g.tk, "Toplevel") as window:
             self.app._resolve_major_master_conflicts(conflicts)
         text = ask.call_args.args[1]
+        self.assertEqual(ask.call_args.kwargs["default"], "no")     # accepting the load order is recommended
         self.assertIn("3 conflicts", text)
         self.assertIn("Extreme: 1", text)
         window.assert_not_called()

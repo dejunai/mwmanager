@@ -729,5 +729,5 @@ def check_folder(root, m, data_dir=None, bsa_meshes=None, stats=None, progress_c
                                          f"converted to {target} (original kept in Off)"))
             fixes.append(("tex", full, rel, {"convert": target}))
     if progress_callback:
-        progress_callback(f"Asset scan complete: {checked:,} files checked")
+        progress_callback(f"Asset scan complete: {checked:,} files checked; {len(fixes):,} in need of repairs")
     return issues, fixes

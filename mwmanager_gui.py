@@ -2548,7 +2548,8 @@ class ManagerGUI(tk.Tk):
                         pass
                     proceed = progress.ask_yes_no(
                         "Review staged mods before deployment",
-                        f"The next batch of {len(pending)} mod(s) is staged and ready to deploy.\n\n"
+                        f"The next batch of {len(pending)} mod(s) is staged and ready to deploy:\n\n"
+                        + "".join(f"  • {label}\n" for _package, label in pending) + "\n"
                         f"Staging folder: {staging_root}\n\n"
                         "Review the opened staging folder. Choose Yes to deploy this batch and continue, or No "
                         "to stop here and leave this batch staged without deploying it.")
@@ -4046,12 +4047,13 @@ class ManagerGUI(tk.Tk):
             self.refresh()
             self.status.set(f"Deployed {len(result['ready'])} major master(s); linked {len(result['linked']):,} files.")
             self._setup_flow_active = False
-            detail = [f"Masters: {', '.join(result['ready'])}",
-                      f"Hardlinked files: {len(result['linked']):,}",
-                      f"Existing files preserved under Off: {len(result['backed_up']):,}",
-                      f"Identical files already present: {len(result['skipped_identical']):,}"]
+            proper = {name.casefold(): name for name in self.major_masters}
+            detail = (["Masters:"] + [f"  • {proper.get(n.casefold(), n)}" for n in result["ready"]]
+                      + ["", f"Hardlinked files: {len(result['linked']):,}",
+                         f"Existing files preserved under Off: {len(result['backed_up']):,}",
+                         f"Identical files already present: {len(result['skipped_identical']):,}"])
             if result["archives"]:
-                detail.append("Registered BSA archives: " + ", ".join(result["archives"]))
+                detail += ["", "Registered BSA archives:"] + [f"  • {name}" for name in result["archives"]]
             messagebox.showinfo("Major masters deployed", "\n".join(detail), parent=self)
             if result.get("conflicts"):
                 self._resolve_major_master_conflicts(result["conflicts"])
@@ -4173,7 +4175,7 @@ class ManagerGUI(tk.Tk):
                 "Major masters are expected to conflict with each other. The agreed community load order is the "
                 f"resolution order.\n\nThere are {len(conflicts):,} conflicts:\n{by_degree}\n\n"
                 "It is strongly recommended to let the load order resolve them. You may edit the resolution if you "
-                "choose.\n\nReview conflicts?", parent=self):
+                "choose.\n\nReview conflicts?", default="no", parent=self):
             return
 
         dialog = tk.Toplevel(self)
@@ -4295,6 +4297,7 @@ class ManagerGUI(tk.Tk):
         ttk.Button(footer, text="Use load order; close", command=dialog.destroy).pack(side="right")
         ttk.Button(footer, text="Save batch / next", command=save_batch).pack(side="right", padx=(0, 8))
         render()
+        dialog.wait_window()        # the caller's next prompt (run --full) waits until the review is closed
 
     def _run_progress_job(self, title, initial_text, worker, on_complete):
         """Run slow archive work away from Tk and keep the user informed while it runs."""

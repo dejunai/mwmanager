@@ -216,15 +216,15 @@ class SafetyTests(unittest.TestCase):
             process.wait.return_value = 0
             return process
 
-        move = DurableTransaction.move
+        move_many = DurableTransaction.move_many
 
-        def fail_texture(tx, source, target):
-            if Path(source) == texture:
+        def fail_texture(tx, moves, **kwargs):
+            if any(Path(item[0]) == texture for item in moves):
                 raise OSError("publication interrupted")
-            return move(tx, source, target)
+            return move_many(tx, moves, **kwargs)
 
         with mock.patch.object(deploy.subprocess, "Popen", side_effect=pack), \
-                mock.patch.object(DurableTransaction, "move", fail_texture):
+                mock.patch.object(DurableTransaction, "move_many", fail_texture):
             with self.assertRaisesRegex(OSError, "interrupted"):
                 deploy._pack_assets(package, "A.esm", Path("bsapack"))
         self.assertEqual(texture.read_bytes(), b"texture")

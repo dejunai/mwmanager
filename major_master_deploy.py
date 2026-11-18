@@ -247,9 +247,15 @@ def _pack_assets_locked(package, plugin_name, tool, progress):
                 destination = package / source.name
                 tx.move(source, destination)
                 published.append(destination)
-            for source, _relative in files:
+            # each loose file is hashed for recovery; one durable record per batch, not per file
+            for start in range(0, len(files), 500):
                 checkpoint(progress)
-                tx.move(source, off / source.relative_to(package))
+                if progress:
+                    progress(f"MWMANAGER-STAGE: Moving packed loose files into Off for {plugin_name}: "
+                             f"{start:,} of {len(files):,} (each is fingerprinted for recovery)")
+                tx.move_many([(source, off / source.relative_to(package)) for source, _r in files[start:start + 500]])
+            if progress:
+                progress(f"MWMANAGER-STAGE: Fingerprinting {len(published)} new archive(s) for {plugin_name}…")
             from workflow_safety import atomic_json
             atomic_json(record_path, {
                 "version": 1,
@@ -259,6 +265,8 @@ def _pack_assets_locked(package, plugin_name, tool, progress):
                           for op in tx.state["operations"] if Path(op["source"]).is_relative_to(package)
                           and Path(op["target"]).is_relative_to(off)]})
             tx.commit()
+            if progress:
+                progress(f"MWMANAGER-STAGE: Cleaning up the packing work folder for {plugin_name}…")
             return published
         except BaseException:
             tx.rollback()
@@ -299,9 +307,8 @@ def restore_packed_assets(package):
         try:
             for index, (archive, _hash) in enumerate(archives):
                 tx.move(archive, root / f"archive-{index}")
-            for source, backup, _hash in files:
-                if not source.exists():
-                    tx.move(backup, source)
+            # already verified above: reuse those hashes, one durable record for all the moves
+            tx.move_many([(backup, source, expected) for source, backup, expected in files if not source.exists()])
             tx.move(record_path, root / "old-state.json")
             tx.commit()
             return True
