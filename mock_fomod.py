@@ -842,13 +842,11 @@ def _needed_mod(description: str) -> str | None:
 
 
 def _mod_is_staged(needed: str, mod_dir: Path) -> bool:
-    """A package of that name is staged next to this one (its folder name starts with the mod's name)."""
-    def norm(text):
-        return " ".join(re.sub(r"[^a-z0-9]+", " ", text.casefold()).split())
-    want = norm(needed.removesuffix(" (mod)"))
+    """A package for that mod is staged next to this one (needed_mods.names_mod: words or Nexus id)."""
+    from needed_mods import names_mod
     roots = {mod_dir.parent, mod_dir.parent.parent}
     try:
-        return any(norm(p.name).startswith(want) for root in roots if root.is_dir() for p in root.iterdir()
+        return any(names_mod(needed, p.name) for root in roots if root.is_dir() for p in root.iterdir()
                    if p.is_dir() and p != mod_dir)
     except OSError:
         return False

@@ -44,6 +44,58 @@ class NeededModsTests(unittest.TestCase):
             self.assertEqual(json.loads(index.read_text())["version"], needed_mods.INDEX_VERSION)
 
 
+class ModNameMatchTests(unittest.TestCase):
+    """OAAB_Data's asset-only options name mods; the real archives (these are real names) rarely match exactly."""
+
+    def test_option_names_find_misleadingly_named_archives(self):
+        cases = {
+            "glass glowset (mod)": "Definative Glass Glowset-42762-2-0-1758844090",
+            "sm bitter coast tree replacer (mod)": "SM_Bitter Coast Tree-49883-1-0-1622322145",
+            "improved kwama eggs and egg sacs (mod)": "Kwama Egg sacs and Eggs Replacer-43555-1-1",
+            "better telvanni crystals (mod)": "Better Telvanni Crystal V2 4k-59196-1-0-1780326665",
+            "glow in the dahrk (mod)": "Glow in the Dahrk-45886-3-3-0-1765851739",
+        }
+        with mock.patch.object(needed_mods, "vortex_mod_titles", return_value={}):
+            for need, name in cases.items():
+                self.assertTrue(needed_mods.names_mod(need, name), need)
+
+    def test_vortex_titles_name_what_the_archive_name_hides(self):
+        titles = {"all-in-one-46180-16-03-26-1773677704": "Epic Plants"}      # as Vortex records it
+        with mock.patch.object(needed_mods, "vortex_mod_titles", return_value=titles):
+            self.assertTrue(needed_mods.names_mod("epic plants (mod)", "All-in-one-46180-16-03-26-1773677704"))
+        with mock.patch.object(needed_mods, "vortex_mod_titles", return_value={}):          # no Vortex
+            self.assertFalse(needed_mods.names_mod("epic plants (mod)", "All-in-one-46180-16-03-26-1773677704"))
+
+    def test_titles_are_read_from_the_vortex_hourly_backup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            backup = Path(tmp) / "Vortex" / "temp" / "state_backups_full" / "hourly.json"
+            backup.parent.mkdir(parents=True)
+            backup.write_text(json.dumps({"persistent": {"mods": {"morrowind": {
+                "All-in-one-46180-1": {"attributes": {"modName": "Epic Plants", "fileName": "All-in-one-46180-1.rar"}},
+                "No title": {"attributes": {}}}}}}), encoding="utf-8")
+            needed_mods._VORTEX_TITLES.clear()
+            with mock.patch.dict(os.environ, {"APPDATA": tmp}):
+                titles = needed_mods.vortex_mod_titles()
+            needed_mods._VORTEX_TITLES.clear()
+        self.assertEqual(titles, {"all-in-one-46180-1": "Epic Plants"})
+
+    def test_patches_and_other_mods_do_not_stand_in(self):
+        with mock.patch.object(needed_mods, "vortex_mod_titles", return_value={}):
+            self.assertFalse(needed_mods.names_mod("glass glowset (mod)", "Glass Glowset - Weapon Sheathing Patch-48602"))
+            self.assertFalse(needed_mods.names_mod("rr - better crystals (mod)", "Better Telvanni Crystal V2 4k-59196"))
+            self.assertFalse(needed_mods.names_mod("sm bitter coast tree replacer (mod)", "Glowing Bitter Coast-47946"))
+
+    def test_the_closest_archive_is_chosen_for_a_mod_need(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dl = Path(tmp) / "downloads"
+            dl.mkdir()
+            for name in ("MET Glass Glowset Textures-50170-1-0.7z", "Definative Glass Glowset-42762-2-0.rar"):
+                (dl / name).write_bytes(b"x")
+            with mock.patch.object(needed_mods, "archive_index", return_value={}):
+                found = needed_mods.find_needed(["glass glowset (mod)"], dl, Path(tmp) / "i.json", Path(tmp))
+        self.assertEqual(found["glass glowset (mod)"].name, "Definative Glass Glowset-42762-2-0.rar")
+
+
 class NexusFallbackTests(unittest.TestCase):
     def test_a_missing_mod_opens_a_nexus_search_that_downloads_to_the_archive_folder(self):
         self.assertEqual(needed_mods.nexus_search_url("Knife_Ears for Bretons.esp"),
