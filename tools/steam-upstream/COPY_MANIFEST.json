@@ -393,10 +393,10 @@
     },
     {
       "RelativePath": "mwdialog_assets.py",
-      "Bytes": 107231,
-      "SHA256": "0a087c6927484c746ced238aaf088df51717bfd8aa35356dc72b45b907917164",
+      "Bytes": 107267,
+      "SHA256": "7e70d37f19c16682e04f1a0742930d9d93188c1baf6823666f60d64e7fa5c95c",
       "Source": "<Steam Morrowind>\\mwdialog_assets.py",
-      "SourceModified": "2026-11-15T06:55:58"
+      "SourceModified": "2026-11-18T11:03:05"
     },
     {
       "RelativePath": "mwdialog_backup.py",
