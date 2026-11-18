@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-17 (America/Los_Angeles); refreshed to 143ad96",
+  "SyncedAt": "2026-11-18 (America/Los_Angeles); refreshed to 804340f",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -449,8 +449,8 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 510902,
-      "SHA256": "f8b8f64c38a72d4d375af464aae8efd0722dbdad0cd7b3e72cd0a7e2110f179f",
+      "Bytes": 502588,
+      "SHA256": "feac0163aabb6928f7d64d9e33afaef52a2d5f0126ad90a9042882b6da436215",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
       "SourceModified": "2026-11-17T13:45:35-08:00"
     },
@@ -554,8 +554,8 @@
     },
     {
       "RelativePath": "mwdialog_mastercheck.py",
-      "Bytes": 42797,
-      "SHA256": "87b85ad5b0e9e63d13fe082242bf90679cc7f149d4e26ff906b5854eff2ff4f3",
+      "Bytes": 42881,
+      "SHA256": "eedfe7b85bed3e8484bc2a6237d93e9a42838ed74a77b5bcd9f67b7fe79f6339",
       "Source": "<Steam Morrowind>\\mwdialog_mastercheck.py",
       "SourceModified": "2026-11-14T10:39:48"
     },
@@ -1064,8 +1064,8 @@
     {
       "RelativePath": "tests\\test_door_ownership.py",
       "Source": "<Steam Morrowind>\\tests\\test_door_ownership.py",
-      "Bytes": 6887,
-      "SHA256": "6d18289c2bff71ca8a1e238da6bea9a191f794ddd17e19fce06235196d2b0716"
+      "Bytes": 8605,
+      "SHA256": "df43fa90e63c338a7e6f0f72e57b69464439e75ade0dbd6c4f010770c4aa04c4"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwexitguard\\main.lua",
@@ -1090,6 +1090,12 @@
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwquicktoggle\\main.lua",
       "Bytes": 4013,
       "SHA256": "06a5a1f0233acc8a4c4c70eac38b7e572d03de336f7202149692093ef1f81196"
+    },
+    {
+      "RelativePath": "tests\test_conflict_confirm.py",
+      "Source": "<Steam Morrowind>\tests\test_conflict_confirm.py",
+      "Bytes": 1128,
+      "SHA256": "673c1840adc4a0a3c89f927c845b8928fa44b79171b5576a99c26b0637514389"
     }
   ]
 }

@@ -290,3 +290,13 @@ Behaviour changes:
 - New suite mod `mwquicktoggle` (a quick key unequips its item when already equipped; vanilla keys and QuickKeys
   Hotbar Extended) in the snapshot; luafix lists it as one of ours. Not yet in the shipped suite
   (`reference\mwse-lua-guards\`): like mwexitguard, it first needs adding to mwguard's exempt list and the menu.
+
+## Steam sync to morrowind-conflict-tools 804340f — 2026-11-18 (Pacific)
+
+- Refreshed `mwdialog_check.py` and `mwdialog_mastercheck.py` (root and `tools\steam-upstream\`), their tests,
+  `UPSTREAM.json` and `COPY_MANIFEST.json`.
+- `--cell-conflicts`: an .esm vs an .esp pair now offers `[1] keep <winner> winning` (remembered; nothing changes).
+- Ownership: owners `--fix` changes stay WARN; the ones it leaves alone are INFO (still listed in
+  `outputs\mwmanager_door_owners.txt`).
+- A patch made for a different master version still has its edits to references the master no longer has dropped,
+  so `--full` no longer stops on them; remapping, moving, size sync and cell renames stay blocked for it.
