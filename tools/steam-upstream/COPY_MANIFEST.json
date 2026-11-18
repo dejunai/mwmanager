@@ -123,8 +123,8 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwcustomclasspersistence\\main.lua",
-      "Bytes": 11720,
-      "SHA256": "6b8ee66847e05f5b5181a2763f20ff5b5ef6f6e39a43e71d534e31dd82f2809f",
+      "Bytes": 12684,
+      "SHA256": "e351ec5675f927b9e04f0ab01679cde52ac078a3b48e59bf814ca60a8a4cb8ac",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcustomclasspersistence\\main.lua"
     },
     {
@@ -171,8 +171,8 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwguard\\main.lua",
-      "Bytes": 15181,
-      "SHA256": "a8087f066c7a972a635779e167230ca64ed6c59432bffa4332ae6f197169f358",
+      "Bytes": 15245,
+      "SHA256": "b39c8fe08e8d63c736da9773dc672c1c03d291ef0162c90ffc0f5a0572e1f6e3",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwguard\\main.lua",
       "SourceModified": "2026-11-14T10:56:52"
     },
@@ -223,12 +223,6 @@
       "Bytes": 3495,
       "SHA256": "7bee8ec316b0996c0eca615bffec3c216494d62215ea3347db5de0edde7f9158",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwplainpaperfix\\main.lua"
-    },
-    {
-      "RelativePath": "Data Files\\MWSE\\mods\\mwplainpaperfix\\mcm.lua",
-      "Bytes": 5465,
-      "SHA256": "6756f4481e3dea419a377eacf55a20068a1ec898d0d1328c42316e540239cfa5",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwplainpaperfix\\mcm.lua"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\config.lua",
@@ -1094,8 +1088,8 @@
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwquicktoggle\\main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwquicktoggle\\main.lua",
-      "Bytes": 3236,
-      "SHA256": "7c7d570f531c661d58d866d5176637c19d0375ab4b9b42bae3d18adb981712e4"
+      "Bytes": 4013,
+      "SHA256": "06a5a1f0233acc8a4c4c70eac38b7e572d03de336f7202149692093ef1f81196"
     }
   ]
 }

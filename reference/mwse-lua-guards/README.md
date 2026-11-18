@@ -8,7 +8,7 @@ Steam install, then copy them again and refresh the manifest.
 - `mods/<name>/` - one folder per suite mod, installed by `--init` to `Data Files\MWSE\mods\<name>\`:
   mwguard, mwhangwatch, mwfloatfix, mwstranded, mwcollide, mwperformers, mwinfoloop, mwsoundguard,
   mwsaveguard, mwwarnsuppression, mwcompanionsneak, mwpluginpatches, mweffectinspector, mwmouseguard,
-  mwteleportguard (15 mods). `dejespreplacements` (formerly mwespreplacements) is the user's own replacement for plugins in one load order;
+  mwteleportguard, mwexitguard, mwquicktoggle, mwplainpaperfix, mwcustomclasspersistence (19 mods). `dejespreplacements` (formerly mwespreplacements) is the user's own replacement for plugins in one load order;
   it is not part of the suite and MWManager does not ship it.
 - `metadata/<name>-metadata.toml` - the MWSE metadata files that go beside them in `Data Files\` (load priority).
 

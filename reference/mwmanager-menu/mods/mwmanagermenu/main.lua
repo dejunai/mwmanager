@@ -2,7 +2,7 @@
     mwmanagermenu - one Mod Config Menu entry for the mw* suite.
 
     Each suite mod registers its own settings page, exactly as it does on its own. This mod loads before them
-    and catches those registrations: instead of fifteen entries in the Mod Config Menu's list there is one,
+    and catches those registrations: instead of an entry per suite mod in the Mod Config Menu's list there is one,
     "MWManager", with a tab for each suite mod. A tab shows that mod's own page, built by that mod's own code,
     and its settings are saved by that mod's own save, so nothing about the suite mods is changed or copied.
 
@@ -17,6 +17,7 @@ local SUITE = {
     "mwsaveguard", "mwteleportguard", "mwmouseguard", "mwwarnsuppression", "mwcompanionsneak",
     "mweffectinspector", "mwpluginpatches", "mwfloatfix", "mwcollide", "mwstranded",
     "mwperformers", "mwinfoloop", "mwsoundguard", "mwhangwatch", "mwguard",
+    "mwexitguard", "mwquicktoggle", "mwplainpaperfix", "mwcustomclasspersistence",
 }
 local isSuite = {}
 for _, mod in ipairs(SUITE) do isSuite[mod] = true end
