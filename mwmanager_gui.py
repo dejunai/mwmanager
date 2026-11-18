@@ -5114,6 +5114,9 @@ class ManagerGUI(tk.Tk):
                 names = self._staged_major_master_names()
                 if option_masters:
                     names &= {name.casefold() for name in option_masters}
+                if not names:
+                    raise RuntimeError("None of the selected masters is staged yet, so there are no options to "
+                                       "reopen. Select them and use Find / stage downloads instead.")
                 self._set_master_stage_ready(names, False)
                 from major_master_deploy import _package_roots, assert_package_disposable, restore_packed_assets
                 for package, masters in _package_roots(staging, list(names)):
