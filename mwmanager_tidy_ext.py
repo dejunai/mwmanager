@@ -21,6 +21,7 @@ import struct
 import traceback
 import threading
 import xml.etree.ElementTree as ET
+from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -1436,6 +1437,13 @@ def assets_apply(args, ares, moved_mods=()):
     try:
         result = _upstream_assets_apply(args, ares, moved_mods)
         _write_package_asset_bug_reports(ares)
+        try:
+            ops = resolve_missing_assets(args.staging, sorted(ares["mods"]), ares["data_dir"],
+                                         ah.shared_cache(game_dir))
+            for plugin, operations in ops.items():
+                by_plugin.setdefault(plugin, []).extend(operations)
+        except Exception as e:                       # never stops Tidy: --full resolves whatever is left
+            print(f"Missing-asset check not finished ({type(e).__name__}: {e}); --full will resolve the rest.")
         return result
     finally:
         ah.apply_folder, lpm.apply_mod = original_folder, original_longpaths
@@ -1448,6 +1456,198 @@ def assets_apply(args, ares, moved_mods=()):
                 for operation in operations:
                     operation["plugin"] = plugin
                     journal.write(json.dumps(operation) + "\n")
+
+
+GENERATED_KEY = "generated:"     # asset-cache flag: a stand-in Tidy built in a package, not real content
+MISSING_ASSETS_REPORT = "mwmanager_missing_assets.txt"
+_REF_TOP = {"mesh": "meshes", "icon": "icons", "texture": "textures", "sound": "sound"}
+_IMAGE_EXTS, _SOUND_EXTS = (".dds", ".tga", ".bmp"), (".wav", ".mp3")
+
+
+def _asset_key(rel):
+    """A Data Files path as the game finds it: images match without their extension (it loads the .dds), sounds
+    as .wav or .mp3."""
+    rel = rel.replace("/", "\\").strip().lower().lstrip("\\")
+    stem, ext = os.path.splitext(rel)
+    top = rel.split("\\", 1)[0]
+    if (ext in _IMAGE_EXTS and top in ("icons", "textures", "bookart")) or (ext in _SOUND_EXTS and top == "sound"):
+        return stem
+    return rel
+
+
+def _asset_candidates(rel):
+    """The files that satisfy a reference, the one a stand-in is built as first."""
+    stem, ext = os.path.splitext(rel)
+    if _asset_key(rel) != rel.lower():
+        exts = _IMAGE_EXTS if ext.lower() in _IMAGE_EXTS else _SOUND_EXTS
+        return [stem + e for e in dict.fromkeys(exts if ext.lower() in _IMAGE_EXTS else (ext.lower(),) + exts)]
+    return [rel]
+
+
+def _bsa_keys(path, m):
+    try:
+        return {_asset_key(p) for p in m.bsa_file_names(path)}
+    except (OSError, ValueError, struct.error, getattr(m, "FormatError", ValueError)):
+        return set()
+
+
+def _package_assets(root, m):
+    """(asset keys a staged package deploys, its plugin files). Off, Docs, Extras and bug reports never deploy."""
+    keys, plugins = set(), []
+    for base, dirs, files in os.walk(root):
+        if base == root:
+            dirs[:] = [d for d in dirs if d.lower() not in OUR_DIRS]
+        for name in files:
+            full = os.path.join(base, name)
+            keys.add(_asset_key(os.path.relpath(full, root)))
+            low = name.lower()
+            if low.endswith((".esp", ".esm")):
+                plugins.append(full)
+            elif low.endswith(".bsa"):
+                keys |= _bsa_keys(full, m)
+    return keys, plugins
+
+
+def _plugin_asset_refs(path, m):
+    """{Data Files path: what names it} for the meshes, icons, textures and sounds a plugin's records name."""
+    refs = {}
+    data = m.read_plugin_bytes(path)
+    for off, tag, _flags, body in m.iter_records(data):
+        wanted = dict(m.ASSET_SUBS.get(tag, ()))
+        if not wanted:
+            continue
+        for name, d in m.iter_subs(body, off):
+            kind = wanted.get(name)
+            if kind is None:
+                continue
+            v = m.cstr(d).replace("/", "\\").strip().lstrip("\\")
+            if not os.path.splitext(v)[1]:            # empty, or the editor's "Add Art File" placeholder
+                continue
+            top = _REF_TOP[kind]
+            if v.lower().startswith("data files\\"):
+                v = v[11:]
+            if v.lower().startswith(top + "\\"):
+                v = v[len(top) + 1:]
+            rid = m.record_id(tag, body)
+            refs.setdefault(os.path.join(top.capitalize(), v),
+                            f"{tag} '{rid[1] if rid else '?'}' in {os.path.basename(path)}")
+    return refs
+
+
+def resolve_missing_assets(staging, mods, data_dir, cache):
+    """Assets the staged packages' plugins name but the package doesn't ship, resolved now rather than at --full:
+    1. already in Data Files (loose or in a BSA): nothing to do;
+    2. another package of this install batch ships it (MWMANAGER_INSTALL_BATCH; for major masters, every staged
+       major master);
+    3. kept in Data Files\\Off: put back through write_generated, journaled for rollback;
+    4. else a stand-in in the package, flagged in the asset cache (GENERATED_KEY) so a real file replaces it.
+    A package that ships a file another package got a stand-in for removes that stand-in.
+    Prints one line per resolution; returns {package: [Tidy journal operations]}."""
+    m = _scanner
+    batch = set(mods) | {n for n in os.environ.get("MWMANAGER_INSTALL_BATCH", "").split(os.pathsep) if n}
+    if os.path.basename(os.path.normpath(staging)).lower() == "major_masters":
+        batch |= {d for d in os.listdir(staging) if os.path.isdir(os.path.join(staging, d))}
+    shipped = {}
+    for name in batch:
+        root = os.path.join(staging, name)
+        if os.path.isdir(root):
+            shipped[name] = _package_assets(root, m)
+    counts = Counter()
+    ops, details = {}, []
+
+    # a real file in this package replaces another package's stand-in for it
+    for key in [k for k in cache.d if k.startswith(GENERATED_KEY)]:
+        info = cache.d[key]
+        flag = json.loads(info[1])
+        if flag.get("package") in mods:
+            continue
+        owner = next((n for n in mods if _asset_key(flag["rel"]) in shipped.get(n, (set(), []))[0]), None)
+        if owner is None:
+            continue
+        path = key[len(GENERATED_KEY):]
+        if os.path.isfile(path) and hashlib.sha256(Path(path).read_bytes()).hexdigest() == info[0]:
+            os.remove(path)
+            counts["replaced"] += 1
+            details.append(f"replaced  {flag['rel']}: stand-in in {flag['package']} removed, {owner} ships it")
+        cache.delete(key)
+
+    data_bsas = None
+    off_root = os.path.normcase(os.path.join(os.path.abspath(data_dir), "Off")) + os.sep
+    find = m._kept_asset_finder(data_dir)
+    to_restore, to_build = [], []
+    for name in mods:
+        own, plugins = shipped.get(name, (set(), []))
+        refs = {}
+        for plugin in plugins:
+            try:
+                refs.update({r: w for r, w in _plugin_asset_refs(plugin, m).items() if r not in refs})
+            except (OSError, ValueError, struct.error, getattr(m, "FormatError", ValueError)) as e:
+                details.append(f"skipped   {os.path.basename(plugin)}: not read ({e})")
+        for rel, why in sorted(refs.items()):
+            key = _asset_key(rel)
+            if key in own:
+                continue
+            cands = _asset_candidates(rel)
+            if any(os.path.isfile(os.path.join(data_dir, c)) for c in cands):
+                counts["data"] += 1
+                continue
+            if data_bsas is None:
+                data_bsas = set().union(*[_bsa_keys(os.path.join(data_dir, f), m) for f in os.listdir(data_dir)
+                                          if f.lower().endswith(".bsa")]) if os.path.isdir(data_dir) else set()
+            if key in data_bsas:
+                counts["data"] += 1
+                continue
+            other = next((n for n in sorted(shipped, key=str.casefold) if n != name and key in shipped[n][0]), None)
+            if other:
+                counts["batch"] += 1
+                details.append(f"batch     {rel} ({why}): shipped by {other}")
+                continue
+            kept = next((c for c in cands if (h := find(c)) and os.path.normcase(h[1]).startswith(off_root)), None)
+            if kept:
+                to_restore.append((name, kept, why))
+                continue
+            to_build.append((name, cands[0], why))
+
+    if to_restore:
+        log = []
+        try:
+            m.write_generated(data_dir, os.path.dirname(os.path.abspath(data_dir)),
+                              [(rel, why, None, name) for name, rel, why in to_restore], log)
+        except RuntimeError as e:                     # no install baseline: rollback couldn't undo a copy
+            details.append(f"not restored from Off ({e})")
+        for name, rel, why in to_restore:
+            if os.path.isfile(os.path.join(data_dir, rel)):
+                counts["off"] += 1
+                details.append(f"restored  {rel} ({why}) from Data Files\\Off")
+            else:
+                to_build.append((name, rel, why))
+    for name, rel, why in to_build:
+        full = os.path.join(staging, name, rel)
+        if not os.path.exists(full):
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            data = m.stand_in_bytes(rel)
+            with open(full, "wb") as f:
+                f.write(data)
+            sha = hashlib.sha256(data).hexdigest()
+            ops.setdefault(name, []).append({"generated": full, "sha256": sha})
+            cache.put(GENERATED_KEY + full, sha, {"rel": rel, "package": name, "why": why})
+        counts["stand_in"] += 1
+        details.append(f"stand-in  {rel} ({why}): built in {name}")
+    cache.flush()
+
+    if details:
+        with open(os.path.join(OUTPUT_DIR, MISSING_ASSETS_REPORT), "a", encoding="utf-8") as f:
+            f.write(f"\n{time.strftime('%Y-%m-%d %H:%M')}  {', '.join(mods)}\n")
+            f.writelines(f"  {line}\n" for line in details)
+    lines = {"data": "already in Data Files",               # each line fits Tidy's 115-column wrap
+             "batch": "shipped by another package of this install",
+             "off": "restored from Data Files\\Off (install rollback undoes it)",
+             "stand_in": f"stand-in(s) built, flagged as generated ({MISSING_ASSETS_REPORT})",
+             "replaced": "earlier stand-in(s) removed: this package ships the real file"}
+    for kind, text in lines.items():
+        if counts[kind]:
+            print(f"Missing assets of staged plugins: {counts[kind]:,} {text}")
+    return ops
 
 
 def _prune_empty_directories(staging, journal):

@@ -2607,6 +2607,7 @@ class ManagerGUI(tk.Tk):
                 pending_items.clear()
                 return True
 
+            batch_names = []                 # packages Tidy staged so far in this install: they ship missing assets
             for index, item in enumerate(items, 1):
                 prepared = False
                 if accept_staged:
@@ -2668,6 +2669,8 @@ class ManagerGUI(tk.Tk):
                         log_install_phase(f"BEGIN package {archive.name}")
                         tidy_env = os.environ.copy()
                         tidy_env["MWMANAGER_SOURCE_ARCHIVE"] = str(archive.resolve())
+                        batch_names.append(package.name)
+                        tidy_env["MWMANAGER_INSTALL_BATCH"] = os.pathsep.join(batch_names)
                         tidy_mod_count = run_tidy_steps(py, staging_root, data_dir, progress,
                                                         f"Tidy and options for {archive.name}",
                                                         only=package.name, env=tidy_env, quiet=quiet,
