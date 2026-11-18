@@ -42,8 +42,23 @@ class PriorityList(unittest.TestCase):
         self.assertEqual(set(shipped), set(core_addons.BUILTIN_MASTERS) | {"cyr_main.esm", "sky_main.esm"})
         order = list(shipped)
         self.assertLess(order.index("tamriel_data.esm"), order.index("tr_mainland.esm"))
-        self.assertLess(order.index("tamriel_data.esm"), order.index("sound_data.esm"))
-        self.assertLess(order.index("oaab_data.esm"), order.index("sound_data.esm"))
+        self.assertNotIn("sound_data.esm", order)              # users add it themselves if they want it
+        self.assertLess(order.index("dr_data.esm"), order.index("wares-base.esm"))
+
+    def test_which_mods_are_major_or_common_masters(self):
+        tier = core_addons.master_tier
+        self.assertEqual(tier("Modders Resources and Tutorials", 548, True), "major")
+        self.assertEqual(tier("Overhauls", 17, True), "major")                        # Wares
+        self.assertEqual(tier("New Lands", 12, True), "common")
+        self.assertIsNone(tier("Patches", 10, True))                                  # 10 or fewer: neither
+        self.assertIsNone(tier("Dungeons and Locations", 99, True))                   # category disqualifies
+        self.assertIsNone(tier("Modders Resources and Tutorials", 99, False))         # no ESM: not a master
+
+    def test_tamriel_data_hd_and_sd_are_separate_nexus_mods(self):
+        self.assertEqual(core_addons.master_mod_id("Tamriel_Data.esm", "Tamriel Data (HD) 59927 26.08.7z"), 59927)
+        self.assertEqual(core_addons.master_mod_id("Tamriel_Data.esm", "Tamriel_Data 44537 26.08.7z"), 44537)
+        self.assertEqual(core_addons.master_mod_id("OAAB_Data.esm", "OAAB_Data (HD) 49042.7z"), 49042)
+        self.assertIn("/mods/59927?", core_addons.nexus_page("tamriel_data.esm", "Tamriel Data (HD).7z"))
         with tempfile.TemporaryDirectory() as tmp:            # no JSON yet: the built-in list
             self.assertEqual(core_addons.configured_master_names(tmp)[0], PFP.lower())
 

@@ -22,7 +22,7 @@ BUILTIN_MASTERS = {
     "oaab_data.esm": ("oaab_data", "oaab data"),
     "aatl_data.esm": ("aatl_data", "aatl data"),
     "dr_data.esm": ("dr_data", "dr data"),
-    "sound_data.esm": ("sound_data", "sound data"),
+    "wares-base.esm": ("wares ultimate", "wares-base", "wares base"),
     "tr_mainland.esm": ("tamriel rebuilt", "tamrielrebuild"),
     "cyr_main.esm": ("project cyrodiil", "cyr_main", "province cyrodiil"),
     "sky_main.esm": ("skyrim home of the nords", "sky_main", "shotn"),
@@ -33,11 +33,36 @@ NEXUS_MOD_IDS = {
     "oaab_data.esm": 49042,
     "aatl_data.esm": 50647,
     "dr_data.esm": 51776,
-    "sound_data.esm": 58854,
+    "wares-base.esm": 52013,
     "tr_mainland.esm": 42145,
     "cyr_main.esm": 44922,
     "sky_main.esm": 44921,
 }
+# Exclusive variants: the same ESM published as separate Nexus mods; exactly one is installed.
+MASTER_VARIANTS = {"tamriel_data.esm": {"HD": 59927, "SD": 44537}}
+
+# What makes a master major or common (decided 2026-11-18): it ships an ESM in its main file, its Nexus
+# category is one of these, and the "mods requiring this file" table on its Nexus page lists enough mods.
+# Dungeons, NPCs, Quests and Gameplay never qualify, however often they are required.
+MASTER_CATEGORIES = {"modders resources and tutorials", "new lands", "patches", "overhauls"}
+MAJOR_MASTER_REQUIRED_BY = 15        # more than this: a major master (staged and deployed on its own)
+COMMON_MASTER_REQUIRED_BY = 10       # more than this: a common master (installed early in the normal batches)
+
+
+def master_tier(category: str, required_by: int, has_esm: bool) -> str | None:
+    """'major', 'common' or None for a Nexus mod, by the rule above."""
+    if not has_esm or str(category).strip().casefold() not in MASTER_CATEGORIES:
+        return None
+    return ("major" if required_by > MAJOR_MASTER_REQUIRED_BY else
+            "common" if required_by > COMMON_MASTER_REQUIRED_BY else None)
+
+
+def master_mod_id(master: str, archive_name: str = "") -> int | None:
+    """The Nexus mod a master's archive came from; a variant master is told apart by 'HD' in the name."""
+    variants = MASTER_VARIANTS.get(master.casefold())
+    if variants:
+        return variants["HD" if re.search(r"(?<![a-z])hd(?![a-z])", archive_name.casefold()) else "SD"]
+    return NEXUS_MOD_IDS.get(master.casefold())
 NEXUS_GRAPHQL = "https://api.nexusmods.com/v2/graphql"
 ARCHIVE_EXTENSIONS = {".zip", ".7z", ".rar"}
 PLUGIN_EXTENSIONS = {".esm", ".esp"}
@@ -802,8 +827,8 @@ def _archive_rank(path: Path) -> tuple:
     return (version is not None, version_key, upload_key, mtime, path.name.casefold())
 
 
-def nexus_page(master: str) -> str | None:
-    mod_id = NEXUS_MOD_IDS.get(master.casefold())
+def nexus_page(master: str, archive_name: str = "") -> str | None:
+    mod_id = master_mod_id(master, archive_name)
     return f"https://www.nexusmods.com/morrowind/mods/{mod_id}?tab=files" if mod_id else None
 
 
@@ -833,12 +858,12 @@ def _files_page_version(text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _scrape_nexus_versions(found: set[str], progress_callback, timeout: float) -> dict[str, str]:
+def _scrape_nexus_versions(found: set[str], progress_callback, timeout: float, ids=None) -> dict[str, str]:
     """Best-effort Files-page versions; use the visible browser only when Nexus blocks ordinary requests."""
     from mwnexus_parse import html_to_text, is_challenge
     versions, blocked = {}, []
     for master in sorted(found):
-        mod_id = NEXUS_MOD_IDS[master]
+        mod_id = (ids or {}).get(master) or master_mod_id(master)
         url = f"https://www.nexusmods.com/morrowind/mods/{mod_id}?tab=files"
         try:
             request = urllib.request.Request(url, headers={"User-Agent": "MWManager/0.1", "Accept": "text/html"})
@@ -893,8 +918,10 @@ def _scrape_nexus_versions(found: set[str], progress_callback, timeout: float) -
 def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8) -> dict:
     """Annotate found major-master archives with latest Nexus primary-file status."""
     progress_callback = progress_callback or (lambda _message: None)
-    found = {master.casefold() for item in plan.get("archives", [])
-             for master in item.get("core_masters", []) if master.casefold() in NEXUS_MOD_IDS}
+    ids = {master.casefold(): master_mod_id(master, Path(item["archive"]).name)
+           for item in plan.get("archives", []) for master in item.get("core_masters", [])}
+    ids = {master: mod_id for master, mod_id in ids.items() if mod_id}     # each master's own Nexus mod (HD or SD)
+    found = set(ids)
     if not found:
         return plan
     page_versions = {}
@@ -905,8 +932,8 @@ def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8
         game = _nexus_query('query { game(domainName: "morrowind") { id } }', {}, timeout)
         game_id = str(game["game"]["id"])
         aliases = " ".join(
-            f'v{i}: mod(modId: "{NEXUS_MOD_IDS[name]}", gameId: $gameId) {{ version }} '
-            f'm{i}: modFiles(modId: "{NEXUS_MOD_IDS[name]}", gameId: $gameId) '
+            f'v{i}: mod(modId: "{ids[name]}", gameId: $gameId) {{ version }} '
+            f'm{i}: modFiles(modId: "{ids[name]}", gameId: $gameId) '
             '{ name version date primary category }'
             for i, name in enumerate(sorted(found)))
         data = _nexus_query(f"query($gameId: ID!) {{ {aliases} }}", {"gameId": game_id}, timeout)
@@ -928,7 +955,7 @@ def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8
     missing = {master for master in found if master not in latest_by_master}
     if missing:
         progress_callback(f"Nexus API did not return {len(missing)} version(s); checking Files-page HTML…")
-        page_versions = _scrape_nexus_versions(missing, progress_callback, timeout)
+        page_versions = _scrape_nexus_versions(missing, progress_callback, timeout, ids)
 
     for item in plan.get("archives", []):
         archive = Path(item["archive"])
@@ -941,7 +968,7 @@ def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8
             if not latest and not page_version:
                 statuses[master.casefold()] = {"status": "unknown", "detail": query_error or
                                                 "Nexus Files page did not expose a version",
-                                                "page": nexus_page(master)}
+                                                "page": nexus_page(master, archive.name)}
                 continue
             latest_text = page_version or str(latest.get("version") or latest.get("name") or "unknown")
             latest_version = tuple(int(value) for value in re.findall(r"\d+", latest_text))
@@ -958,7 +985,7 @@ def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8
                       + (f"; archive version: {'.'.join(map(str, local_version))}" if local_version
                          else "; archive filename has no comparable version"))
             statuses[master.casefold()] = {"status": status, "latest": latest_text,
-                                           "detail": detail, "page": nexus_page(master),
+                                           "detail": detail, "page": nexus_page(master, archive.name),
                                            "verified_at": verified_at}
         item["nexus"] = statuses
     return plan
