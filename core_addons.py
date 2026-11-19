@@ -58,13 +58,16 @@ def master_tier(category: str, required_by: int, has_esm: bool) -> str | None:
             "common" if required_by > COMMON_MASTER_REQUIRED_BY else None)
 
 
-def master_mod_id(master: str, archive_name: str = "") -> int | None:
+def master_mod_id(master: str, archive_name: str = "", vortex: dict | None = None) -> int | None:
     """The Nexus mod a master's archive came from; a variant master is told apart by 'HD' in the name."""
     variants = MASTER_VARIANTS.get(master.casefold())
     if variants:
         return variants["HD" if re.search(r"(?<![a-z])hd(?![a-z])", archive_name.casefold()) else "SD"]
-    # a master the user added has no built-in ID: its archive's own ("Mod-46810-2-3-0-….7z")
-    return NEXUS_MOD_IDS.get(master.casefold()) or (_archive_mod_id(Path(archive_name)) if archive_name else None)
+    # a master with no built-in ID: its archive's own ("Mod-46810-2-3-0-….7z"), else what Vortex recorded for it
+    if master.casefold() in NEXUS_MOD_IDS or not archive_name:
+        return NEXUS_MOD_IDS.get(master.casefold())
+    vortex = vortex_downloads() if vortex is None else vortex
+    return _archive_mod_id(Path(archive_name)) or (vortex.get(Path(archive_name).name.casefold()) or {}).get("mod_id")
 
 
 _FILE_CATEGORIES = {"main", "optional", "update", "miscellaneous", "old_version", "archived", "deleted"}
