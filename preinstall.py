@@ -806,11 +806,14 @@ def run_preinstall(game_dir: Path, manager_dir: Path, progress, *,
         journal = mwmanager_journal.Journal(manager_dir / "journal")
         valid_baseline = journal.has_baseline() and journal.baseline_matches_install(game_dir)[0]
         if not valid_baseline and any(item.get("present") for item in report["prerequisites"].values()):
+            store = install_store(game_dir)
+            found = [key for key, item in report["prerequisites"].items() if item.get("present")]
             progress.ask_yes_no(
-                "A clean store baseline is required",
-                "Prerequisite files already exist, but MWManager has not recorded the clean GOG installation. "
-                "Use GOG Verify/Repair (or reinstall), then run MWManager before installing MWSE, MCP or MGE XE. "
-                "This prevents prerequisite files from entering baseline.json.")
+                "Setup needs an unmodded game",
+                f"MWManager first records the game exactly as {store} installed it, before any mods. This game "
+                f"already has: {', '.join(found)}.\n\nA store verify/repair does not remove these. Remove them "
+                f"(or reinstall the game into an empty folder), then start MWManager again. "
+                f"MWManager will install them for you afterwards.")
             return False
         if report["hash_mismatches"]:
             details = "\n".join(f"- {name}: expected {expected[:16]}…, found {actual[:16]}…"

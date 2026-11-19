@@ -1727,9 +1727,6 @@ class ManagerGUI(tk.Tk):
             return
         self._offer_major_master_processing()
 
-    def _open_first_run_options(self):
-        self.open_options(first_run=True)
-
     def _open_detected_paths(self, *, first_run=True):
         """Pre-preflight: show the installs and Archive Downloads folder found in the registry for approval.
 
@@ -1834,6 +1831,13 @@ class ManagerGUI(tk.Tk):
             if game is None:
                 messagebox.showerror("Not a Morrowind folder",
                                      "The selected folder must contain Morrowind.exe and a Data Files folder.",
+                                     parent=dialog)
+                return
+            drive = lambda p: os.path.splitdrive(str(Path(p).resolve()))[0].casefold()
+            if drive(APP_DIR) != drive(game):             # staging hardlinks into Data Files need one drive
+                messagebox.showerror("MWManager is on another drive",
+                                     f"MWManager must be on the same drive as Morrowind ({drive(game).upper()}). "
+                                     f"Move the MWManager folder to {drive(game).upper()}\\ and start it again.",
                                      parent=dialog)
                 return
             if first_run:
@@ -2552,8 +2556,12 @@ class ManagerGUI(tk.Tk):
                 progress(f"Reviewing {len(unresolved):,} unresolved cell conflict pair(s)…")
                 command = [str(py), "-u", str(manager_script), str(data_dir),
                            "--cell-conflicts", "--only-new", "--defer-follow-up"]
-                conflict = _popen(command, cwd=str(APP_DIR), creationflags=
-                                            getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+                conflict = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                  stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                                  env=dict(os.environ, MWMANAGER_CONFLICT_GUI="1"),
+                                  creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                for line in conflict.stdout:
+                    progress(_display_line(line))
                 if conflict.wait():
                     raise RuntimeError("The interactive cell-conflict review did not complete.")
                 run_logged([str(py), "-u", str(manager_script), str(data_dir), "--sort", "--all", "--yes"],
@@ -4020,7 +4028,7 @@ class ManagerGUI(tk.Tk):
                  if name.casefold() in available and not (data_dir / name).is_file()
                  and name.casefold() in self.selected_major_masters]
         if not ready:
-            messagebox.showinfo("No masters selected", "Select at least one processed, staged master in the On column.", parent=self)
+            messagebox.showinfo("No masters selected", "Select at least one processed, staged master in the Enable column.", parent=self)
             return
         unfinished = self._unfinished_master_stages(ready)
         if unfinished:
