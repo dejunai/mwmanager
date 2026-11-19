@@ -543,6 +543,31 @@ class PreflightTests(Base):
         self.assertTrue((root / "Data Files/A Mod.esp").is_file())
         self.assertIn("Data Files/A Mod.esp", json.loads((root / "manifest.json").read_text())["files"])
 
+    def test_first_run_quarantines_preinstalled_prerequisites_and_restores_unpatched_exe(self):
+        import mwmanager_journal as journal
+        game = make_game(self.tmp / "g")
+        write(game / "Morrowind.Original.exe", b"MZ store")
+        store = {"Morrowind.exe", "Morrowind.ini", *(f"Data Files/{name}" for name in CORE)}
+        original = {journal.key(rel): (rel, "") for rel in store}
+        stopped = mock.patch.object(preinstall, "_prepare_first_run", return_value=False)
+        with mock.patch.object(journal, "find_hashdb", return_value=game / "goggame-1.hashdb"), \
+                mock.patch.object(journal, "read_hashdb", return_value=original), stopped as prepare:
+            self.assertFalse(preinstall.run_preinstall(game, self.manager, Progress(), first_run=True,
+                                                       check_latest=lambda: (LATEST, None)))
+            prepare.assert_not_called()                           # no choice given: Stop
+            self.assertTrue((game / "MGEXEgui.exe").exists())
+            progress = Progress(choices=["quarantine"])
+            preinstall.run_preinstall(game, self.manager, progress, first_run=True,
+                                      check_latest=lambda: (LATEST, None))
+        title, choices = progress.asked[0][1], progress.asked[0][3]
+        self.assertEqual((title, choices[0][1]), ("Setup needs an unmodded game", "quarantine"))
+        prepare.assert_called_once()
+        self.assertFalse((game / "MGEXEgui.exe").exists())
+        self.assertFalse((game / "Morrowind.Original.exe").exists())
+        self.assertEqual((game / "Morrowind.exe").read_bytes(), b"MZ store")
+        root = next((self.manager / "quarantine").iterdir())
+        self.assertEqual((root / "Morrowind.exe").read_bytes(), b"MZ any store")
+
     def test_gog_generated_runtime_files_are_not_reported_as_mods(self):
         import mwmanager_journal as journal
         game = make_game(self.tmp / "g")

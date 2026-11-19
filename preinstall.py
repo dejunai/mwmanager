@@ -196,8 +196,11 @@ def move_official_addon_docs(game_dir: Path, manager_dir: Path) -> list[str]:
     return moved
 
 
-def detected_mod_files(game_dir: Path, manager_dir: Path | None = None) -> tuple[list[Path], bool]:
+def detected_mod_files(game_dir: Path, manager_dir: Path | None = None,
+                       include_prereqs: bool = False) -> tuple[list[Path], bool]:
     """Return safely identifiable mod files and whether a GOG store manifest made the scan complete."""
+    skipped = {"user-data", "store-meta", "game-exe"} | (set() if include_prereqs else
+                                                         {"prereq:mcp", "prereq:mge_xe", "prereq:mwse"})
     game_dir = Path(game_dir).resolve()
     import mwmanager_journal
     managed = {}
@@ -229,8 +232,7 @@ def detected_mod_files(game_dir: Path, manager_dir: Path | None = None) -> tuple
                     continue
                 if mwmanager_journal.key(rel) in original:
                     continue
-                if mwmanager_journal.classify(rel) in {"prereq:mcp", "prereq:mge_xe", "prereq:mwse",
-                                                       "user-data", "store-meta", "game-exe"}:
+                if mwmanager_journal.classify(rel) in skipped:
                     continue
                 extras.append(path)
             return extras, True
@@ -808,13 +810,33 @@ def run_preinstall(game_dir: Path, manager_dir: Path, progress, *,
         if not valid_baseline and any(item.get("present") for item in report["prerequisites"].values()):
             store = install_store(game_dir)
             found = [key for key, item in report["prerequisites"].items() if item.get("present")]
-            progress.ask_yes_no(
-                "Setup needs an unmodded game",
-                f"MWManager first records the game exactly as {store} installed it, before any mods. This game "
-                f"already has: {', '.join(found)}.\n\nA store verify/repair does not remove these. Remove them "
-                f"(or reinstall the game into an empty folder), then start MWManager again. "
-                f"MWManager will install them for you afterwards.")
-            return False
+            files, complete = detected_mod_files(game_dir, manager_dir, include_prereqs=True)
+            intro = (f"MWManager first records the game exactly as {store} installed it, before any mods. This "
+                     f"game already has: {', '.join(found)}.\n\n")
+            if complete and files:
+                names = "\n".join(f"- {path.relative_to(game_dir)}" for path in files[:20])
+                if len(files) > 20:
+                    names += f"\n- …and {len(files) - 20} more"
+                text = (intro + "The GOG file manifest identified every non-store file below. MWManager can move "
+                        "them to a recoverable quarantine outside the game folder and continue; it installs the "
+                        f"prerequisites again afterwards.\n\n{names}")
+                choices = [("Move them to quarantine and continue", "quarantine"), ("Stop", "stop")]
+            else:
+                text = (intro + "A store verify/repair does not remove these. Remove them (or reinstall the game "
+                        "into an empty folder), then start MWManager again. MWManager will install them for you "
+                        "afterwards.")
+                choices = [("Stop", "stop")]
+            if _choose(progress, "Setup needs an unmodded game", text, choices, "stop") != "quarantine":
+                return False
+            # the Code Patch rewrites Morrowind.exe in place and keeps the store copy as Morrowind.Original.exe
+            original = next((p for p in files if p.relative_to(game_dir).as_posix().casefold()
+                             == "morrowind.original.exe"), None)
+            patched = _find(game_dir, "Morrowind.exe") if original else None
+            root = quarantine_mod_files(game_dir, manager_dir, files + ([patched] if patched else []))
+            if patched:
+                shutil.copy2(root / original.relative_to(game_dir), patched)
+            progress(f"Preflight: quarantined {len(files)} file(s) at {root}.")
+            report = inspect_install(game_dir, manager_dir, progress=progress, check_latest=latest_check)
         if report["hash_mismatches"]:
             details = "\n".join(f"- {name}: expected {expected[:16]}…, found {actual[:16]}…"
                                 for name, expected, actual in report["hash_mismatches"])
