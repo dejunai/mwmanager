@@ -464,7 +464,7 @@ def assert_package_disposable(package, staging, data_dir, manager_dir, configure
     for name, source in staged_masters(staging, configured).items():
         if source.resolve().is_relative_to(package) and any(
                 path.name.casefold() == name for path in Path(data_dir).glob("*") if path.is_file()):
-            raise ValueError(f"{package.name} contains an installed master; remove its deployment first.")
+            raise ValueError(f"{package.name} contains a deployed master; remove its deployment first.")
     if not check_dependencies:
         return
     # A fresh dependency scan, never GUI cached data, before any deletion.
@@ -534,7 +534,7 @@ def deployment_statuses(names, data_dir: Path, manager_dir: Path, *, staged=()) 
             status = {"state": "untracked", "label": "Untracked on disk",
                       "live": True, "tracked": False}
         elif staged is True or key in staged_keys:
-            status = {"state": "ready", "label": "Ready for install",
+            status = {"state": "ready", "label": "Staged",
                       "live": False, "tracked": False}
         else:
             status = {"state": "absent", "label": "Not staged", "live": False, "tracked": False}
@@ -782,7 +782,7 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
     ready = [name for name in configured if name.casefold() in staged and not (data_dir / name).is_file()
              and (selected_keys is None or name.casefold() in selected_keys)]
     if not ready:
-        raise ValueError("No staged, uninstalled major masters are ready to deploy.")
+        raise ValueError("No staged, undeployed major masters are ready to deploy.")
     package_info = _package_roots(staging, ready)
     ready_keys = {name.casefold() for name in ready}
     selected_for_bsa = ({name.casefold() for name in ready} if build_bsa is True else

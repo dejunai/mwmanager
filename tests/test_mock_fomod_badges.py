@@ -14,15 +14,15 @@ class BadgeTests(unittest.TestCase):
         return mock_fomod._option_badges(folder, docs, INSTALLED)
 
     def test_core_and_choose_one(self):
-        self.assertIn("Always install", self.badges("00 Core"))
-        self.assertIn("Always install", self.badges("Main", "00 Core --> Always install"))
+        self.assertIn("Always included", self.badges("00 Core"))
+        self.assertIn("Always included", self.badges("Main", "00 Core --> Always install"))
         self.assertIn("Choose one", self.badges("SSE Version (choose ONE)"))
 
     def test_requirements_are_checked_against_installed_plugins(self):
-        self.assertIn("Requires TD (installed)", self.badges("03 TD to Wares", "03 TD to Wares - requires TD - adds"))
-        self.assertIn("Requires OAAB DATA (not installed)", self.badges("04", "requires OAAB DATA - adds"))
-        self.assertIn("Requires TR_MAINLAND (not installed)", self.badges("06", "requires TR_MAINLAND - gives lists"))
-        self.assertIn("Requires LeFemmArmor (installed)", self.badges("patch for LeFemmArmor"))
+        self.assertIn("Requires TD (deployed)", self.badges("03 TD to Wares", "03 TD to Wares - requires TD - adds"))
+        self.assertIn("Requires OAAB DATA (not deployed)", self.badges("04", "requires OAAB DATA - adds"))
+        self.assertIn("Requires TR_MAINLAND (not deployed)", self.badges("06", "requires TR_MAINLAND - gives lists"))
+        self.assertIn("Requires LeFemmArmor (deployed)", self.badges("patch for LeFemmArmor"))
         self.assertIn("Requires Glowing Bitter Coast", self.badges("11", "Install if you use Glowing Bitter Coast."))
 
     def test_phrases_and_engines_are_not_requirements(self):
@@ -32,7 +32,7 @@ class BadgeTests(unittest.TestCase):
         self.assertIn("MWSE", self.badges("06 Typography Patch (MWSE)"))
 
     def test_install_order(self):
-        self.assertIn("Install after Glowing Bitter Coast",
+        self.assertIn("Deploy after Glowing Bitter Coast",
                       self.badges("11 Atlas", "11 Atlas - Install AFTER Glowing Bitter Coast"))
 
 

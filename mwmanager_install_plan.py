@@ -95,7 +95,7 @@ def build(item: dict, package: Path, data_dir: Path, manager_dir: Path) -> dict:
     held = [entry for entry in pending.values()
             if isinstance(entry, dict) and entry.get("status") == "waiting"]
     if held:
-        warnings.append(f"{len(held)} installer option(s) are waiting for missing dependencies.")
+        warnings.append(f"{len(held)} option(s) are waiting for missing dependencies.")
     counts = {}
     for operation in operations:
         counts[operation["action"]] = counts.get(operation["action"], 0) + 1
@@ -122,7 +122,7 @@ def build(item: dict, package: Path, data_dir: Path, manager_dir: Path) -> dict:
 def render(plan: dict) -> list[str]:
     counts = plan.get("operation_counts") or {}
     lines = [
-        f"Install plan for {Path(plan['package']).name}",
+        f"Deploy plan for {Path(plan['package']).name}",
         "  " + ", ".join(f"{count} {action}" for action, count in sorted(counts.items())),
         "  plugins: " + (", ".join(plan.get("selected_plugins") or []) or "none"),
     ]

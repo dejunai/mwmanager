@@ -128,8 +128,8 @@ class BatchPlanTests(unittest.TestCase):
                              [("Epic Plants-1-0.zip", ["Epic Plants.esp"], "OAAB_Data")])
             self.assertEqual([c.args[0] for c in searched.call_args_list], ["Knife Ears.esp"])
             text = " ".join(lines)
-            self.assertIn("needs Epic Plants.esp; installing Epic Plants-1-0.zip first", text)
-            self.assertIn("needs the major master Tamriel_Data.esm; install it from Major masters", text)
+            self.assertIn("needs Epic Plants.esp; staging Epic Plants-1-0.zip first", text)
+            self.assertIn("needs the major master Tamriel_Data.esm; stage it from Major masters", text)
             self.assertNotIn("Other.esp", text)                                  # not chosen: not fetched
             queued = {str((dl / "Epic Plants-1-0.zip").resolve()).casefold()}
             with mock.patch.object(needed_mods, "search_on_nexus"):

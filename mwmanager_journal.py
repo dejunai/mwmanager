@@ -187,7 +187,7 @@ class Journal:
         except (OSError, ValueError):
             return False, "the baseline file is unreadable"
         if baseline.get("game_dir_name", "").casefold() != game_dir.name.casefold():
-            return False, "the selected install folder does not match the recorded baseline"
+            return False, "the selected game folder does not match the recorded baseline"
         identity = baseline.get("install_identity")
         if not identity:  # version 1 baselines already contain the same file facts
             recorded = baseline.get("files", {})
@@ -197,16 +197,16 @@ class Journal:
                 info = recorded.get(rel) or next((v for r, v in recorded.items() if key(r) == key(rel)), None)
                 identity = dict(info or {}, path=rel)
         if not identity or not identity.get("path"):
-            return False, "the baseline has no store-install identity"
+            return False, "the baseline has no store identity for the game folder"
         current = game_dir / identity["path"]
         if not current.is_file():
-            return False, f"the recorded install marker is missing: {identity['path']}"
+            return False, f"the recorded game-folder marker is missing: {identity['path']}"
         stat = current.stat()
         if stat.st_size != identity.get("size") or stat.st_mtime_ns != identity.get("mtime_ns"):
-            return False, f"the store-install marker changed: {identity['path']}"
+            return False, f"the store game-folder marker changed: {identity['path']}"
         if sha256_file(current) != identity.get("sha256"):
-            return False, f"the store-install marker content changed: {identity['path']}"
-        return True, "baseline belongs to this install"
+            return False, f"the store game-folder marker content changed: {identity['path']}"
+        return True, "baseline belongs to this game folder"
 
     def archive_current(self, reason: str) -> Path:
         """Move an obsolete journal aside without discarding any rollback evidence."""
@@ -317,7 +317,7 @@ class Journal:
     def preserve_file(self, path) -> dict:
         """Keep a content-addressed copy of a recoverable original."""
         if not self.has_baseline():
-            raise RuntimeError("game files cannot be changed before the install baseline is recorded")
+            raise RuntimeError("game files cannot be changed before the game baseline is recorded")
         path = Path(path).resolve()
         if not path.is_file():
             return {"kind": "absent"}
@@ -344,7 +344,7 @@ class Journal:
         """Bridge a completed GUI deployment's operation list into the install rollback ledger."""
         game_dir = Path(game_dir).resolve()
         if not self.has_baseline():
-            raise RuntimeError("deployment requires an install baseline so rollback can remove it")
+            raise RuntimeError("deployment requires a game baseline so rollback can remove it")
         run = self.start_run(tool, inputs)
         records = []
         total = len(operations)
@@ -474,12 +474,12 @@ class Journal:
     def move_original(self, game_dir, source, destination, run: str, *, tag: str | None = None) -> dict:
         """Move an original file while preserving a journal-owned copy for reliable rollback."""
         if not self.has_baseline():
-            raise RuntimeError("original files cannot be moved before the install baseline is recorded")
+            raise RuntimeError("original files cannot be moved before the game baseline is recorded")
         game_dir, source, destination = Path(game_dir).resolve(), Path(source).resolve(), Path(destination).resolve()
         try:
             source_rel = rel_of(game_dir, source)
         except ValueError as exc:
-            raise ValueError(f"the moved original is outside the game install: {source}") from exc
+            raise ValueError(f"the moved original is outside the game folder: {source}") from exc
         if not source.is_file():
             raise FileNotFoundError(source)
         original = self.preserve_original(game_dir, source)
@@ -937,8 +937,8 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
         print_report(lines, "Mod rollback plan (dry run, nothing changed):")
         return 0 if plan["status"] == "ready" else 1
     if not journal.has_baseline():
-        print_report(["No baseline exists yet. Run --capture-baseline on the install as you start from it (fresh or "
-                      "already modded) before MWManager installs anything."], "Nothing to compare against:")
+        print_report(["No baseline exists yet. Run --capture-baseline on the game folder as you start from it (fresh or "
+                      "already modded) before MWManager deploys anything."], "Nothing to compare against:")
         return 2
     if args.verify:
         report = journal.verify(game_dir, against=args.verify_against, full_hash=args.full_hash)
@@ -960,7 +960,7 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
         if args.no_staging:
             lines.append(f"After verification, clear MWManager staging: {journal.root.parent / 'staging'}")
         if args.dry_run:
-            print_report(lines or ["The install already matches the baseline."],
+            print_report(lines or ["The game folder already matches the baseline."],
                          "Rollback plan (dry run, nothing changed):")
             return 1 if plan["refuse"] else 0
         if plan["refuse"] or plan["unexplained"]:

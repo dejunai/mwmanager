@@ -616,6 +616,37 @@ class GuiProbes(unittest.TestCase):
         baseline.assert_called_once_with(force=True)
         self.assertTrue(self.app._setup_done("major_masters_deployed"))
 
+    def test_enable_toggles_staged_master_but_not_a_required_one(self):
+        self.app.major_masters = ["A.esm", "B.esm"]
+        package = self.g.APP_DIR / "staging" / "major_masters" / "Package"
+        put(package, "A.esm", esm())
+        put(package, "B.esm", esm("A.esm"))
+        self.app.selected_major_masters = {"a.esm", "b.esm"}
+        self.app.open_major_masters()
+
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        tree = next(widget for widget in descendants(self.app._major_master_dialog)
+                    if isinstance(widget, self.g.ttk.Treeview))
+        self.app._major_master_dialog.update()
+
+        def click(name):
+            x, y, w, h = tree.bbox(name, "active")
+            tree.event_generate("<Button-1>", x=x + w // 2, y=y + h // 2)
+            self.app.update()
+            return tree.item(name)["values"][0]
+        # A click must not rescan staging and Data Files: that froze the dialog for seconds per click.
+        with mock.patch.object(self.app, "_staged_major_master_names", side_effect=AssertionError),                 mock.patch.object(self.app, "_required_major_master_names", side_effect=AssertionError):
+            self.assertEqual(click("B.esm"), "☐")
+            self.assertNotIn("b.esm", self.app.selected_major_masters)
+            self.assertEqual(click("B.esm"), "☑")
+            self.assertEqual(click("A.esm"), "☑")          # B needs A, so A stays locked on
+        self.assertIn("a.esm", self.app.selected_major_masters)
+        self.assertTrue(self.app.stage_master_button.instate(["!disabled"]))     # B is staged
+        self.assertTrue(self.app.remove_master_button.instate(["disabled"]))     # nothing deployed
+
     def test_untracked_live_major_is_not_declared_deployed(self):
         package = self.package("A.esm", complete=True)
         data = Path(self.app.settings["game_dir"]) / "Data Files"

@@ -492,7 +492,7 @@ def plan_mod(mod_dir):
         core_home = os.path.join(extras, core_name)
         if os.path.normcase(os.path.abspath(core_dir)) != os.path.normcase(os.path.abspath(core_home)):
             moves.append((core_dir, free_path(core_home, taken),
-                          "keep the 00 folder under Extras/<plugin> so the install can be repeated"))
+                          "keep the 00 folder under Extras/<plugin> so the options can be reapplied"))
 
     def link(src, dst, why):
         """A 00 Core file goes into the root as a hard link; its 00 folder stays whole under Extras. A file an option
@@ -546,7 +546,7 @@ def plan_mod(mod_dir):
                                         if part.casefold() == "splash")
                     splash_relative = os.path.join(*relative_parts[splash_index + 1:])
                     move(source, os.path.join(mod_dir, "Off", off_owner, "Splash", splash_relative),
-                         "redundant TGA splash source retained under Off; matching JPEG is installed")
+                         "redundant TGA splash source retained under Off; matching JPEG is deployed")
                     continue
             openmw_path = ext == ".omwscripts" or any(part.casefold() in OPENMW_DIRS for part in relative_parts)
             openmw_option_index = next((i for i, part in enumerate(relative_parts[:-1])
@@ -873,7 +873,7 @@ def review(staging, moves, assume_keep=False):
         print(f"  OpenMW plugin(s): {', '.join(addons) if addons else '(none)'}; no .esp or .esm")
         print(f"  OpenMW scripts: {', '.join(scripts)}")
         print("  OpenMW's Lua scripting is required; these files will be retained under Off\\<Vortex mod name>\\OpenMW.")
-        print("  A future MWSE conversion pass may be able to replace them. To uninstall, remove the mod in Vortex.")
+        print("  A future MWSE conversion pass may be able to replace them. To remove them, remove the mod in Vortex.")
     return moves, []
 
 
@@ -1640,8 +1640,8 @@ def resolve_missing_assets(staging, mods, data_dir, cache):
             f.write(f"\n{time.strftime('%Y-%m-%d %H:%M')}  {', '.join(mods)}\n")
             f.writelines(f"  {line}\n" for line in details)
     lines = {"data": "already in Data Files",               # each line fits Tidy's 115-column wrap
-             "batch": "shipped by another package of this install",
-             "off": "restored from Data Files\\Off (install rollback undoes it)",
+             "batch": "shipped by another package of this batch",
+             "off": "restored from Data Files\\Off (rollback undoes it)",
              "stand_in": f"stand-in(s) built, flagged as generated ({MISSING_ASSETS_REPORT})",
              "replaced": "earlier stand-in(s) removed: this package ships the real file"}
     for kind, text in lines.items():
@@ -1769,7 +1769,7 @@ def apply(moves, staging, progress=None, head_extra=None):
                 os.makedirs(os.path.dirname(dst), exist_ok=True)
                 if why.startswith(LINK_PREFIX):
                     # 00 Core content: the root gets a hard link (no extra space) and the 00 folder itself is kept
-                    # under Extras, so the install can be repeated from the package
+                    # under Extras, so the options can be reapplied from the package
                     try:
                         os.link(src, dst)
                     except OSError:
@@ -2066,7 +2066,7 @@ def plan_data_files(data_dir):
         target_dir = official_dir if official else docs_dir
         dst = free_path(os.path.join(target_dir, new_name), taken)
         reason = ("official base-game add-on documentation" if official else
-                  "document associated with an installed plugin" if associated else
+                  "document associated with a deployed plugin" if associated else
                   "document has no matching .esp/.esm; label as No Known Mod")
         moves.append((src, dst, reason))
     return moves, errors
@@ -2117,7 +2117,7 @@ def run_data_files_tidy(data_dir, *, apply_changes=False, marker=None, dry_run=F
     if marker and os.path.isfile(marker):
         moves, errors = plan_official_addon_docs(data_dir)
         if not moves and not errors:
-            print(f"Data Files tidy already completed for this installation (marker: {marker}); official add-on docs are organized.")
+            print(f"Data Files tidy already completed for this game folder (marker: {marker}); official add-on docs are organized.")
             return 0
     else:
         moves, errors = plan_data_files(data_dir)
@@ -2139,7 +2139,7 @@ def run_data_files_tidy(data_dir, *, apply_changes=False, marker=None, dry_run=F
     import mwmanager_journal
     install_ledger = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
     if not install_ledger.has_baseline():
-        print("Data Files tidy refused: record the install baseline first so every original move can be rolled back.",
+        print("Data Files tidy refused: record the game baseline first so every original move can be rolled back.",
               file=sys.stderr)
         return 2
     ledger_run = install_ledger.start_run("mwmanager_install.py", {"operation": "Data Files document tidy"})
@@ -2183,11 +2183,11 @@ def run_initial_tidy(data_dir, *, apply_changes=True):
         return rc
     command = [data_dir, "--fix", "--asset-check", "--no-interactive"]
     command += ["--yes"] if apply_changes else ["--dry-run"]
-    print("\nInitial-install Tidy: checking official plugins and live Data Files assets.")
+    print("\nInitial Tidy: checking official plugins and live Data Files assets.")
     try:
         result = _scanner.main(command)
         if apply_changes and result == 1:
-            print("Initial-install Tidy repaired reported errors; --full will verify the result.")
+            print("Initial Tidy repaired reported errors; --full will verify the result.")
             return 0
         return result
     finally:

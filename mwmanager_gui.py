@@ -21,7 +21,7 @@ import mwmanager_dialogs as messagebox  # themed prompts
 import mwmanager_setup_state as setup_state
 from mwmanager_workflow import JobCancelled, JobControl, JobView, checkpoint, preflight_signature
 
-from mwmanager_theme import COLORS, FONTS, SPACE, apply_theme, center, tree_tags
+from mwmanager_theme import COLORS, FONTS, SPACE, apply_theme, center, master_status_legend, master_status_tags, tree_tags
 from bsa_pack import BSA_OFFER_SETTING, DEFAULT_THRESHOLD as DEFAULT_BSA_OFFER, MIN_THRESHOLD as MIN_BSA_OFFER
 ALWAYS_BSA_SETTING = "always_build_bsa"      # mwmanager.ini [Staging]; default off: ask per package
 
@@ -106,7 +106,7 @@ def plan_needed_archives(package_name: str, outputs: Path, downloads, manager_di
         users = ", ".join(f"'{v['label']}'" for v in held.values() if need in v.get("needs", []))
         archive = found.get(need)
         if need.casefold() in majors:
-            progress(f"{package_name}: option {users} needs the major master {need}; install it from Major masters")
+            progress(f"{package_name}: option {users} needs the major master {need}; stage it from Major masters")
             continue
         if archive is None:
             progress(f"{package_name}: option {users} needs {need}, which isn't in your downloads; "
@@ -120,7 +120,7 @@ def plan_needed_archives(package_name: str, outputs: Path, downloads, manager_di
         if key in queued:
             continue
         queued.add(key)
-        progress(f"{package_name}: option {users} needs {need}; installing {Path(archive).name} first")
+        progress(f"{package_name}: option {users} needs {need}; staging {Path(archive).name} first")
         items.append({"archive": str(archive), "plugins": index.get(Path(archive).name, []), "needed_by": package_name})
     return items
 
@@ -219,16 +219,16 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
         # unknown failures retain their diagnostics and never become success.
         refusals += 1
         if refusals == 3:
-            stop = ("Stop the install", "stop")
+            stop = ("Stop staging", "stop")
             first = refusal_series == 1
             action = progress.ask_choice(
                 "Tidy keeps finding new work",
                 f"{label}: Tidy found a different plan on three passes in a row, so it has not finished. "
                 "Earlier passes may already have changed staged files; their records were preserved.\n\n" +
-                ("Try again runs three more passes. Stop the install keeps the staged files as they are."
+                ("Try again runs three more passes. Stop staging keeps the staged files as they are."
                  if first else
-                 "Apply Anyway applies the plan Tidy calculates now, even though it keeps changing. Stop the "
-                 "install keeps the staged files as they are."),
+                 "Apply Anyway applies the plan Tidy calculates now, even though it keeps changing. Stop "
+                 "staging keeps the staged files as they are."),
                 [("Try Again", "retry"), stop] if first else [("Apply Anyway", "apply_anyway"), stop], "stop")
             if action == "apply_anyway":
                 progress(f"{label}: applying the plan Tidy calculates now, as asked.")
@@ -236,7 +236,7 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
                     ["--apply", "--yes", "--force-plan"], "apply changing plan by user request")
                 break
             if action != "retry":
-                raise TidyPlanPaused(f"{label}: the install was stopped. The staged files and Tidy's latest plan "
+                raise TidyPlanPaused(f"{label}: staging was stopped. The staged files and Tidy's latest plan "
                                      f"are kept:\n{plan_path}")
             refusals = 0
             refusal_series += 1
@@ -629,6 +629,10 @@ def read_settings() -> dict:
         data["compare_steam_lua"] = ini.getboolean("Dev", "compare_steam_lua", fallback=False)
     except ValueError:
         data["compare_steam_lua"] = False
+    try:        # --remove before shipping: [Dev] dev_options turns on developer-only steps
+        data["dev_options"] = ini.getboolean("Dev", "dev_options", fallback=False)
+    except ValueError:
+        data["dev_options"] = False
     detected_exe = vortex_install_path()
     data["vortex_detected"] = bool(detected_exe or vortex_registered())
     data["vortex_exe"] = str(detected_exe) if detected_exe else ""
@@ -778,12 +782,12 @@ def offer_elevation(game_dir: Path) -> None:
         frame = ttk.Frame(dialog, padding=16)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text=("Morrowind.exe is configured to run with administrator privileges.\n\n"
-                               "MWManager must run at the same elevation level to manage this game install "
+                               "MWManager must run at the same elevation level to manage this game folder "
                                "reliably. Without elevation, deployment and Morrowind.ini changes may fail.\n\n"
                                "Relaunch MWManager as administrator now?"),
                   justify="left", wraplength=440).pack(anchor="w", pady=(0, 12))
         always_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(frame, text="Always run MWManager as administrator for this install",
+        ttk.Checkbutton(frame, text="Always run MWManager as administrator for this game folder",
                         variable=always_var).pack(anchor="w", pady=(0, 14))
         result = {"elevate": False, "always": False}
 
@@ -1147,7 +1151,7 @@ class ManagerGUI(tk.Tk):
         menu = tk.Menu(self)
         file_menu = tk.Menu(menu, tearoff=False)
         file_menu.add_command(label="Options…", command=self.open_options)
-        file_menu.add_command(label="Detected installs…", command=lambda: self._open_detected_paths(first_run=False))
+        file_menu.add_command(label="Detected game folders…", command=lambda: self._open_detected_paths(first_run=False))
         file_menu.add_separator()
         file_menu.add_command(label="Resume setup", command=self._resume_setup)
         file_menu.add_command(label="Exit", command=self._on_close)
@@ -1159,10 +1163,10 @@ class ManagerGUI(tk.Tk):
         tools_menu.add_command(label="Capture integrity snapshot…", command=self.capture_integrity_snapshot)
         tools_menu.add_command(label="Compare integrity snapshot…", command=self.compare_integrity_snapshot)
         tools_menu.add_command(label="Record conflict report…", command=self.show_record_conflicts)
-        tools_menu.add_command(label="Save install profile…", command=self.save_install_profile)
-        tools_menu.add_command(label="Apply install profile…", command=self.apply_install_profile)
+        tools_menu.add_command(label="Save setup profile…", command=self.save_install_profile)
+        tools_menu.add_command(label="Apply setup profile…", command=self.apply_install_profile)
         tools_menu.add_separator()
-        tools_menu.add_command(label="Preview staged install…", command=self.preview_staged_install)
+        tools_menu.add_command(label="Preview staged files…", command=self.preview_staged_install)
         tools_menu.add_command(label="Compare staged update…", command=self.compare_staged_update)
         menu.add_cascade(label="Tools", menu=tools_menu)
         self.file_menu = file_menu
@@ -1327,10 +1331,10 @@ class ManagerGUI(tk.Tk):
 
     def save_install_profile(self):
         import mwmanager_profiles
-        name = messagebox.askstring("Save install profile", "Profile name:", parent=self)
+        name = messagebox.askstring("Save setup profile", "Profile name:", parent=self)
         if not name:
             return
-        note = messagebox.askstring("Save install profile", "Optional note:", parent=self) or ""
+        note = messagebox.askstring("Save setup profile", "Optional note:", parent=self) or ""
         try:
             path = mwmanager_profiles.save(APP_DIR, name, note=note)
         except (OSError, ValueError) as exc:
@@ -1342,12 +1346,12 @@ class ManagerGUI(tk.Tk):
         import mwmanager_profiles
         profiles = mwmanager_profiles.list_profiles(APP_DIR)
         if not profiles:
-            messagebox.showinfo("Install profiles", "No saved profiles are available.", parent=self)
+            messagebox.showinfo("Setup profiles", "No saved profiles are available.", parent=self)
             return
         choices = [(f"{item['name']} — {item.get('note') or item.get('saved_at')}", item["name"])
                    for item in profiles]
         dialog = tk.Toplevel(self)
-        dialog.title("Apply install profile")
+        dialog.title("Apply setup profile")
         dialog.transient(self)
         dialog.grab_set()
         center(dialog, self, 620, 360)
@@ -1364,7 +1368,7 @@ class ManagerGUI(tk.Tk):
             delta = mwmanager_profiles.compare(APP_DIR, name)
             changed = delta["changed"] + delta["missing"] + delta["extra"]
             if not messagebox.askyesno(
-                    "Apply install profile",
+                    "Apply setup profile",
                     f"Apply {name}?\n\n{len(changed)} managed state file(s) differ. "
                     "This restores manager choices only; it does not redeploy or remove game files.",
                     parent=dialog):
@@ -1411,7 +1415,7 @@ class ManagerGUI(tk.Tk):
             *[f"  {op['action']}: {op['relative_target']} ({op['size']:,} bytes)"
               for op in plan["operations"][:500]],
         ])
-        self._show_tool_report("Staged install preview", lines)
+        self._show_tool_report("Staged files preview", lines)
 
     def compare_staged_update(self):
         import mwmanager_update_impact
@@ -1752,7 +1756,7 @@ class ManagerGUI(tk.Tk):
             found["managers"], self.settings.get("archive_downloads_dir", "")))
         ttk.Label(form, text="MWManager found these paths. Approve them or change them before setup continues.",
                   wraplength=600).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
-        ttk.Label(form, text="Morrowind install").grid(row=1, column=0, columnspan=2, sticky="w")
+        ttk.Label(form, text="Morrowind folder").grid(row=1, column=0, columnspan=2, sticky="w")
         row = 2
         if found["games"]:
             for game in found["games"]:
@@ -1760,12 +1764,12 @@ class ManagerGUI(tk.Tk):
                                 variable=game_var).grid(row=row, column=0, columnspan=2, sticky="w")
                 row += 1
         else:
-            ttk.Label(form, text="No Morrowind install was found in the registry; choose its folder below.",
+            ttk.Label(form, text="No Morrowind folder was found in the registry; choose its folder below.",
                       wraplength=600).grid(row=row, column=0, columnspan=2, sticky="w")
             row += 1
         ttk.Entry(form, textvariable=game_var, width=70).grid(row=row, column=0, sticky="ew", pady=(3, 12))
         ttk.Button(form, text="Browse…", command=lambda: game_var.set(filedialog.askdirectory(
-            parent=dialog, title="Select Morrowind install", initialdir=game_var.get() or str(Path.home()))
+            parent=dialog, title="Select Morrowind folder", initialdir=game_var.get() or str(Path.home()))
             or game_var.get())).grid(row=row, column=1, padx=(8, 0), pady=(3, 12))
         row += 1
         ttk.Label(form, text="Archive Downloads").grid(row=row, column=0, columnspan=2, sticky="w")
@@ -1823,7 +1827,7 @@ class ManagerGUI(tk.Tk):
         def approve():
             game = mwmanager_detect.valid_install(game_var.get())
             if game is None:
-                messagebox.showerror("Not a Morrowind install",
+                messagebox.showerror("Not a Morrowind folder",
                                      "The selected folder must contain Morrowind.exe and a Data Files folder.",
                                      parent=dialog)
                 return
@@ -1860,7 +1864,7 @@ class ManagerGUI(tk.Tk):
             self._ensure_core()
             self.refresh()
             self._update_action_buttons()
-            self.status.set("Paths saved. Starting preflight for the selected install…")
+            self.status.set("Paths saved. Starting preflight for the selected game folder…")
             self.after(150, self._begin_first_run)
 
         def cancel():
@@ -1975,11 +1979,11 @@ class ManagerGUI(tk.Tk):
 
         actions = ttk.Frame(self, padding=(pad["xl"], pad["md"], pad["xl"], pad["md"]))
         actions.pack(fill="x", side="bottom")
-        self.install_plugins_button = ttk.Button(actions, text="Install Plugins", command=self.install_plugins)
+        self.install_plugins_button = ttk.Button(actions, text="Deploy Plugins", command=self.install_plugins)
         self.install_plugins_button.pack(side="left")
         self.enable_new_button = ttk.Button(actions, text="Enable all new plugins", command=self.enable_all_new_plugins)
         self.enable_new_button.pack(side="left", padx=(pad["sm"], 0))
-        self.remove_plugins_button = ttk.Button(actions, text="Remove Installed Plugins…", style="Danger.TButton",
+        self.remove_plugins_button = ttk.Button(actions, text="Remove Deployed Plugins…", style="Danger.TButton",
                                                 command=self.remove_installed_plugins)
         self.remove_plugins_button.pack(side="left", padx=(pad["lg"], 0))
         self.play_button = ttk.Button(actions, text="▶  Play", style="Primary.TButton", command=self.play_game)
@@ -2048,7 +2052,7 @@ class ManagerGUI(tk.Tk):
         self.down_btn = ttk.Button(buttons, text="▼  Move down", style="Toolbar.TButton",
                                    command=lambda: self.move_selected(1))
         self.down_btn.pack(side="left", padx=(pad["xs"], 0))
-        ttk.Button(buttons, text="Modify Sort Rules", style="Toolbar.TButton",
+        ttk.Button(buttons, text="Edit sort rules", style="Toolbar.TButton",
                    command=self.open_sort_rules).pack(side="left", padx=(pad["lg"], 0))
         ttk.Button(buttons, text="Show Disabled", style="Toolbar.TButton",
                    command=self.show_disabled_plugins).pack(side="left", padx=(pad["xs"], 0))
@@ -2213,7 +2217,7 @@ class ManagerGUI(tk.Tk):
         Blocked by default: binaries and scripts usually mean an engine injector or something for the game folder,
         but now and then a normal mod ships a modder's utility."""
         dialog = tk.Toplevel(self)
-        dialog.title("Archives blocked from installation")
+        dialog.title("Archives blocked from deployment")
         dialog.transient(self)
         center_window(dialog, self, 820, 600)
         dialog.minsize(620, 360)
@@ -2221,7 +2225,7 @@ class ManagerGUI(tk.Tk):
             dialog,
             text=(f"{len(items)} archive(s) contain executable, library, or script files and are blocked: these "
                   "usually belong to an engine extension or the game folder, not Data Files. If one is a normal mod "
-                  "that just ships a modder's utility, tick Allow to install it with those files. The rest stay "
+                  "that just ships a modder's utility, tick Allow to deploy it with those files. The rest stay "
                   "marked BLOCKED in the archive list."),
             wraplength=780,
         ).pack(anchor="w", padx=12, pady=(12, 8))
@@ -2295,7 +2299,7 @@ class ManagerGUI(tk.Tk):
     def install_plugins(self):
         """Choose regular plugin archives from Vortex or a manually selected archive."""
         source = messagebox.askyesnocancel(
-            "Install Plugins", "From Archive Downloads?\n\nYes: browse the Archive Downloads folder\n"
+            "Deploy Plugins", "From Archive Downloads?\n\nYes: browse the Archive Downloads folder\n"
             "No: choose one plugin archive",
             parent=self)
         if source is None:
@@ -2363,7 +2367,7 @@ class ManagerGUI(tk.Tk):
 
     def _show_plugin_archive_picker(self, items, refresh_callback=None):
         dialog = tk.Toplevel(self)
-        dialog.title("Install Plugins")
+        dialog.title("Deploy Plugins")
         dialog.transient(self)
         center_window(dialog, self, 920, 520)
         dialog.minsize(760, 400)
@@ -2371,7 +2375,7 @@ class ManagerGUI(tk.Tk):
         frame.pack(fill="both", expand=True)
         header = ttk.Frame(frame)
         header.pack(fill="x", pady=(0, 8))
-        ttk.Label(header, text="Select archives, then choose an install action. Auto Install prioritizes MWSE-only tools, then larger plugin mods and recent downloads, with replacers and pluginless mods last.",
+        ttk.Label(header, text="Select archives, then choose a deploy action. Auto Deploy prioritizes MWSE-only tools, then larger plugin mods and recent downloads, with replacers and pluginless mods last.",
                   wraplength=760, justify="left").pack(side="left", fill="x", expand=True, anchor="w")
         if refresh_callback:
             def refresh_scan():
@@ -2383,7 +2387,7 @@ class ManagerGUI(tk.Tk):
         columns = ("selected", "plugins", "assets", "features", "download")
         tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings", selectmode="browse")
         tree.heading("#0", text="Archive")
-        tree.heading("selected", text="Install")
+        tree.heading("selected", text="Deploy")
         tree.heading("plugins", text="Plugins")
         tree.heading("assets", text="Assets")
         tree.heading("features", text="Detected contents")
@@ -2452,7 +2456,7 @@ class ManagerGUI(tk.Tk):
         footer_top.pack(fill="x")
         footer_bottom = ttk.Frame(footer)
         footer_bottom.pack(fill="x", pady=(5, 0))
-        ttk.Label(footer, text="Auto Install uses the detected order; estimates are content-based.").pack(side="left")
+        ttk.Label(footer, text="Auto Deploy uses the detected order; estimates are content-based.").pack(side="left")
 
         def close_then_install(chosen):
             if not chosen:
@@ -2461,21 +2465,21 @@ class ManagerGUI(tk.Tk):
             blocked = [item for item in chosen if item["blocked"]]
             if blocked:
                 messagebox.showerror("Archive needs review",
-                                     "These archives cannot be installed until their paths are reviewed:\n\n" +
+                                     "These archives cannot be deployed until their paths are reviewed:\n\n" +
                                      "\n".join(Path(item["archive"]).name + ": " + str(item["problem"])
                                               for item in blocked[:8]), parent=dialog)
                 return
             dialog.destroy()
             self._install_plugin_archives(chosen)
 
-        ttk.Button(footer, text="Install Selected",
+        ttk.Button(footer, text="Deploy Selected",
                    command=lambda: close_then_install([by_id[i] for i in sorted(selected, key=lambda x: list(by_id).index(x))])).pack(side="right")
-        ttk.Button(footer, text="Install All Except Selected",
+        ttk.Button(footer, text="Deploy All Except Selected",
                    command=lambda: close_then_install([item for iid, item in by_id.items()
                                                         if iid not in selected and not item["blocked"]])).pack(side="right", padx=(0, 6))
-        ttk.Button(footer, text="Auto Install",
+        ttk.Button(footer, text="Auto Deploy",
                    command=lambda: close_then_install([item for item in items if not item["blocked"]])).pack(side="right", padx=(0, 6))
-        ttk.Button(footer, text="Skip Install", command=dialog.destroy).pack(side="right", padx=(0, 6))
+        ttk.Button(footer, text="Skip", command=dialog.destroy).pack(side="right", padx=(0, 6))
 
     def _install_plugin_archives(self, items, *, accept_staged=False):
         from plugin_install import (apply_plugin_compatibility, check_deploy_path_lengths, count_bsa_assets,
@@ -2623,7 +2627,7 @@ class ManagerGUI(tk.Tk):
                         if self.settings.get("compare_steam_lua"):
                             imported = pull_updated_steam_luas(package, progress.ask_yes_no)
                             if imported:
-                                progress(f"Imported {len(imported)} Lua file(s) from the Steam install for {label}.")
+                                progress(f"Imported {len(imported)} Lua file(s) from the Steam game for {label}.")
                         linked, _skipped, operations = deploy_package(
                             package, data_dir, label, APP_DIR / "protected_replacer_textures.json",
                             transaction=transaction)
@@ -2771,8 +2775,8 @@ class ManagerGUI(tk.Tk):
                     messagebox.showinfo("Plugin Tidy paused", str(error), parent=self)
                     self.refresh()
                     return
-                self.status.set("Plugin installation stopped; completed batches remain installed.")
-                messagebox.showerror("Plugin installation failed", str(error), parent=self)
+                self.status.set("Plugin deployment stopped; completed batches remain deployed.")
+                messagebox.showerror("Plugin deployment failed", str(error), parent=self)
                 self.refresh()
                 return
             if result.get("stopped"):
@@ -2789,25 +2793,25 @@ class ManagerGUI(tk.Tk):
                         messagebox.showinfo(
                             "Deployment paused by preflight",
                             "No files were deployed. Resolve any missing prerequisites or review the declined "
-                            "warnings, then retry the install.", parent=self)
+                            "warnings, then retry the deployment.", parent=self)
                         return
                     self.status.set("Plugin staging was left untouched; no files were deployed from the pending batch.")
                     return
-                self.status.set("Plugin installation paused before deployment; the staged batch is ready for inspection.")
+                self.status.set("Plugin deployment paused before copying to Data Files; the staged batch is ready for inspection.")
                 messagebox.showinfo(
                     "Batch left staged",
                     f"Stopped before deploying the next batch. The staged files are here:\n\n{result['staging']}\n\n"
-                    "No files from this batch were deployed. Inspect the staging folder before starting another install.",
+                    "No files from this batch were deployed. Inspect the staging folder before starting another deployment.",
                     parent=self)
                 return
             self.refresh()
             self.gui_state["generated_signature"] = None
             write_gui_state(self.gui_state)
             self._update_action_buttons()
-            self.status.set(f"Installed {result['processed']} archive(s). Generate Patches reflects the updated plugin set.")
-            messagebox.showinfo("Plugins installed", f"Processed {result['processed']} archive(s) in batches of 15 mods.", parent=self)
+            self.status.set(f"Deployed {result['processed']} archive(s). Generate Patches reflects the updated plugin set.")
+            messagebox.showinfo("Plugins deployed", f"Processed {result['processed']} archive(s) in batches of 15 mods.", parent=self)
 
-        job_title = "Accept staged files as ready" if accept_staged else "Install Plugins"
+        job_title = "Accept staged files as ready" if accept_staged else "Deploy Plugins"
         self._run_progress_job(job_title, "Preparing staged plugin deployment…", worker, completed)
 
     def remove_installed_plugins(self):
@@ -2818,7 +2822,7 @@ class ManagerGUI(tk.Tk):
                                 "MWManager has no regular plugin deployments recorded to remove.", parent=self)
             return
         dialog = tk.Toplevel(self)
-        dialog.title("Remove Installed Plugins")
+        dialog.title("Remove Deployed Plugins")
         dialog.transient(self)
         center_window(dialog, self, 760, 420)
         dialog.minsize(620, 320)
@@ -2927,7 +2931,7 @@ class ManagerGUI(tk.Tk):
                                     f"Removed files: {result['removed']:,}\nRestored files: {result['restored']:,}\n"
                                     f"Still tracked for review: {result['pending']:,}{tidy_note}", parent=self)
 
-            self._run_progress_job("Remove Installed Plugins", "Removing selected tracked deployments…",
+            self._run_progress_job("Remove Deployed Plugins", "Removing selected tracked deployments…",
                                    worker, completed)
 
         footer = ttk.Frame(frame)
@@ -3525,7 +3529,7 @@ class ManagerGUI(tk.Tk):
         frame = ttk.Frame(dialog, padding=12)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text="Optional community masters", font=FONTS["h2"]).pack(anchor="w")
-        ttk.Label(frame, text="Installed masters can be enabled and prioritized here. Missing masters stay in this catalog only.", wraplength=660).pack(anchor="w", pady=(3, 8))
+        ttk.Label(frame, text="Staged and deployed masters can be enabled and prioritized here. Missing masters stay in this catalog only.", wraplength=660).pack(anchor="w", pady=(3, 8))
         tree_box = ttk.Frame(frame)
         tree_box.pack(fill="both", expand=True)
         tree = ttk.Treeview(tree_box, columns=("active", "installed"), show="tree headings", selectmode="extended")
@@ -3541,10 +3545,14 @@ class ManagerGUI(tk.Tk):
         tree.configure(yscrollcommand=master_scroll.set)
         tree_box.columnconfigure(0, weight=1)
         tree_box.rowconfigure(0, weight=1)
-        tree.tag_configure("installed", foreground=COLORS["green"])
-        tree.tag_configure("ready", foreground=COLORS["blue"])
-        tree.tag_configure("absent", foreground=COLORS["amber"])
-        tree.tag_configure("required", foreground=COLORS["red"])
+        master_status_tags(tree)
+        toggleable, last_scan = set(), {}        # rows the Enable column may flip, from the last refresh; a rescan per click froze the dialog
+
+        def update_deploy_button(staged_keys, unfinished):
+            self.deploy_master_button.state(["!disabled"] if any(
+                name.casefold() in self.selected_major_masters and name.casefold() in staged_keys
+                and name.casefold() not in unfinished
+                and not (data_dir / name).is_file() for name in masters) else ["disabled"])
 
         def refresh_masters():
             if not dialog.winfo_exists():
@@ -3555,6 +3563,7 @@ class ManagerGUI(tk.Tk):
             tree.delete(*tree.get_children())
             required_names = self._required_major_master_names()
             unfinished = {name.casefold() for name in self._unfinished_master_stages(masters)}
+            toggleable.clear()
             for i, name in enumerate(masters, 1):
                 key = name.casefold()
                 status_info = statuses[key]
@@ -3562,6 +3571,8 @@ class ManagerGUI(tk.Tk):
                 enabled = key in self.selected_major_masters
                 ready = status_info["state"] == "ready"
                 required = name.casefold() in required_names
+                if (exists or ready) and not required:
+                    toggleable.add(key)
                 if required and (exists or ready):
                     self.selected_major_masters.add(key)
                     if exists:
@@ -3571,17 +3582,13 @@ class ManagerGUI(tk.Tk):
                 if ready and key in unfinished:
                     state = "Needs processing"
                 if status_info["state"] in {"recovery", "missing", "untracked"}:
-                    tag = "required"
+                    tag = "problem"
                 else:
-                    tag = "required" if required else "installed" if exists else "ready" if ready else "absent"
+                    tag = "locked" if required else "deployed" if exists else "staged" if ready else "not_staged"
                 tree.insert("", "end", iid=name, text=f"{i:02d}  {name}", values=(check, state), tags=(tag,))
-            self.deploy_master_button.state(["!disabled"] if any(
-                name.casefold() in self.selected_major_masters and name.casefold() in staged_map
-                and name.casefold() not in unfinished
-                and not (data_dir / name).is_file() for name in masters) else ["disabled"])
             from major_master_deploy import tracked_deployment_masters
-            tracked = tracked_deployment_masters(APP_DIR)
-            self.remove_master_button.state(["!disabled"] if any((data_dir / name).is_file() for name in tracked) else ["disabled"])
+            last_scan.update(staged=staged_map, unfinished=unfinished, required=required_names,
+                             tracked=tracked_deployment_masters(APP_DIR))
             update_master_buttons()
 
         controls = ttk.Frame(frame)
@@ -3594,8 +3601,7 @@ class ManagerGUI(tk.Tk):
         add_button.pack(side="left", padx=(12, 0))
         legend = ttk.Frame(frame)
         legend.pack(fill="x", pady=(7, 0))
-        for label, color in (("Green — installed", COLORS["green"]), ("Blue — ready for install", COLORS["blue"]), ("Red — required by another master; cannot be disabled", COLORS["red"]), ("Amber — not staged", COLORS["amber"])):
-            ttk.Label(legend, text=label, foreground=color, wraplength=660, justify="left").pack(anchor="w")
+        master_status_legend(legend, ("deployed", "staged", "not_staged", "locked", "problem"))
         footer = ttk.Frame(frame)
         footer.pack(fill="x", pady=(10, 0))
         footer_top = ttk.Frame(footer)
@@ -3604,7 +3610,14 @@ class ManagerGUI(tk.Tk):
         footer_bottom.pack(fill="x", pady=(SPACE["sm"], 0))
 
         def update_master_buttons(_event=None):
+            """Every Major Masters button's enabled state, from the last refresh's scan."""
             selection = tree.selection()
+            update_deploy_button(last_scan.get("staged", {}), last_scan.get("unfinished", set()))
+            self.remove_master_button.state(["!disabled"] if any(
+                (data_dir / name).is_file() for name in last_scan.get("tracked", [])) else ["disabled"])
+            # nothing selected reopens every staged master
+            self.stage_master_button.state(["!disabled"] if any(
+                name.casefold() in last_scan.get("staged", {}) for name in selection or masters) else ["disabled"])
             if not selection:
                 up.state(["disabled"])
                 down.state(["disabled"])
@@ -3616,13 +3629,11 @@ class ManagerGUI(tk.Tk):
             up.state(["!disabled"] if single and idx > 0 else ["disabled"])
             down.state(["!disabled"] if single and idx < len(masters) - 1 else ["disabled"])
             if hasattr(self, "unstage_master_button"):
-                staged = self._staged_major_master_names()
-                required = self._required_major_master_names()
-                ready = any(name.casefold() in staged and not (data_dir / name).is_file()
+                mapping, required = last_scan.get("staged", {}), last_scan.get("required", set())
+                ready = any(name.casefold() in mapping and not (data_dir / name).is_file()
                             and name.casefold() not in required for name in selection)
                 if ready:
-                    from major_master_deploy import assert_package_disposable, staged_masters
-                    mapping = staged_masters(APP_DIR / "staging" / "major_masters", masters)
+                    from major_master_deploy import assert_package_disposable
                     try:
                         for name in selection:
                             source = mapping.get(name.casefold())
@@ -3697,9 +3708,7 @@ class ManagerGUI(tk.Tk):
             if tree.identify("region", event.x, event.y) != "cell" or tree.identify_column(event.x) != "#1":
                 return
             name = tree.identify_row(event.y)
-            staged = self._staged_major_master_names()
-            if (not name or (not (data_dir / name).is_file() and name.casefold() not in staged)
-                    or name.casefold() in self._required_major_master_names()):
+            if not name or name.casefold() not in toggleable:
                 return "break"
             if name.casefold() in self.selected_major_masters:
                 self.selected_major_masters.discard(name.casefold())
@@ -3710,7 +3719,10 @@ class ManagerGUI(tk.Tk):
             self.gui_state["selected_major_masters"] = [n for n in masters
                                                         if n.casefold() in self.selected_major_masters]
             write_gui_state(self.gui_state)
-            refresh_masters()
+            values = list(tree.item(name, "values"))
+            values[0] = "☑" if name.casefold() in self.selected_major_masters else "☐"
+            tree.item(name, values=values)
+            update_master_buttons()
             tree.selection_set(name)
             return "break"
 
@@ -3807,11 +3819,11 @@ class ManagerGUI(tk.Tk):
         down.configure(command=lambda: move_master(1))
         add_button.configure(command=add_master)
         self.stage_master_button = ttk.Button(
-            footer_top, text="Resume / reopen selected…",
+            footer_top, text="Reopen options for selected…",
             command=lambda: saved_action(lambda: self.stage_major_masters(option_masters=list(tree.selection()))))
         self.stage_master_button.pack(side="left")
         self.stage_more_master_button = ttk.Button(
-            footer_top, text="Find / stage downloads…",
+            footer_top, text="Find and stage archives…",
             command=lambda: saved_action(lambda: self.stage_major_masters(force_scan=True)))
         self.stage_more_master_button.pack(side="left", padx=(6, 0))
         self.deploy_master_button = ttk.Button(
@@ -4162,7 +4174,7 @@ class ManagerGUI(tk.Tk):
         tracked = [name for name in tracked_deployment_masters(APP_DIR) if (data_dir / name).is_file()]
         if not tracked:
             messagebox.showinfo("No deployed masters to remove",
-                                "There are no MWManager-tracked major masters installed in Data Files.", parent=self)
+                                "There are no MWManager-tracked major masters deployed in Data Files.", parent=self)
             return
         if not messagebox.askyesno(
                 "Remove deployed masters?",
@@ -4379,8 +4391,8 @@ class ManagerGUI(tk.Tk):
 
         footer = ttk.Frame(outer)
         footer.pack(fill="x", pady=(10, 0))
-        ttk.Button(footer, text="Use load order; close", command=dialog.destroy).pack(side="right")
-        ttk.Button(footer, text="Save batch / next", command=save_batch).pack(side="right", padx=(0, 8))
+        ttk.Button(footer, text="Use this order and close", command=dialog.destroy).pack(side="right")
+        ttk.Button(footer, text="Save and next batch", command=save_batch).pack(side="right", padx=(0, 8))
         render()
         dialog.wait_window()        # the caller's next prompt (run --full) waits until the review is closed
 
@@ -4418,20 +4430,20 @@ class ManagerGUI(tk.Tk):
         elif title == "Accept staged files as ready":
             description = ("MWManager will deploy the selected staging folders directly without running Tidy, the mock FOMOD, "
                            "or BSA packing again. It will then run --all and open conflict review when needed.")
-        elif title == "Install Plugins":
+        elif title == "Deploy Plugins":
             description = ("Each archive is extracted to its own staging folder, tidied, and passed through its FOMOD or mock BAIN options. "
                            "Before each 15-mod deployment batch, MWManager opens staging for review and waits for approval. "
                            "After deployment it runs --all and opens conflict review when new cell choices are needed.")
         elif title == "Scan plugin archives":
-            description = "MWManager is inspecting archive contents to identify plugins, MWSE files, installers, asset counts, and download dates."
+            description = "MWManager is inspecting archive contents to identify plugins, MWSE files, FOMOD options, asset counts, and download dates."
         else:
             description = {
-                "First-run preflight": "Check the game and prerequisites. Only installation and configuration choices need your input.",
+                "First-run preflight": "Check the game and prerequisites. Only setup and configuration choices need your input.",
                 "Initial setup": "Sort and tidy the shipped files. Safe fixes apply automatically; output is shown below.",
                 "Catalog": "Build the plugin and archive catalog. Completed setup checkpoints will be kept.",
                 "Pre-deploy checks": "Recheck prerequisites before changing the live game.",
                 "Scanning major-master downloads": "Inspect downloaded archives and check versions before choosing what to stage.",
-            }.get(title, "Process the staged files. Tidy applies automatically; installer choices remain interactive.")
+            }.get(title, "Process the staged files. Tidy applies automatically; option choices remain interactive.")
         control = JobControl()
         self._job_control = control
         view.begin(title, description, control)
@@ -4511,7 +4523,7 @@ class ManagerGUI(tk.Tk):
                         [APP_DIR, Path(self.settings["game_dir"]), APP_DIR / "staging" / "plugins"])
                     from major_master_deploy import recovery_pending, recover_deployment
                     if recovery_pending(APP_DIR):
-                        report("Recovering interrupted installation changes before starting this job.")
+                        report("Recovering interrupted deployment changes before starting this job.")
                         recover_deployment(APP_DIR, self.settings["game_dir"])
                     result = worker(report)
                 events.put(("done", result, None))
@@ -4986,8 +4998,8 @@ class ManagerGUI(tk.Tk):
                 complete_package_step(mod_dir, step, outcome=outcome or "completed")
 
             def tidy():
-                progress(f"Running tidy and option installer for {label}. "
-                         "Choose any optional packages in the installer window that opens.")
+                progress(f"Running tidy and options for {label}. "
+                         "Choose any optional packages in the options window that opens.")
 
                 def tidy_line(clean_line):
                     if clean_line.startswith("ASSET CHECK"):
@@ -5028,7 +5040,7 @@ class ManagerGUI(tk.Tk):
 
             run("tidied", tidy)
             run("bsa_checked", bsa_check)
-            progress(f"Finished tidy and installer for {label}.")
+            progress(f"Finished tidy and options for {label}.")
 
         def unstaged_masters():
             have = self._staged_major_master_names() | deployed_master_names()
@@ -5118,7 +5130,7 @@ class ManagerGUI(tk.Tk):
                     names &= {name.casefold() for name in option_masters}
                 if not names:
                     raise RuntimeError("None of the selected masters is staged yet, so there are no options to "
-                                       "reopen. Select them and use Find / stage downloads instead.")
+                                       "reopen. Select them and use Find and stage archives instead.")
                 self._set_master_stage_ready(names, False)
                 from major_master_deploy import _package_roots, assert_package_disposable, restore_packed_assets
                 for package, masters in _package_roots(staging, list(names)):
@@ -5191,7 +5203,7 @@ class ManagerGUI(tk.Tk):
                     messagebox.showerror("Could not scan downloads",
                                          plan.get("error") or "The downloads folder could not be scanned.", parent=self)
                     return
-                # the required-by count only suggests: the user confirms each, and nothing configured is removed
+                # --remove before shipping: dev-only master suggestions; the user confirms each, nothing is removed
                 declined = set(self.gui_state.get("declined_master_suggestions", []))
                 added = []
                 for suggestion in plan.pop("_master_suggestions", []):
@@ -5319,7 +5331,7 @@ class ManagerGUI(tk.Tk):
                 self._run_progress_job(
                     "Staging major masters",
                     f"Starting {len(selected_archives)} archive(s) ({size_text}) for {len(selected)} selected master(s).\n"
-                    f"Destination: {staging}\nPreparing archive extraction, tidy, and installer steps…",
+                    f"Destination: {staging}\nPreparing archive extraction, tidy, and option steps…",
                     stage_and_process, staged)
 
             self.status.set("Scanning Archive Downloads for major masters…")
@@ -5335,9 +5347,10 @@ class ManagerGUI(tk.Tk):
                 if not plan.get("error") and not plan.get("missing_directory"):
                     checked("Looking for HD and voice packs that go with the masters…")
                     find_companions(plan, downloads, APP_DIR)
-                    checked("Checking Nexus for other masters many mods require…")
-                    plan["_master_suggestions"] = suggest_masters(plan, downloads, APP_DIR,
-                                                                  data_dir=Path(game_dir) / "Data Files")
+                    if self.settings.get("dev_options"):        # --remove before shipping
+                        checked("Checking Nexus for other masters many mods require…")
+                        plan["_master_suggestions"] = suggest_masters(plan, downloads, APP_DIR,
+                                                                      data_dir=Path(game_dir) / "Data Files")
                     plan["_prepared_review"] = prepare_core_master_review(APP_DIR, game_dir, plan, progress=checked)
                 return plan
             self._run_progress_job(
@@ -5362,9 +5375,9 @@ class ManagerGUI(tk.Tk):
         downloads_var = tk.StringVar(value=downloads if downloads is not None
                                      else self.settings.get("archive_downloads_dir", ""))
         bsa_offer_var = tk.StringVar(value=str(self.settings.get(BSA_OFFER_SETTING, DEFAULT_BSA_OFFER)))
-        ttk.Label(form, text="Morrowind install folder").grid(row=0, column=0, columnspan=2, sticky="w")
+        ttk.Label(form, text="Morrowind folder").grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Entry(form, textvariable=game_var, width=62).grid(row=1, column=0, sticky="ew", pady=(3, 12))
-        ttk.Button(form, text="Browse…", command=lambda: game_var.set(filedialog.askdirectory(title="Select Morrowind install", initialdir=game_var.get()) or game_var.get())).grid(row=1, column=1, padx=(8, 0), pady=(3, 12))
+        ttk.Button(form, text="Browse…", command=lambda: game_var.set(filedialog.askdirectory(title="Select Morrowind folder", initialdir=game_var.get()) or game_var.get())).grid(row=1, column=1, padx=(8, 0), pady=(3, 12))
         source = self.settings.get("archive_source")
         source_name = {"vortex": "Vortex", "mo2": "Mod Organizer 2", "unmanaged": "a folder you chose"}.get(
             source, source or "not chosen yet")
@@ -5372,7 +5385,7 @@ class ManagerGUI(tk.Tk):
                                                                                  sticky="w")
         ttk.Entry(form, textvariable=downloads_var, width=62).grid(row=3, column=0, sticky="ew", pady=(3, 5))
         ttk.Button(form, text="Browse…", command=lambda: downloads_var.set(filedialog.askdirectory(title="Select the Archive Downloads folder", initialdir=downloads_var.get() or str(Path.home())) or downloads_var.get())).grid(row=3, column=1, padx=(8, 0), pady=(3, 5))
-        ttk.Label(form, text="Used to find downloaded mods. Install staging is configured separately.", wraplength=520).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        ttk.Label(form, text="Used to find downloaded mods. Staging is configured separately.", wraplength=520).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 12))
         ttk.Label(form, text="Offer BSA when this many assets are found").grid(
             row=5, column=0, columnspan=2, sticky="w")
         ttk.Entry(form, textvariable=bsa_offer_var, width=12).grid(row=6, column=0, sticky="w", pady=(3, 12))
@@ -5422,7 +5435,7 @@ class ManagerGUI(tk.Tk):
                 self._ensure_core()
                 self.refresh()
                 self._update_action_buttons()
-                self.status.set("Paths saved. Starting preflight for the selected install…")
+                self.status.set("Paths saved. Starting preflight for the selected game folder…")
                 self.after(150, self._begin_first_run)
                 return
             if game_changed:
@@ -5433,8 +5446,8 @@ class ManagerGUI(tk.Tk):
             dialog.destroy()
             if game_changed:
                 choice = messagebox.askyesnocancel(
-                    "Morrowind Install Path has changed",
-                    "MWManager must restart to reinitialize preflight against the selected install.\n\n"
+                    "Morrowind folder has changed",
+                    "MWManager must restart to reinitialize preflight against the selected game folder.\n\n"
                     "Yes restarts MWManager, sets first_run to 1, and uses the saved INI paths.\n"
                     "No continues in this session without restarting.\n"
                     "Cancel disables MWManager controls until you close it.",
@@ -5459,7 +5472,7 @@ class ManagerGUI(tk.Tk):
             self.refresh()
             self._update_action_buttons()
             if game_changed:
-                self.status.set("Game path changed; refreshing plugins and rerunning preflight for this install…")
+                self.status.set("Game path changed; refreshing plugins and rerunning preflight for this game folder…")
                 self.after(150, self._begin_first_run)
             elif downloads_changed and self.settings.get("init_complete", 0) != 1:
                 self.status.set("Downloads path changed; resuming initialization.")

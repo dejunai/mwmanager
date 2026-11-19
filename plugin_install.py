@@ -50,15 +50,15 @@ SCRIPT_PAYLOAD_EXTENSIONS = {
 # journal and safely remove/restore files under the game directory.
 UTILITY_ARCHIVES = (
     ("mcp", "plugin", re.compile(r"^(?:morrowind[ _-]+code[ _-]+patch(?:[ _-].*)?|mcp(?:[ _-](?:beta|v?\d.*|installer|setup))?)$", re.I),
-     "Morrowind Code Patch is a standalone utility and is not installed as a plugin."),
+     "Morrowind Code Patch is a standalone utility and is not deployed as a plugin."),
     ("mwse", "plugin", re.compile(r"^(?:mwse(?:[ _-](?:v?\d.*|core|installer|setup))?|morrowind[ _-]+script[ _-]+extender(?:[ _-].*)?)$", re.I),
-     "MWSE is a standalone utility and is not installed as a plugin."),
+     "MWSE is a standalone utility and is not deployed as a plugin."),
     ("mge_xe", "plugin", re.compile(r"^(?:mge[ _-]*xe|morrowind[ _-]+graphics[ _-]+extender[ _-]+xe)(?:[ _-].*)?$", re.I),
-     "MGE XE is a standalone utility and is not installed as a plugin."),
+     "MGE XE is a standalone utility and is not deployed as a plugin."),
     ("nifzer0edit", "root", re.compile(r"^nifzer0edit(?:[ _-].*)?$", re.I),
-     "NifZer0Edit installs into the Morrowind root; root utility deployment is not available yet."),
+     "NifZer0Edit belongs in the Morrowind root; root utility deployment is not available yet."),
     ("breezify", "root", re.compile(r"^breezify(?:[ _-].*)?$", re.I),
-     "Breezify installs into the Morrowind root; root utility deployment is not available yet."),
+     "Breezify belongs in the Morrowind root; root utility deployment is not available yet."),
 )
 
 
@@ -844,7 +844,7 @@ def extract_archive(item: dict, destination: Path, manager: Path) -> Path:
         else:
             seven_zip = _seven_zip(manager)
             if not seven_zip:
-                raise FileNotFoundError("7-Zip is required to install this archive format.")
+                raise FileNotFoundError("7-Zip is required to extract this archive format.")
             linked = _seven_zip_link_members(seven_zip, archive)
             if linked:
                 raise ValueError(f"Archive contains symbolic links or junctions: "
@@ -1444,8 +1444,8 @@ def pull_updated_steam_luas(package: Path, ask) -> list[str]:
                 source.read_text("utf-8", errors="replace").splitlines(keepends=True),
                 candidate.read_text("utf-8", errors="replace").splitlines(keepends=True),
                 f"staged/{lua_rel.as_posix()}", f"steam/{lua_rel.as_posix()}"))
-            if not ask("Lua differs from the Steam install",
-                       f"{lua_rel} in {package.name} differs from the Steam install's copy.\n\n{diff}\n"
+            if not ask("Lua differs from the Steam copy",
+                       f"{lua_rel} in {package.name} differs from the Steam game's copy.\n\n{diff}\n"
                        "Import the Steam copy into this package?"):
                 continue
             # Update the staged copy before linking so deployment payload tracking remains exact.

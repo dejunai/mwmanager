@@ -693,7 +693,7 @@ def check_folder(root, m, data_dir=None, bsa_meshes=None, stats=None, progress_c
             if not header.startswith((b"BIK", b"KB2")):
                 rel = os.path.relpath(full, root)
                 issues.append(("ERROR", rel, "not a recognized Bink video (damaged or wrong file) -> original kept in "
-                                             "the mod Off/broken tree; stand-in video installed"))
+                                             "the mod Off/broken tree; stand-in video deployed"))
                 fixes.append(("broken", full, rel, "damaged Bink video"))
     # PNG/JPEG: neither the engine nor a BSA takes them. Converted like the other texture repairs, to DDS under
     # Textures and TGA under BookArt, Icons and Splash. Only there: elsewhere (Extras, fomod images, docs) nothing

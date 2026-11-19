@@ -269,6 +269,7 @@ def nexus_required_by(mod_ids: dict[int, str], manager_dir: str | os.PathLike, *
     return result
 
 
+# --remove before shipping: dev-only (MWManager runs it only with [Dev] dev_options on)
 def suggest_masters(plan: dict, downloads_dir: str | os.PathLike, manager_dir: str | os.PathLike, *,
                     data_dir=None, vortex: dict | None = None, timeout: float = 8) -> list[dict]:
     """Downloaded mods that master_tier makes major or common masters (an ESM, a master category, enough mods
@@ -691,7 +692,7 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         import tkinter as tk
         from tkinter import ttk
         import mwmanager_dialogs as messagebox
-        from mwmanager_theme import COLORS, FONTS, apply_theme, center
+        from mwmanager_theme import COLORS, FONTS, apply_theme, center, master_status_legend, master_status_tags
         root = tk.Toplevel(parent) if parent is not None else tk.Tk()
         if parent is None:
             apply_theme(root)                       # run on its own: no main window has themed it
@@ -702,40 +703,35 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         root.minsize(700, 380)
         outer = ttk.Frame(root, padding=12)
         outer.pack(fill="both", expand=True)
-        ttk.Label(outer, text="Every configured major master was checked before installation.",
+        ttk.Label(outer, text="Every configured major master was checked before staging.",
                   font=FONTS["h2"]).pack(anchor="w")
-        ttk.Label(outer, text="Masters are installed in the order shown. Selecting a master automatically selects "
-                  "its configured prerequisite masters above it; those blue rows stay enabled until every dependent "
+        ttk.Label(outer, text="Masters are staged in the order shown. Selecting a master automatically selects "
+                  "its configured prerequisite masters above it; those red rows stay enabled until every dependent "
                   "master below them is disabled. Double-click a ready row or press Space to include or skip it. "
-                  "Nexus versions are shown as Current or Outdated; missing or unavailable dependencies are red. "
+                  "Nexus versions are shown as Current or Outdated; missing or unavailable dependencies are rust. "
                   "This review makes no file changes.",
                   wraplength=810).pack(anchor="w", pady=(4, 10))
         list_frame = ttk.Frame(outer)
         list_frame.pack(fill="both", expand=True)
         tree = ttk.Treeview(list_frame, columns=("use", "status", "requires"), show="tree headings")
         tree.heading("#0", text="Major master")
-        tree.heading("use", text="Install")
+        tree.heading("use", text="Stage")
         tree.heading("status", text="Status")
         tree.heading("requires", text="Missing / required masters")
         tree.column("#0", width=245, stretch=False)
         tree.column("use", width=75, anchor="center", stretch=False)
         tree.column("status", width=175, stretch=False)
         tree.column("requires", width=360)
-        tree.tag_configure("ready", foreground=COLORS["green"])
-        tree.tag_configure("missing", foreground=COLORS["red"])
-        tree.tag_configure("disabled", foreground=COLORS["muted"])
-        tree.tag_configure("installed", foreground=COLORS["green"])
-        tree.tag_configure("required", foreground=COLORS["blue"])
-        tree.tag_configure("outdated", foreground=COLORS["amber"])
+        master_status_tags(tree)
         tree.grid(row=0, column=0, sticky="nsew")
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=tree.yview)
         scrollbar.grid(row=0, column=1, sticky="ns")
         tree.configure(yscrollcommand=scrollbar.set)
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
-        ttk.Label(outer,
-                  text="Blue — prerequisite master required by a later selected master; disable its dependents first.",
-                  foreground=COLORS["blue"], wraplength=810).pack(anchor="w", pady=(6, 0))
+        legend = ttk.Frame(outer)
+        legend.pack(fill="x", pady=(6, 0))
+        master_status_legend(legend, ("deployed", "not_staged", "locked", "problem", "skipped"), wraplength=810)
         item_ids = [tree.insert("", "end", text=row["name"]) for row in rows]
 
         def refresh():
@@ -746,16 +742,16 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                 version_status = "Outdated" if nexus_status == "outdated" else \
                                  "Current" if nexus_status == "current" else "Version unknown"
                 if row["installed"]:
-                    status, tag, use = "Installed; inspected", "installed", "—"
+                    status, tag, use = "Deployed; inspected", "deployed", "—"
                 elif not row["ready"]:
-                    status, tag, use = "Missing master", "missing", "—"
+                    status, tag, use = "Missing master", "problem", "—"
                 elif i in required_indices:
-                    status, tag, use = f"Required — {version_status}", "required", "☑"
+                    status, tag, use = f"Required — {version_status}", "locked", "☑"
                 elif row["selected"]:
                     status = f"Ready — {version_status}"
-                    tag, use = ("outdated" if nexus_status == "outdated" else "ready"), "☑"
+                    tag, use = "not_staged", "☑"
                 else:
-                    status, tag, use = "Ready (disabled)", "disabled", "☐"
+                    status, tag, use = "Skipped", "skipped", "☐"
                 reasons = "; ".join(row["reasons"]) if row["reasons"] else ", ".join(row["deps"])
                 nexus_detail = row.get("nexus", {}).get("detail")
                 if nexus_detail:
@@ -1452,7 +1448,7 @@ def scan_downloads(downloads_dir: str | os.PathLike, manager_dir: str | os.PathL
             for problem in item["windows_path_collisions"]:
                 print(f"    BLOCKED Windows path collision: {problem}")
             if item["bsas"]:
-                print("    companion BSA(s) to register after installation: " + ", ".join(item["bsas"]))
+                print("    companion BSA(s) to register after deployment: " + ", ".join(item["bsas"]))
     for item in superseded:
         winner_names = sorted({Path(winners[p.casefold()]["archive"]).name for p in item["plugins"]
                                if winners[p.casefold()]["archive"] != item["archive"]}, key=str.casefold)
@@ -1501,14 +1497,14 @@ def scan_downloads(downloads_dir: str | os.PathLike, manager_dir: str | os.PathL
               "ordered_install_masters": identified,
               "core_masters_blocked_for_review": blocked_masters,
               "master_archive_asset_overlaps": asset_overlaps,
-              "install_order_policy": "use only the latest downloaded archive for each exact plugin filename; install selected core masters before dependent plugins",
+              "install_order_policy": "use only the latest downloaded archive for each exact plugin filename; deploy selected core masters before dependent plugins",
               "archive_safety_policy": "archives that cannot be inspected, contain unsafe/traversal paths, or contain Windows path collisions are marked BLOCKED for review; SHA-256 is recorded for provenance",
               "non_master_blacklist": {"plugins_added": sorted(set(newly_blacklisted_plugins), key=str.casefold),
                                        "archives_added": sorted(set(newly_blacklisted_archives), key=str.casefold),
                                        "archives_skipped": skipped_blacklisted,
                                        "candidate_archives": len(matching_candidates),
                                        "archives_inspected": len(candidates)},
-              "bsa_policy": "register companion BSAs in Morrowind.ini after install; inspect for vanilla-unsupported folders and repack when needed"}
+              "bsa_policy": "register companion BSAs in Morrowind.ini after deployment; inspect for vanilla-unsupported folders and repack when needed"}
     if not dry_run:
         output.mkdir(parents=True, exist_ok=True)
         target = output / "mwmanager_core_addon_plan.json"
@@ -1541,7 +1537,7 @@ def scan_downloads(downloads_dir: str | os.PathLike, manager_dir: str | os.PathL
                 lines.extend("      " + problem for problem in item["windows_path_collisions"])
             if item["inspection_error"]:
                 lines.append("    inspection issue: " + item["inspection_error"])
-        lines += ["", "Major masters blocked from installation pending review:"]
+        lines += ["", "Major masters blocked from staging pending review:"]
         lines.extend("  " + master for master in blocked_masters)
         lines += ["", "Non-master plugin blacklist:"]
         lines.append(f"  Candidate archives: {len(matching_candidates)}; inspected: {len(candidates)}; "
@@ -1556,8 +1552,8 @@ def scan_downloads(downloads_dir: str | os.PathLike, manager_dir: str | os.PathL
         for overlap in asset_overlaps:
             lines.append(f"  {overlap['normalized_path']}: " + "; ".join(
                 f"{source['archive']} ({source['path']})" for source in overlap["sources"]))
-        lines += ["", "Install policy: selected core masters and their required assets first; dependent plugins afterwards.",
-                  "Archive safety: do not install packages marked BLOCKED until their unsafe paths or Windows path collisions are reviewed.",
+        lines += ["", "Deploy policy: selected core masters and their required assets first; dependent plugins afterwards.",
+                  "Archive safety: do not deploy packages marked BLOCKED until their unsafe paths or Windows path collisions are reviewed.",
                   "BSA policy: inspect archive contents; BSAs containing Sound, Fonts, Splash, Music, or other unsupported folders must be unpacked and repacked with those folders removed before registration."]
         report.write_text("\n".join(lines) + "\n", encoding="utf-8")
         print(f"  Plans saved to {target} and {report}")
@@ -1769,7 +1765,7 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
 # Stage run is picked up at the package and step where it stopped.
 PACKAGE_STEPS = ("extracted", "tidied", "bsa_checked")
 PACKAGE_PROCESSING_VERSION = 1
-PACKAGE_STEP_LABELS = {"extracted": "extracting the archive", "tidied": "Tidy and the option installer",
+PACKAGE_STEP_LABELS = {"extracted": "extracting the archive", "tidied": "Tidy and the option picker",
                        "bsa_checked": "the BSA check"}
 
 
@@ -2122,7 +2118,7 @@ def apply_plugin_replacement_overrides(trigger_plugin: str, data_dir: str | Path
                 import mwmanager_journal
                 journal = mwmanager_journal.Journal(manager / "journal")
                 if not journal.has_baseline():
-                    messages[-1] = f"Skipped {filename}: no install baseline exists, so the original cannot be journaled."
+                    messages[-1] = f"Skipped {filename}: no game baseline exists, so the original cannot be journaled."
                     journal = None
                     continue
                 run = journal.start_run("core_addons.py", {"trigger_plugin": trigger_plugin})

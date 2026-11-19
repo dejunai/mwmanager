@@ -573,7 +573,7 @@ class GuiTidySteps(unittest.TestCase):
             self.gui.run_tidy_steps("py", Path("s"), Path("d"), progress, "Tidy X", only="X")
         self.assertEqual(len(calls), 6)
         progress.ask_choice.assert_called_once()
-        self.assertEqual(progress.ask_choice.call_args.args[2], [("Try Again", "retry"), ("Stop the install", "stop")])
+        self.assertEqual(progress.ask_choice.call_args.args[2], [("Try Again", "retry"), ("Stop staging", "stop")])
 
     def test_three_changed_plans_can_retry(self):
         pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]
@@ -607,7 +607,7 @@ class GuiTidySteps(unittest.TestCase):
         first_choices = progress.ask_choice.call_args_list[0].args[2]
         second_choices = progress.ask_choice.call_args_list[1].args[2]
         self.assertNotIn(("Apply Anyway", "apply_anyway"), first_choices)
-        self.assertEqual(second_choices, [("Apply Anyway", "apply_anyway"), ("Stop the install", "stop")])
+        self.assertEqual(second_choices, [("Apply Anyway", "apply_anyway"), ("Stop staging", "stop")])
 
     def test_partial_apply_failure_stops_without_hiding_the_error(self):
         pending = ["vortex_tidy plan, x: 1 mod(s)", "MWMANAGER-PLAN: pending plan.txt"]

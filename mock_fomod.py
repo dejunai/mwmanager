@@ -373,7 +373,7 @@ def _discover_fomod(mod_dir: Path, installed: set[str]) -> list[dict]:
                         "image_path": module_image, "all_payload_files": payload, "payload_files": payload,
                         "option_type": "Required", "has_plugin_payload": bool(plugins), "mod_dir": mod_dir})
     for step_index, step in enumerate(steps):
-        step_name = step.attrib.get("name", f"Install step {step_index + 1}")
+        step_name = step.attrib.get("name", f"Option step {step_index + 1}")
         for group_index, group in enumerate(_xml_local(step, "group")):
             group_name = group.attrib.get("name", f"Options {group_index + 1}")
             if re.search(r"\b(?:documentation|readme|changelog|manuals?)\b",
@@ -774,7 +774,7 @@ def _option_badges(folder: str, docs: str, installed: set[str]) -> list[str]:
     text = f"{folder}\n{docs}"
     badges = []
     if _REQUIRED_RE.search(folder) or _REQUIRED_RE.search(docs):
-        badges.append("Always install")
+        badges.append("Always included")
     if _CHOOSE_ONE_RE.search(text):
         badges.append("Choose one")
     seen = set()
@@ -789,10 +789,10 @@ def _option_badges(folder: str, docs: str, installed: set[str]) -> list[str]:
             continue
         seen.add(key)
         met = _requirement_met(name, installed)
-        badges.append(f"Requires {name}" + {True: " (installed)", False: " (not installed)", None: ""}[met])
+        badges.append(f"Requires {name}" + {True: " (deployed)", False: " (not deployed)", None: ""}[met])
     order = _ORDER_RE.search(docs)
     if order:
-        badges.append(f"Install after {order.group('x').strip()}")
+        badges.append(f"Deploy after {order.group('x').strip()}")
     if re.search(r"\bopenmw\b", folder, re.IGNORECASE):
         badges.append("OpenMW")
     if re.search(r"\bmwse\b", folder, re.IGNORECASE) and not re.search(r"\bno[ _-]?mwse\b", folder, re.IGNORECASE):
@@ -1767,9 +1767,9 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         caption = item.get("group_label") or f"{item['number']:02d}"
         target.insert("end", f"{caption} — {item['label']}\n\n")
         if item.get("informational_utility"):
-            target.insert("end", "Optional package: Tamriel Data (HD). This is included as an optional package utility and is not required for the Tamriel Data master installation.\n\n")
+            target.insert("end", "Optional package: Tamriel Data (HD). This is included as an optional package utility and is not required to deploy the Tamriel Data master.\n\n")
         if item.get("utility_folder"):
-            target.insert("end", "EXECUTABLE DETECTED: this folder contains an .exe utility. Any ESP/ESM files listed here may be inputs or outputs for that utility rather than installable plugins. Inspect the folder before selecting it.\n")
+            target.insert("end", "EXECUTABLE DETECTED: this folder contains an .exe utility. Any ESP/ESM files listed here may be inputs or outputs for that utility rather than deployable plugins. Inspect the folder before selecting it.\n")
             target.insert("end", "Executable(s): " + ", ".join(item.get("exe_files", [])) + "\n")
             if item.get("nested_plugin_files"):
                 target.insert("end", "Nested ESP/ESM files (also offered separately where detected): "
@@ -1777,7 +1777,7 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
             else:
                 target.insert("end", "\n")
         if item.get("preset_technology") == "mwse":
-            target.insert("end", "MWSE version selected automatically and locked. OpenMW files are unsupported by this vanilla Morrowind install.\n\n")
+            target.insert("end", "MWSE version selected automatically and locked. OpenMW files are unsupported by this vanilla Morrowind game.\n\n")
         if item.get("badges"):
             target.insert("end", "Readme notes: " + " · ".join(item["badges"]) + "\n\n")
         if item.get("evidence"):
@@ -1788,7 +1788,7 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
             target.insert("end", "Compatibility plugins: " + ", ".join(item["targets"]) + "\n\n")
         if item.get("missing_masters"):
             target.insert("end", "MISSING MASTERS: " + ", ".join(item["missing_masters"])
-                          + "\nThis option may be installed, but Morrowind may refuse to load it or abort at runtime.\n\n")
+                          + "\nThis option may be deployed, but Morrowind may refuse to load it or abort at runtime.\n\n")
         if item.get("fomod_description"):
             target.insert("end", item["fomod_description"] + "\n\n")
         description = _option_description(item, Path(item.get("mod_dir") or item["path"]), page_text)
@@ -2004,10 +2004,10 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         if missing:
             messagebox.showwarning(
                 "Selected option has missing masters",
-                "Some selected options need mods that are not installed:\n\n"
+                "Some selected options need mods that are not deployed:\n\n"
                 + "\n".join(missing)
-                + "\n\nThose options are held, not installed now. MWManager installs them once these mods are "
-                "installed.",
+                + "\n\nThose options are held, not deployed now. MWManager deploys them once these mods are "
+                "deployed.",
                 parent=root)
         result["value"] = chosen
         root.destroy()
@@ -2035,7 +2035,7 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
                              f"  Nested ESP/ESM file(s): {plugin_summary}")
         root.after(150, lambda: messagebox.showwarning(
             "Executable utility found",
-            "One or more option folders contain an .exe utility. Any nested ESP/ESM files may be utility inputs or outputs, not intended for installation. "
+            "One or more option folders contain an .exe utility. Any nested ESP/ESM files may be utility inputs or outputs, not intended for deployment. "
             "The plugins remain available as separate choices; use Open Folder to inspect the files.\n\n"
             + "\n\n".join(summaries), parent=root))
     try:
@@ -2070,7 +2070,7 @@ def _companion_records(mod_dir: Path) -> list[dict]:
     for order, companion in enumerate(marker.get("companions") or []):
         archive = Path(companion["archive"])
         docs = (f"Separate download: {archive.name} ({int(companion.get('size_bytes') or 0) / 1048576:,.0f} MB). "
-                f"Extracted and installed over {companion.get('master') or mod_dir.name} only if you choose it.")
+                f"Extracted and deployed over {companion.get('master') or mod_dir.name} only if you choose it.")
         badges = [companion["label"]]
         if companion.get("warning"):
             badges.append("Older than the master")
@@ -2401,7 +2401,7 @@ def record_pending_options(output_dir: Path, mod_dir: Path, records: list[dict],
     os.replace(temp, path)
     for item in waiting.values():
         if item["status"] == "waiting":
-            print(f"  {mod_dir.name}: option '{item['label']}' waits on {', '.join(item['needs'])} (not installed)")
+            print(f"  {mod_dir.name}: option '{item['label']}' waits on {', '.join(item['needs'])} (not deployed)")
     return waiting
 
 
@@ -2414,7 +2414,7 @@ def held_options(records: list[dict], chosen: set[str], installed: set[str]) -> 
 
 def ask_see_options(package: str, arrived: list[str], labels: list[str]) -> bool:
     """A mod that an option the user didn't choose works with has just been installed: offer to show it."""
-    text = (f"You just installed {', '.join(arrived)}.\n\n{package} has an optional component you didn't choose "
+    text = (f"You just deployed {', '.join(arrived)}.\n\n{package} has an optional component you didn't choose "
             f"before that works with it: {', '.join(labels)}.\n\nSee it now?")
     try:
         import tkinter as tk
@@ -2530,8 +2530,8 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
                 chosen = selected | held
                 for r in pending:
                     if r["key"] in ready:
-                        print(f"  {entry.get('plugin') or mod_dir.name}: installing option '{r.get('label') or r['key']}'"
-                              f" now that what it needs is installed")
+                        print(f"  {entry.get('plugin') or mod_dir.name}: deploying option '{r.get('label') or r['key']}'"
+                              f" now that what it needs is deployed")
             else:
                 print(f"\nCompatibility option(s) may now apply to {entry.get('plugin')}: "
                       f"{', '.join(sorted(newly_relevant))}")
@@ -2623,7 +2623,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             answered_groups = _legacy_answer_groups(records)
         if answer is not None and _reuse_saved_answers() and _legacy_answer_groups(records) <= answered_groups:
             chosen = sorted(previous)       # every group already answered and nothing new: no window
-            print(f"{mod_dir.name}: saved installer choices applied")
+            print(f"{mod_dir.name}: saved option choices applied")
         else:
             chosen = _show_selector(mod_dir.name, records, previous, installed, answered_groups)
         if chosen is None:

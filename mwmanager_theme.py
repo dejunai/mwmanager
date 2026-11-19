@@ -266,6 +266,29 @@ def center(window: tk.Misc, parent: tk.Misc | None = None, width: int | None = N
     window.geometry(f"{width}x{height}+{x}+{y}")
 
 
+# One palette for a major master's state in every window (staging review and Major Masters).
+# Enabled is the ☑ mark, not a colour, so it reads the same at every state.
+MASTER_STATUS = {
+    "deployed": ("green", "Green — deployed into Data Files"),
+    "staged": ("blue", "Blue — staged, not deployed yet"),
+    "not_staged": ("amber", "Amber — not staged"),
+    "locked": ("red", "Red — required by another master; cannot be disabled"),
+    "problem": ("rust", "Rust — missing or needs repair"),
+    "skipped": ("muted", "Grey — skipped"),
+}
+
+
+def master_status_tags(tree: ttk.Treeview) -> None:
+    for tag, (tone, _label) in MASTER_STATUS.items():
+        tree.tag_configure(tag, foreground=COLORS[tone])
+
+
+def master_status_legend(parent, keys, wraplength=660) -> None:
+    for key in keys:
+        tone, label = MASTER_STATUS[key]
+        ttk.Label(parent, text=label, foreground=COLORS[tone], wraplength=wraplength, justify="left").pack(anchor="w")
+
+
 def tree_tags(tree: ttk.Treeview) -> None:
     """Shared row tags for load-order style trees: zebra striping plus status foregrounds."""
     c = COLORS

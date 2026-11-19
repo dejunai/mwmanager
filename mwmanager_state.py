@@ -523,7 +523,7 @@ def write_generated(data_dir, game_dir, items, log):
         import mwmanager_journal
         install_ledger = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
         if not install_ledger.has_baseline():
-            raise RuntimeError("generated files require an install baseline so rollback can remove them")
+            raise RuntimeError("generated files require a game baseline so rollback can remove them")
         ledger_run = install_ledger.start_run("mwmanager.py", {"operation": "generate missing assets"})
     for item in items:
         rel, why, source = (item + (None,))[:3]

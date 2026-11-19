@@ -113,7 +113,7 @@ def write(game_dir, data_dir, plugins, log=print, *, manager_dir=None):
         game, manager = Path(game_dir).resolve(), Path(manager_dir).resolve()
         ledger = Journal(manager / "journal")
         if not ledger.has_baseline():
-            log("WARNING: distant-land overrides were not changed: record an install baseline first.")
+            log("WARNING: distant-land overrides were not changed: record a game baseline first.")
             return None
         with mutation_lock(manager, game):
             root = manager / "transactions" / "ghost-statics"

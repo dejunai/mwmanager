@@ -219,6 +219,17 @@ class WorkflowGuiTests(unittest.TestCase):
         options.assert_called_once()
         job.assert_not_called()
 
+    def test_master_suggestions_run_only_with_dev_options(self):
+        downloads = Path(self.app.settings["game_dir"]).parent / "downloads"
+        downloads.mkdir(exist_ok=True)
+        self.app.settings["archive_downloads_dir"] = str(downloads)
+        for dev, expected in ((False, 0), (True, 1)):
+            self.app.settings["dev_options"] = dev
+            with mock.patch.object(self.app, "_run_progress_job") as job,                     mock.patch("core_addons.scan_downloads", return_value={"archives": []}),                     mock.patch("core_addons.verify_nexus_versions", side_effect=lambda plan, **_: plan),                     mock.patch("core_addons.find_companions"),                     mock.patch("core_addons.prepare_core_master_review"),                     mock.patch("core_addons.suggest_masters", return_value=[]) as suggest:
+                self.app.stage_major_masters(force_scan=True)
+                job.call_args.args[2](mock.Mock())
+            self.assertEqual(suggest.call_count, expected)
+
     def test_same_session_resume_keeps_confirmed_paths_and_checkpoints(self):
         self.app.settings.update(first_run=1, paths_confirmed=False)
         self.app._setup_start()
