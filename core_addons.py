@@ -399,6 +399,36 @@ def _parse_seven_zip_listing(output: str) -> tuple[dict[str, str], list[dict[str
     return archive, records
 
 
+def _check_staging_archive(archive: Path, seven_zip: str | None) -> None:
+    """Apply the plugin installer's member-count, size and link limits before staging a major master."""
+    import plugin_install as pi
+    if archive.suffix.casefold() == ".zip":
+        with zipfile.ZipFile(archive) as zf:
+            infos = [info for info in zf.infolist() if not info.is_dir()]
+        sizes = [(info.filename, info.file_size) for info in infos]
+        # 0x400 is FILE_ATTRIBUTE_REPARSE_POINT in the MS-DOS attributes
+        links = [info.filename for info in infos
+                 if (info.external_attr >> 16) & 0o170000 == 0o120000 or info.external_attr & 0x400]
+    else:
+        _archive, records, error = _seven_zip_listing(archive, seven_zip)
+        if error:
+            raise RuntimeError(f"{archive.name} could not be inspected: {error}")
+        sizes = [(record.get("path", ""), pi._technical_size(record.get("size"))) for record in records]
+        links = [record.get("path", "") for record in records
+                 if pi._seven_zip_member_is_link(record) or any(
+                     pi._technical_link_value(record.get(field))
+                     for field in ("symbolic link", "hard link", "reparse", "reparse point"))]
+    if links:
+        raise ValueError(f"Archive contains symbolic links or junctions: {', '.join(links[:10])}")
+    if len(sizes) > pi.MAX_ARCHIVE_MEMBERS:
+        raise ValueError(f"Archive has too many members ({len(sizes):,}): {archive.name}")
+    oversized = [name for name, size in sizes if size > pi.MAX_EXPANDED_MEMBER_BYTES]
+    if oversized:
+        raise ValueError(f"Archive member expands beyond the safety limit: {oversized[0]}")
+    if sum(size for _name, size in sizes) > pi.MAX_EXPANDED_ARCHIVE_BYTES:
+        raise ValueError(f"Archive expands beyond the safety limit: {archive.name}")
+
+
 def _seven_zip_listing(path: Path, seven_zip: str | None) -> tuple[
         dict[str, str], list[dict[str, str]], str | None]:
     if not seven_zip:
@@ -1706,6 +1736,7 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
             if progress_callback:
                 progress_callback(extraction_status(archive, index, len(ordered_archives)))
             if archive.suffix.casefold() == ".zip":
+                _check_staging_archive(archive, seven_zip)
                 with zipfile.ZipFile(archive) as zf:
                     members = zf.infolist()
                     heartbeat = time.monotonic()
@@ -1731,6 +1762,7 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
             else:
                 if not seven_zip:
                     raise ValueError("7-Zip is required to extract this archive.")
+                _check_staging_archive(archive, seven_zip)
                 import managed_processes
                 result = managed_processes.run([seven_zip, "x", f"-o{destination}", "-y", "--", str(archive)],
                                         progress=progress_callback,
@@ -1740,6 +1772,8 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
                 if result.returncode:
                     raise RuntimeError((result.stderr or result.stdout or
                                          f"7-Zip exited with code {result.returncode}")[-2000:])
+                import plugin_install
+                plugin_install._assert_no_links(destination)
             complete_package_step(destination, "extracted")
             if published.exists():
                 # Keep the old package until the replacement is fully extracted.

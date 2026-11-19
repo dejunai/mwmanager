@@ -343,13 +343,29 @@ def _fomod_payload(mod_dir: Path, plugin: ET.Element, payload_root: Path | None 
     return payload
 
 
+MAX_FOMOD_CONFIG_BYTES = 5 * 1024 ** 2
+
+
+def parse_fomod_config(config: Path):
+    """Parse a downloaded ModuleConfig.xml. Real FOMOD configs never need a DTD, and one can declare
+    nested entities that exhaust memory, so a DOCTYPE or an oversized file is refused as a parse error."""
+    if Path(config).stat().st_size > MAX_FOMOD_CONFIG_BYTES:
+        raise ET.ParseError(f"FOMOD config is larger than {MAX_FOMOD_CONFIG_BYTES:,} bytes: {config}")
+    data = Path(config).read_bytes()
+    lowered = data.lower()                            # ASCII-only, so UTF-16 bytes stay comparable
+    if any(token.encode(codec) in lowered for token in ("<!doctype", "<!entity")
+           for codec in ("utf-8", "utf-16-le", "utf-16-be")):
+        raise ET.ParseError(f"FOMOD config declares a DTD, which MWManager does not read: {config}")
+    return ET.fromstring(data)
+
+
 def _discover_fomod(mod_dir: Path, installed: set[str]) -> list[dict]:
     """Translate a FOMOD ModuleConfig into the same choice records used by the mock installer UI."""
     config = _fomod_config(mod_dir)
     if not config:
         return []
     try:
-        root = ET.parse(config).getroot()
+        root = parse_fomod_config(config)
     except (OSError, ET.ParseError):
         return []
     shared_docs = _read_docs([mod_dir / "Docs", mod_dir / "docs"])

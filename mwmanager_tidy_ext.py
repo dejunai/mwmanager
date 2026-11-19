@@ -191,7 +191,8 @@ def fomod_declared_paths(mod_dir):
         protected_files.add(os.path.normcase(str(config.resolve())))
         protected_dirs.add(os.path.normcase(str(config.parent.resolve())))
         try:
-            root = ET.parse(config).getroot()
+            from mock_fomod import parse_fomod_config
+            root = parse_fomod_config(config)
         except (OSError, ET.ParseError):
             continue
         source_root = config.parent.parent if config.parent.name.casefold() == "fomod" else config.parent
