@@ -113,6 +113,11 @@ class Companions(unittest.TestCase):
         self.assertEqual([c["name"] for c in self.plan["archives"][0]["companions"] if c["kind"] == "voice"],
                          ["Patch for Purists - Voices"])
 
+    def test_voice_pack_row_names_only_the_npcs_it_voices(self):
+        self.vortex[VOICE.casefold()]["name"] = "OAAB Data - Dark Elves Female Part 2"
+        self.assertEqual(self.companions(self.vortex)["voice"]["short"], "Dark Elves Female Part 2")
+        self.assertEqual(core_addons._after_name("Tamriel Rebuilt - Argonians", "Tamriel Rebuilt"), "Argonians")
+
     def test_without_vortex_the_hd_pack_is_found_by_the_id_in_its_name(self):
         self.assertEqual(set(self.companions({})), {"hd"})
 
@@ -126,9 +131,12 @@ class Companions(unittest.TestCase):
         (package / ".mwmanager-stage.json").write_text(json.dumps({"companions": list(found.values())}),
                                                        encoding="utf-8")
         records = mock_fomod._companion_records(package)
-        self.assertEqual(sorted(r["label"].split(":")[0] for r in records),
-                         ["HD pack available", "Voice pack available"])
         hd, voice = sorted(records, key=lambda r: r["label"])
+        self.assertTrue(hd["label"].startswith("HD pack available:"))
+        self.assertEqual(voice["label"], "OAAB Data")       # nothing follows the master's name: the whole title
+        self.assertEqual((voice["group_key"], voice["selection_type"], voice["recommended"]),
+                         ("companion:voice", "SelectAny", True))
+        self.assertNotIn("recommended", hd)
         self.assertIn("Older than the master", hd["badges"])
         self.assertIn("may overwrite newer files", hd["docs"])
         self.assertFalse(hd["required"])

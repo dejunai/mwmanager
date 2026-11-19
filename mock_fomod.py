@@ -2075,13 +2075,20 @@ def _companion_records(mod_dir: Path) -> list[dict]:
         if companion.get("warning"):
             badges.append("Older than the master")
             docs += "\n\nWarning: " + companion["warning"]
-        records.append({"key": "companion:" + archive.name, "path": None, "number": 950 + order,
-                        "label": f"{companion['label']}: {companion.get('name') or archive.stem}",
-                        "required": False, "core_bundle": False, "has_plugin_payload": False,
-                        "has_master_payload": False, "informational_utility": False, "targets": [],
-                        "compatible": [], "missing_masters": [], "docs": docs, "mod_dir": mod_dir,
-                        "badges": badges, "outputs": set(), "group_label": "Companion downloads",
-                        "companion": companion})
+        record = {"key": "companion:" + archive.name, "path": None, "number": 950 + order,
+                  "label": f"{companion['label']}: {companion.get('name') or archive.stem}",
+                  "required": False, "core_bundle": False, "has_plugin_payload": False,
+                  "has_master_payload": False, "informational_utility": False, "targets": [],
+                  "compatible": [], "missing_masters": [], "docs": docs, "mod_dir": mod_dir,
+                  "badges": badges, "outputs": set(), "group_label": "Companion downloads",
+                  "companion": companion}
+        if companion.get("kind") == "voice":
+            # all voice packs in one box, all chosen; each row names only the NPCs it voices
+            docs += f"\n\nFull name: {companion.get('name') or archive.stem}"
+            record.update(label=companion.get("short") or companion.get("name") or archive.stem, docs=docs,
+                          group_key="companion:voice", group_label="Voice packs", selection_type="SelectAny",
+                          recommended=True)
+        records.append(record)
     return records
 
 

@@ -116,6 +116,15 @@ def _starts_with_name(title: str, name: str) -> bool:
     return bool(want) and words(title)[:len(want)] == want
 
 
+def _after_name(title: str, name: str) -> str:
+    """What a voice pack adds after its master's name: "Tamriel Rebuilt - Dark Elves Female Part 2" ->
+    "Dark Elves Female Part 2". The whole title when nothing follows the name."""
+    words = re.findall(r"[a-z0-9]+", name.casefold())
+    match = re.match(r"[^a-z0-9]*" + r"[^a-z0-9]+".join(map(re.escape, words)), title, re.I) if words else None
+    rest = title[match.end():].strip(" -–—:_,.") if match else ""
+    return rest or title
+
+
 def find_companions(plan: dict, downloads_dir: str | os.PathLike, manager_dir: str | os.PathLike, *,
                     vortex: dict | None = None) -> dict:
     """Downloads that go with a found master but are never masters themselves (no ESM): its HD pack (same Nexus
@@ -157,10 +166,11 @@ def find_companions(plan: dict, downloads_dir: str | os.PathLike, manager_dir: s
                 info = vortex.get(path.name.casefold()) or {}
                 mod_id = info.get("mod_id") or _archive_mod_id(path)
                 title = info.get("name") or path.stem
+                voice_of = None
                 if master_id and mod_id == master_id:
                     kind = "hd" if re.search(r"(?<![a-z])hd(?![a-z])", title.casefold()) else "extra"
-                elif str(info.get("category", "")).casefold() == "audio" and any(
-                        names_mod(n, title) and _starts_with_name(title, n) for n in names):
+                elif str(info.get("category", "")).casefold() == "audio" and (voice_of := next(
+                        (n for n in names if names_mod(n, title) and _starts_with_name(title, n)), None)):
                     kind = "voice"
                 else:
                     continue
@@ -171,6 +181,8 @@ def find_companions(plan: dict, downloads_dir: str | os.PathLike, manager_dir: s
                          "voice": "Voice pack available"}[kind]
                 companion = {"archive": str(path), "kind": kind, "label": label, "name": title, "master": master,
                              "version": ".".join(map(str, version)) or None, "size_bytes": path.stat().st_size}
+                if voice_of:
+                    companion["short"] = _after_name(title, voice_of)
                 # a voice pack is versioned on its own; only a file of the master's own Nexus mod is comparable
                 if kind != "voice" and version and master_version and version < master_version:
                     companion["warning"] = (
