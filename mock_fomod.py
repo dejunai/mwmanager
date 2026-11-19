@@ -2004,9 +2004,10 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         if missing:
             messagebox.showwarning(
                 "Selected option has missing masters",
-                "The selected option requires master plugin(s) that are not installed:\n\n"
+                "Some selected options need mods that are not installed:\n\n"
                 + "\n".join(missing)
-                + "\n\nYou can continue installing it, but Morrowind may refuse to load the plugin or abort at runtime.",
+                + "\n\nThose options are held, not installed now. MWManager installs them once these mods are "
+                "installed.",
                 parent=root)
         result["value"] = chosen
         root.destroy()
