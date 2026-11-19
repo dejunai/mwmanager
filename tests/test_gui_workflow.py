@@ -70,6 +70,8 @@ class WorkflowLogicTests(unittest.TestCase):
         self.assertEqual(progress_fraction("1,000 of 2,000 files"), (1000, 2000))
         self.assertIsNone(progress_fraction("still working"))
         self.assertIsNone(progress_fraction("1 of 0"))
+        self.assertEqual(progress_fraction("[3/12] reading Tribunal.esm"), (3, 12))
+        self.assertEqual(progress_fraction("BSAPack: Processed 40 / 80 files"), (40, 80))
 
     def test_preflight_cache_invalidates_after_change_or_removal(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -182,6 +184,19 @@ class WorkflowGuiTests(unittest.TestCase):
         view.append("MWMANAGER-STAGE: Hardlinking OAAB: 500 files scanned; 500 linked")
         self.assertIn("500 files scanned", view.stage.get())
         self.assertNotIn("Hardlinking OAAB", view.log.get("1.0", "end"))
+
+    def test_action_line_follows_current_work(self):
+        from mwmanager_workflow import JobView
+        view = JobView(self.app)
+        view.append("Staging master 3 of 10: OAAB_Data")
+        view.append("Tidy OAAB_Data: Applying Tidy moves 2,000 of 6,578")
+        self.assertIn("Staging master 3 of 10", view.stage.get())
+        self.assertIn("Applying Tidy moves 2,000", view.activity.get())
+        self.assertEqual((str(view.progress["mode"]), int(view.progress["value"])), ("determinate", 2000))
+        for detail in ("  indented detail", "####################", "ASSET CHECK (each mod's own files)",
+                       "G:\\projects\\MWManager\\outputs\\plan.txt"):
+            view.append(detail)
+        self.assertIn("Applying Tidy moves 2,000", view.activity.get())
 
     def test_cancel_waits_for_safe_boundary_and_all_actions_restore(self):
         started, release = threading.Event(), threading.Event()

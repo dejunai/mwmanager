@@ -73,11 +73,19 @@ def log_tone(message):
 
 def progress_fraction(message):
     """Only explicit counters are determinate; never invent time estimates."""
-    match = re.search(r"(?:^|\b)(\d[\d,]*)\s+(?:of|/)\s+(\d[\d,]*)\b", message, re.I)
+    match = re.search(r"(?:^|\b)(\d[\d,]*)(?:\s+of\s+|\s*/\s*)(\d[\d,]*)\b", message, re.I)
     if not match:
         return None
     current, total = (int(value.replace(",", "")) for value in match.groups())
     return (current, total) if total > 0 and 0 <= current <= total else None
+
+
+def is_action_line(message):
+    """A top-level line that says what is happening now: not detail, separators, headings or bare paths."""
+    text = str(message)
+    line = text.strip()
+    return (bool(line) and text[:1] not in (" ", "\t") and re.match(r"[A-Za-z\[]", line) is not None
+            and not line.split("(")[0].strip().isupper() and not re.match(r"[A-Za-z]:\\", line))
 
 
 PHASES = (
@@ -118,10 +126,12 @@ class JobView:
         self.title = tk.StringVar()
         self.stage = tk.StringVar(value="Starting...")
         self.description = tk.StringVar()
+        self.activity = tk.StringVar()      # the latest top-level action, under the coarser stage
         ttk.Label(frame, textvariable=self.title, style="H2.TLabel").pack(anchor="w")
         ttk.Label(frame, textvariable=self.description, style="Muted.TLabel",
                   wraplength=650, justify="left").pack(fill="x", pady=(6, 12))
-        ttk.Label(frame, textvariable=self.stage, style="H3.TLabel", wraplength=650).pack(fill="x", pady=(0, 8))
+        ttk.Label(frame, textvariable=self.stage, style="H3.TLabel", wraplength=650).pack(fill="x", pady=(0, 2))
+        ttk.Label(frame, textvariable=self.activity, style="Muted.TLabel", wraplength=650).pack(fill="x", pady=(0, 8))
         logs = ttk.Frame(frame)
         logs.pack(fill="both", expand=True)
         self.log = tk.Text(logs, height=14, width=70, wrap="word", state="disabled",
@@ -177,6 +187,7 @@ class JobView:
         self.title.set(title)
         self.description.set(description)
         self.stage.set("Starting...")
+        self.activity.set("")
         self.resume.pack_forget()
         self.close.pack_forget()
         self.force.pack_forget()
@@ -225,6 +236,8 @@ class JobView:
             if not stopping and text.startswith(("Preflight:", "Staging master ", "Cataloguing", "Tidying", "Sorting",
                                                  "Opening", "Checking BSA", "Running tidy")):
                 self.stage.set(text.strip()[:180])
+            elif not stopping and is_action_line(text):
+                self.activity.set(text.strip()[:180])
             self.log.configure(state="normal")
             self.log.insert("end", text.rstrip() + "\n", log_tone(text))
             excess = int(self.log.index("end-1c").split(".")[0]) - 4000
@@ -234,8 +247,7 @@ class JobView:
                 self.log.see("end")
             self.log.configure(state="disabled")
         fraction = progress_fraction(text)
-        if fraction and (text.startswith("MWMANAGER-STAGE:") or
-                         re.match(r"(?:Staging master|Cataloguing|Removing deployed masters)", text)):
+        if fraction and (text.startswith("MWMANAGER-STAGE:") or is_action_line(text)):
             self.progress.stop()
             self.progress.configure(mode="determinate", maximum=fraction[1], value=fraction[0])
 
@@ -261,6 +273,7 @@ class JobView:
         self.window.grab_release()      # the job is over: begin()'s input grab must not outlive it
         self.refresh_phases()
         self.stage.set("Paused. Resume setup when ready." if error else "Step complete. Continuing setup...")
+        self.activity.set("")
         self.window.protocol("WM_DELETE_WINDOW", self.window.withdraw)
         self.close.pack(side="right")
         if self.setup and error is not None:
