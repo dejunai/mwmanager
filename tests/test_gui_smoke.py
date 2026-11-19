@@ -486,6 +486,30 @@ class GuiSmokeTests(unittest.TestCase):
                                    "archive_source": "unmanaged"}])
         self.assertEqual(self.errors, [])
 
+    def test_options_window_has_always_pack_bsa_checkbox_off_by_default(self):
+        self.app.settings.pop(self.g.ALWAYS_BSA_SETTING, None)
+        before = set(self.app.winfo_children())
+        self.app.open_options(first_run=False)
+        self.pump(0.2)
+        dialog = next(w for w in self.app.winfo_children() if w not in before and w.winfo_class() == "Toplevel")
+        found = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                found.append(child)
+                walk(child)
+        walk(dialog)
+        box = next(w for w in found if w.winfo_class() == "TCheckbutton" and w.cget("text") == "Always Pack BSA")
+        self.assertNotIn("selected", box.state())
+        box.invoke()
+        mb = self.g.messagebox                                  # no real prompt may open during the test
+        with mock.patch.object(self.g, "write_settings"), mock.patch.object(mb, "_prompt", return_value=True),                 mock.patch.object(mb, "showerror") as error:
+            next(w for w in found if w.winfo_class() == "TButton" and w.cget("text") == "Save").invoke()
+            self.pump(0.2)
+        error.assert_not_called()
+        self.assertIs(self.app.settings[self.g.ALWAYS_BSA_SETTING], True)
+        self.assertEqual(self.errors, [])
+
     def test_first_path_approval_skips_the_second_options_window(self):
         import mwmanager_detect
         game = Path(self.app.settings["game_dir"])

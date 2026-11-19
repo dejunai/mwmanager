@@ -1821,7 +1821,12 @@ class ManagerGUI(tk.Tk):
                 row=row, column=0, columnspan=2, sticky="w")
             row += 1
             ttk.Entry(form, textvariable=bsa_offer_var, width=12).grid(
-                row=row, column=0, sticky="w", pady=(3, 12))
+                row=row, column=0, sticky="w", pady=(3, 4))
+            row += 1
+        always_bsa_var = tk.BooleanVar(value=bool(self.settings.get(ALWAYS_BSA_SETTING)))
+        if first_run:
+            ttk.Checkbutton(form, text="Always Pack BSA", variable=always_bsa_var).grid(
+                row=row, column=0, columnspan=2, sticky="w", pady=(0, 12))
             row += 1
 
         def approve():
@@ -1851,6 +1856,7 @@ class ManagerGUI(tk.Tk):
                 return
             self.settings.update({"game_dir": str(game), "archive_downloads_dir": folder,
                                   "archive_source": source, BSA_OFFER_SETTING: bsa_offer,
+                                  ALWAYS_BSA_SETTING: always_bsa_var.get(),
                                   "first_run": 1, "init_complete": 0})
             write_settings(self.settings)
             self._setup_start()
@@ -5388,7 +5394,10 @@ class ManagerGUI(tk.Tk):
         ttk.Label(form, text="Used to find downloaded mods. Staging is configured separately.", wraplength=520).grid(row=4, column=0, columnspan=2, sticky="w", pady=(0, 12))
         ttk.Label(form, text="Offer BSA when this many assets are found").grid(
             row=5, column=0, columnspan=2, sticky="w")
-        ttk.Entry(form, textvariable=bsa_offer_var, width=12).grid(row=6, column=0, sticky="w", pady=(3, 12))
+        ttk.Entry(form, textvariable=bsa_offer_var, width=12).grid(row=6, column=0, sticky="w", pady=(3, 4))
+        always_bsa_var = tk.BooleanVar(value=bool(self.settings.get(ALWAYS_BSA_SETTING)))
+        ttk.Checkbutton(form, text="Always Pack BSA", variable=always_bsa_var).grid(
+            row=7, column=0, columnspan=2, sticky="w", pady=(0, 12))
 
         def save_close():
             game, downloads = Path(game_var.get()).expanduser(), Path(downloads_var.get()).expanduser()
@@ -5417,6 +5426,7 @@ class ManagerGUI(tk.Tk):
             self.settings["game_dir"] = str(game)
             self.settings["archive_downloads_dir"] = str(downloads) if downloads_var.get().strip() else ""
             self.settings[BSA_OFFER_SETTING] = bsa_offer
+            self.settings[ALWAYS_BSA_SETTING] = always_bsa_var.get()
             if archive_source is not None:
                 self.settings["archive_source"] = archive_source
             if first_run:
@@ -5481,7 +5491,7 @@ class ManagerGUI(tk.Tk):
                 self.status.set("Options saved.")
 
         buttons = ttk.Frame(form)
-        buttons.grid(row=7, column=0, columnspan=2, sticky="e")
+        buttons.grid(row=8, column=0, columnspan=2, sticky="e")
         def cancel_options():
             dialog.destroy()
             if first_run:
