@@ -58,3 +58,6 @@ venv/
 .claude/
 .vscode/
 .idea/
+
+# Run lock held by the vendored tools
+mwdialog.lock
