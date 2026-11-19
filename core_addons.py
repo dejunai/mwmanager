@@ -26,6 +26,7 @@ BUILTIN_MASTERS = {
     "tr_mainland.esm": ("tamriel rebuilt", "tamrielrebuild"),
     "cyr_main.esm": ("project cyrodiil", "cyr_main", "province cyrodiil"),
     "sky_main.esm": ("skyrim home of the nords", "sky_main", "shotn"),
+    "solstheim tomb of the snow prince.esm": ("solstheim tomb of the snow prince",),
 }
 NEXUS_MOD_IDS = {
     "patch for purists.esm": 45096,
