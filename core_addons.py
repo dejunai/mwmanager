@@ -38,6 +38,7 @@ NEXUS_MOD_IDS = {
     "tr_mainland.esm": 42145,
     "cyr_main.esm": 44922,
     "sky_main.esm": 44921,
+    "solstheim tomb of the snow prince.esm": 46810,
 }
 # Exclusive variants: the same ESM published as separate Nexus mods; exactly one is installed.
 MASTER_VARIANTS = {"tamriel_data.esm": {"HD": 59927, "SD": 44537}}

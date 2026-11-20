@@ -62,7 +62,7 @@ class VortexAndNames(unittest.TestCase):
     def test_a_master_the_user_added_takes_its_mod_id_from_its_archive(self):
         archive = "Solstheim Tomb of the Snow Prince-46810-2-3-0-1731263823.7z"
         self.assertEqual(core_addons.master_mod_id("Solstheim Tomb of The Snow Prince.esm", archive), 46810)
-        self.assertIsNone(core_addons.master_mod_id("Solstheim Tomb of The Snow Prince.esm"))
+        self.assertIsNone(core_addons.master_mod_id("Unlisted Master.esm"))
         renamed = {"snow prince.7z": {"mod_id": 46810}}                     # no ID in the name: Vortex knows it
         self.assertEqual(core_addons.master_mod_id("Snow.esm", "K:/dl/Snow Prince.7z", renamed), 46810)
         self.assertIsNone(core_addons.master_mod_id("Snow.esm", "K:/dl/Other.7z", renamed))
