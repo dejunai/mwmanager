@@ -440,6 +440,42 @@ class PluginPathSafetyTests(unittest.TestCase):
             self.assertTrue(remaining[0]["operations"][0]["target"].endswith("Changed.esp"))
 
 
+    def test_a_removed_mod_is_unpacked_again_from_its_archive(self):
+        """Rolling back a mod puts its staged folder back to what its archive holds, not a tidy undo log."""
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = Path(tmp) / "manager"
+            data = Path(tmp) / "game" / "Data Files"
+            package = manager / "staging" / "plugins" / "Mod"
+            data.mkdir(parents=True)
+            source = package / "Mod.esp"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"tidied plugin")
+            (package / "Off").mkdir()
+            os.link(source, data / "Mod.esp")
+            archive = Path(tmp) / "Mod-123-1-0.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("Data Files/Mod.esp", "plugin as shipped")
+            state = {"version": 1, "deployments": [{
+                "id": "mod", "label": "Mod", "plugins": ["Mod.esp"], "archives": [], "registered_archives": [],
+                "archive": str(archive), "staging_package": str(package), "mod": "archive-Mod-123-1-0",
+                "operations": [{"source": str(source), "target": str(data / "Mod.esp"), "backup": None,
+                                "size": 13, "sha256": None}]}]}
+            (manager / "plugin_deployments.json").write_text(json.dumps(state), encoding="utf-8")
+            result = plugin_install.remove_deployments(manager, data, {"mod"})
+            self.assertFalse((data / "Mod.esp").exists())
+            self.assertEqual(result["unpack"], [{"package": str(package), "archive": str(archive), "label": "Mod"}])
+            with mock.patch.object(plugin_install, "analyze_archive", return_value={"blocked": False}):
+                plugin_install.unpack_again(manager, package, archive)
+            self.assertEqual((package / "Data Files/Mod.esp").read_bytes(), b"plugin as shipped")
+            self.assertFalse((package / "Off").exists())
+            with self.assertRaises(ValueError):
+                plugin_install.unpack_again(manager, Path(tmp) / "elsewhere", archive)
+            with self.assertRaises(FileNotFoundError):
+                plugin_install.unpack_again(manager, package, Path(tmp) / "gone.zip")
+            self.assertTrue(package.is_dir())                  # no archive: the folder is left as it is
+
+
 class JobCancellationTests(unittest.TestCase):
     def test_tidy_without_output_still_observes_cancellation(self):
         class BlockingOutput:

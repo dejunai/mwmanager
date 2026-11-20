@@ -584,7 +584,7 @@ class GuiProbes(unittest.TestCase):
         self.assertTrue(all(path.exists() for path in backups))
         self.assertTrue(all(not path.is_relative_to(package) for path in backups))
         preserved = root / "journal/originals" / hashlib.sha256(b"original game texture").hexdigest()
-        self.assertTrue(preserved.is_file())
+        self.assertFalse(preserved.exists())     # not a game original: no journal copy; the backup restores it
         result = deploy.remove_deployed(package.parent, data, root)
         self.assertEqual(result["pending"], 0)
         self.assertEqual((data / "Textures/a.dds").read_bytes(), b"original game texture")

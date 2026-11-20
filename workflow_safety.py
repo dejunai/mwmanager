@@ -172,9 +172,19 @@ class DurableTransaction:
 
     def safe(self, path):
         path = Path(path)
-        if not path.is_absolute() or not any(path.resolve().is_relative_to(p) for p in self.allowed):
+        if not path.is_absolute() or not any(self._resolved(path).is_relative_to(p) for p in self.allowed):
             raise ValueError(f"Unsafe transaction path: {path}")
         return path
+
+    def _resolved(self, path):
+        """path.resolve(), with each folder resolved once: resolving every one of 600,000 files opened each."""
+        if path.name in ("", ".", "..") or path.is_symlink():
+            return path.resolve()
+        cache = self.__dict__.setdefault("_resolved_dirs", {})
+        parent = cache.get(path.parent)
+        if parent is None:
+            parent = cache[path.parent] = path.parent.resolve()
+        return parent / path.name
 
     def save(self):
         atomic_json(self.path, self.state)
@@ -255,10 +265,13 @@ class DurableTransaction:
                 operation["sha256"] = digest(source)
             operations.append(operation)
         self.record_many(operations)  # Durable before any backup or link changes the game.
+        made = self.__dict__.setdefault("_made_dirs", set())
         for operation in operations:
             source, target = Path(operation["source"]), Path(operation["target"])
             backup = Path(operation["backup"]) if operation.get("backup") else None
-            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.parent not in made:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                made.add(target.parent)
             if backup:
                 backup.parent.mkdir(parents=True, exist_ok=True)
                 os.replace(target, backup)

@@ -2658,8 +2658,15 @@ class ManagerGUI(tk.Tk):
         def worker(progress):
             staging_root.mkdir(parents=True, exist_ok=True)
             from preinstall import run_preinstall
-            preflight_result = run_preinstall(game_dir, APP_DIR, progress,
-                                              archive_dir=self.settings.get("archive_downloads_dir"))
+            cached_preflight = getattr(self, "_preflight_signature", None)
+            if cached_preflight is not None and cached_preflight == preflight_signature(game_dir):
+                progress("Reusing this session's successful preflight; prerequisite files are unchanged.")
+                preflight_result = True
+            else:
+                preflight_result = run_preinstall(game_dir, APP_DIR, progress,
+                                                  archive_dir=self.settings.get("archive_downloads_dir"))
+                if preflight_result is True:
+                    self._preflight_signature = preflight_signature(game_dir)
             if preflight_result == "restart":
                 return {"processed": 0, "stopped": True, "restart": True,
                         "staging": str(staging_root)}
@@ -2971,7 +2978,7 @@ class ManagerGUI(tk.Tk):
             if not messagebox.askyesno(
                     "Remove tracked deployments",
                     f"Remove {len(chosen)} selected deployment(s), restore their saved overwritten files, "
-                    "unregister their BSAs, and roll back their staged Tidy changes? "
+                    "unregister their BSAs, and unpack their staged folders again from the archives? "
                     "Any file changed since deployment will be left in place.",
                     parent=dialog):
                 return
@@ -2987,24 +2994,18 @@ class ManagerGUI(tk.Tk):
                     startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                     startup.wShowWindow = subprocess.SW_HIDE
                     quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
+                from plugin_install import unpack_again
                 result = remove_deployments(APP_DIR, data_dir, ids)
-                tidy_failures = []
-                staging_root = (APP_DIR / "staging" / "plugins").resolve()
-                for package_text in result.get("tidy_packages", []):
-                    package = Path(package_text).resolve()
-                    if not package.is_relative_to(staging_root):
-                        tidy_failures.append(f"{package}: outside plugin staging")
-                        continue
-                    progress(f"Rolling back Tidy changes for {package.name}…")
-                    tidy_command = [str(self._console_python()), "-u", str(APP_DIR / "mwmanager_install.py"),
-                                    "--staging", str(staging_root), "--undo", "--only", package.name]
-                    tidy_process = subprocess.run(
-                        tidy_command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, capture_output=True,
-                        text=True, encoding="utf-8", errors="replace", timeout=7200, **quiet)
-                    if tidy_process.returncode:
-                        tidy_failures.append(f"{package.name}: "
-                                             + (tidy_process.stderr or tidy_process.stdout or "rollback failed")[-500:])
-                result["tidy_rollback_failures"] = tidy_failures
+                unpack_failures = []
+                for item in result.get("unpack", []):
+                    package = Path(item["package"])
+                    progress(f"Unpacking {item.get('label') or package.name} again from its archive…")
+                    try:
+                        unpack_again(APP_DIR, package, item.get("archive"))
+                        _remove_ready_plugin_stage(package)
+                    except (OSError, ValueError, RuntimeError) as exc:
+                        unpack_failures.append(str(exc))
+                result["unpack_failures"] = unpack_failures
                 progress("Updating the plugin catalog and load order…")
                 command = [str(self._console_python()), "-u", str(APP_DIR / "mwmanager.py"),
                            str(data_dir), "--sort", "--all", "--yes"]
@@ -3026,11 +3027,11 @@ class ManagerGUI(tk.Tk):
                 self._update_action_buttons()
                 self.status.set(f"Removed {result['removed']:,} files; restored {result['restored']:,}. "
                                 f"{result['pending']:,} changed file(s) remain tracked; "
-                                f"{len(result.get('tidy_rollback_failures', [])):,} Tidy rollback(s) need attention.")
+                                f"{len(result.get('unpack_failures', [])):,} staged folder(s) not unpacked again.")
                 tidy_note = ""
-                if result.get("tidy_rollback_failures"):
-                    tidy_note = "\n\nTidy rollback needs attention:\n" + "\n".join(
-                        result["tidy_rollback_failures"][:5])
+                if result.get("unpack_failures"):
+                    tidy_note = "\n\nNot unpacked again from the archive:\n" + "\n".join(
+                        result["unpack_failures"][:5])
                 messagebox.showinfo("Plugin deployments removed",
                                     f"Removed files: {result['removed']:,}\nRestored files: {result['restored']:,}\n"
                                     f"Still tracked for review: {result['pending']:,}{tidy_note}", parent=self)

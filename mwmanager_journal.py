@@ -12,8 +12,13 @@ under Data Files\\MWSE\\mods.
                            their own snapshot entry, never with a store list; the one exception is the three
                            masters and three BSAs, which are checked against known store-independent hashes
                            and reported (not refused) when modified. A copy of Morrowind.ini is kept too.
-  install.jsonl            one line per install path MWManager creates/replaces/changes/removes; the first line
-                           for a path records where its original is (absent = new file). Hash-chained.
+  install.jsonl            one line per install path MWManager creates/replaces/changes/removes outside a mod's
+                           deployment (setup moves, asset repairs, generated patches); the first line for a path
+                           records where its original is (absent = new file). Hash-chained.
+  mods\\<mod>.jsonl         the same, one ledger per mod: what its deployments and removals changed. Only a game
+                           original it replaced is copied into originals\\; another mod's file comes back from
+                           that mod's archive.
+  manifests\\<sha256>.json  the file list of a large batch (a deployment of thousands of files is one ledger line).
   runs.jsonl               one line per run: tool, version, the ledger range it wrote (with its hash), inputs.
   inputs\\<sha256>.json     content-addressed copies of the choices a run used (FOMOD answers, options, order).
   mods.json                per mod: archive name + sha256, Nexus ids, staged folder, answers - mod rollback
@@ -95,6 +100,22 @@ def key(rel: str) -> str:
     return rel.replace("\\", "/").casefold()
 
 
+def stat_marker(stat) -> str:
+    """after_sha256 of a hardlink MWManager made: its size and modification time (a link shares them with its
+    staged source), so recording 600,000 linked files doesn't read every byte of them again."""
+    return f"stat:{stat.st_size}:{stat.st_mtime_ns}"
+
+
+def matches_after(path: Path, want: str) -> bool:
+    """Whether the file at path is what the ledger recorded there (a sha256, or a hardlink's stat marker)."""
+    if want.startswith("stat:"):
+        try:
+            return stat_marker(Path(path).stat()) == want
+        except OSError:
+            return False
+    return sha256_file(path) == want
+
+
 def hashes(path: Path) -> tuple[str, str]:
     sha, md5 = hashlib.sha256(), hashlib.md5()
     with open(path, "rb") as stream:
@@ -171,6 +192,9 @@ def read_hashdb(path: Path) -> dict[str, tuple[str, str]]:
 
 # ------------------------------------------------------------------------------------------------ journal
 _LEDGER_CACHE: dict[str, dict] = {}   # ledger path -> its last read (entries, problems) and the file's size/age then
+_MANIFESTS: dict[str, list] = {}       # manifest sha256 -> its [[path, after_sha256], ...]
+_MERGED: dict[str, dict] = {}          # journal root -> the install ledger and every mod's ledger, read as one
+BATCH_MIN = 1000                       # a record_many call this big keeps its new files in one manifest entry
 
 
 def _ledger_key(path: Path) -> str:
@@ -195,6 +219,8 @@ class Journal:
         self.baseline_ini = self.root / "baseline" / "Morrowind.ini"
         self.prerequisites_file = self.root / "prerequisites" / "prerequisites.json"
         self.ledger = self.root / "install.jsonl"
+        self.manifests = self.root / "manifests"
+        self.mod_ledgers = self.root / "mods"      # one ledger per mod: what its deployments changed
         self.runs = self.root / "runs.jsonl"
         self.mods_file = self.root / "mods.json"
         self.inputs = self.root / "inputs"
@@ -373,29 +399,44 @@ class Journal:
 
     def record_deployment(self, game_dir, operations: list[dict], *, tool: str, tag: str,
                           inputs: dict | None = None, moves: list[dict] | None = None,
-                          progress=None) -> dict:
-        """Bridge a completed GUI deployment's operation list into the install rollback ledger."""
+                          progress=None, mod: str | None = None) -> dict:
+        """Bridge a completed GUI deployment's operation list into the rollback ledger of its mod (`mod`, or each
+        operation's own "mod"). A file it replaced is copied into the journal only when it is a game original
+        (baseline or prerequisites): a file another mod deployed comes back from that mod's archive instead."""
         game_dir = Path(game_dir).resolve()
         if not self.has_baseline():
             raise RuntimeError("deployment requires a game baseline so rollback can remove it")
         run = self.start_run(tool, inputs)
+        checkpoint = self.checkpoint_state()
         records = []
         total = len(operations)
+        last_report = time.monotonic()
         for index, operation in enumerate(operations, 1):
-            target = Path(operation["target"]).resolve()
+            # the transaction already checked these paths (resolved, inside the game); resolving each again
+            # opened every file a second time
+            target = Path(os.path.abspath(operation["target"]))
             rel = rel_of(game_dir, target)
             backup = Path(operation["backup"]).resolve() if operation.get("backup") else None
-            original = self.preserve_file(backup) if backup else {"kind": "absent"}
-            if not target.is_file():
+            original = (self.preserve_file(backup) if backup and key(rel) in checkpoint
+                        else {"kind": "absent"})
+            try:
+                stat = target.stat()
+            except OSError:
+                stat = None
+            if stat is None or not target.is_file():
                 raise FileNotFoundError(f"deployed file disappeared before journaling: {target}")
-            if progress and (index == 1 or index % 250 == 0):
-                progress(f"MWMANAGER-STAGE: Recording deployment: {index:,} of {total:,} files verified")
-            deployed_hash = operation.get("sha256") or sha256_file(
-                target, progress, f"Recording deployment: {index:,} of {total:,} files — {target.name}")
+            if progress and (index == 1 or index == total or time.monotonic() - last_report >= 20):
+                progress(f"MWMANAGER-STAGE: Recording deployment: {index:,} of {total:,} files")
+                last_report = time.monotonic()
+            linked = (operation.get("verification") == "hardlink" and operation.get("size") == stat.st_size
+                      and operation.get("mtime_ns") == stat.st_mtime_ns)
+            deployed_hash = operation.get("sha256") or (stat_marker(stat) if linked else sha256_file(
+                target, progress, f"Recording deployment: {index:,} of {total:,} files — {target.name}"))
             operation["sha256"] = deployed_hash
             records.append({"run": run["run"], "path": rel,
                             "action": "replace" if backup else "create",
-                            "after_sha256": deployed_hash, "original": original, "tag": tag})
+                            "after_sha256": deployed_hash, "original": original, "tag": tag,
+                            "mod": operation.get("mod") or mod})
         for move in moves or []:
             source, target = Path(move["source"]).resolve(), Path(move["target"]).resolve()
             original = self.preserve_file(target)
@@ -441,7 +482,8 @@ class Journal:
                 problems.append(f"{path.name}: hash chain broken at line {number}")
             entries.append(entry)
             prev = entry.get("hash")
-        _LEDGER_CACHE[cache_key] = {"stat": stat, "entries": entries, "problems": problems, "originals": None}
+        _LEDGER_CACHE[cache_key] = {"stat": stat, "entries": entries, "problems": problems, "originals": None,
+                                    "expanded": None}
         return list(entries), list(problems)
 
     @classmethod
@@ -475,22 +517,89 @@ class Journal:
         else:                                   # what was read, plus what was just written
             cached["entries"].extend(prepared)
             cached["stat"] = _ledger_stat(path)
-            if cached["originals"] is not None:
-                cached["originals"].update(key(e["path"]) for e in prepared if e.get("original"))
+            if any(e.get("manifest") for e in prepared):
+                cached["originals"] = cached["expanded"] = None
+            else:
+                if cached["originals"] is not None:
+                    cached["originals"].update(key(e["path"]) for e in prepared if e.get("original"))
+                if cached.get("expanded") is not None:
+                    cached["expanded"][0].extend(prepared)
         return prepared
 
+    def mod_ledger(self, mod: str) -> Path:
+        return self.mod_ledgers / (re.sub(r"[^A-Za-z0-9._-]+", "_", mod).strip("._")[:100] + ".jsonl")
+
+    def _ledger_files(self) -> list[Path]:
+        mods = sorted(self.mod_ledgers.glob("*.jsonl")) if self.mod_ledgers.is_dir() else []
+        return [self.ledger] + mods
+
+    def _signature(self, files) -> tuple:
+        return tuple((str(f), _ledger_stat(f)) for f in files)
+
     def entries(self) -> tuple[list[dict], list[str]]:
-        return self._read_jsonl(self.ledger)
+        """Every recorded change, one entry per path, oldest first: the install ledger and each mod's own ledger
+        merged by time; a batch entry (one deployment's files) is expanded from its manifest."""
+        files = self._ledger_files()
+        signature = self._signature(files)
+        merged = _MERGED.get(_ledger_key(self.root))
+        if merged is not None and merged["signature"] == signature:
+            return list(merged["entries"]), list(merged["problems"])
+        parts, problems = [], []
+        for path in files:
+            entries, file_problems = self._expanded(path)
+            parts.append(entries)
+            problems += file_problems if path == self.ledger else [f"mods/{path.name}: {p}" for p in file_problems]
+        entries = list(parts[0]) if len(parts) == 1 else sorted((e for part in parts for e in part), key=lambda e: e["ts"])
+        _MERGED[_ledger_key(self.root)] = {"signature": signature, "entries": entries, "problems": problems,
+                                           "originals": None}
+        return list(entries), list(problems)
+
+    def _expanded(self, path: Path) -> tuple[list[dict], list[str]]:
+        raw, problems = self._read_jsonl(path)
+        if not any(e.get("manifest") for e in raw):
+            return raw, problems
+        cached = _LEDGER_CACHE.get(_ledger_key(path))
+        if cached is not None and cached.get("expanded") is not None:
+            return cached["expanded"]
+        entries, problems = [], list(problems)
+        for entry in raw:
+            if entry.get("manifest"):
+                entries.extend(self._expand(entry, problems))
+            else:
+                entries.append(entry)
+        if cached is not None:
+            cached["expanded"] = (entries, problems)
+        return entries, problems
+
+    def _expand(self, entry: dict, problems: list[str]) -> list[dict]:
+        files = self._manifest(entry, problems)
+        base = {k: v for k, v in entry.items() if k not in ("manifest", "count", "after_sha256", "each_original")}
+        original = entry.get("each_original", {"kind": "absent"} if entry["action"] == "create" else None)
+        return [dict(base, path=path, after_sha256=after, original=original) for path, after in files]
+
+    def _manifest(self, entry: dict, problems: list[str]) -> list:
+        digest = entry["manifest"]
+        if digest in _MANIFESTS:
+            return _MANIFESTS[digest]
+        path = self.manifests / f"{digest}.json"
+        try:
+            data = path.read_bytes()
+        except OSError:
+            problems.append(f"ledger entry {entry.get('seq')}: its file list is missing ({path.name})")
+            return []
+        if hashlib.sha256(data).hexdigest() != digest:
+            problems.append(f"ledger entry {entry.get('seq')}: its file list does not match its hash ({path.name})")
+            return []
+        _MANIFESTS[digest] = json.loads(data.decode("utf-8"))
+        return _MANIFESTS[digest]
 
     def _original_paths(self) -> set[str]:
         """Paths whose first original is already recorded (a copy: the caller may add to it)."""
-        entries, _problems = self._read_jsonl(self.ledger)
-        cached = _LEDGER_CACHE.get(_ledger_key(self.ledger))
-        if cached is None:                      # no ledger yet
-            return {key(entry["path"]) for entry in entries if entry.get("original")}
-        if cached["originals"] is None:
-            cached["originals"] = {key(entry["path"]) for entry in cached["entries"] if entry.get("original")}
-        return set(cached["originals"])
+        entries, _problems = self.entries()
+        merged = _MERGED[_ledger_key(self.root)]
+        if merged["originals"] is None:
+            merged["originals"] = {key(entry["path"]) for entry in entries if entry.get("original")}
+        return set(merged["originals"])
 
     def first_original(self, rel: str, entries=None) -> dict | None:
         for entry in entries if entries is not None else self.entries()[0]:
@@ -529,7 +638,64 @@ class Journal:
             if record.get("mod"):
                 entry["mod"] = record["mod"]
             entries.append(entry)
-        return self._append_many(self.ledger, entries)
+        merged = _MERGED.get(_ledger_key(self.root))      # fresh: _original_paths just read it
+        by_ledger: dict[Path, list[dict]] = {}
+        for entry in entries:
+            by_ledger.setdefault(self.mod_ledger(entry["mod"]) if entry.get("mod") else self.ledger, []).append(entry)
+        prepared = []
+        for path, group in by_ledger.items():
+            prepared += self._append_many(path, self._batch(group))
+        if merged is not None:
+            if any(e.get("manifest") for e in prepared):
+                _MERGED.pop(_ledger_key(self.root), None)
+            else:                               # what was read, plus what was just written
+                merged["entries"].extend(prepared)
+                merged["signature"] = self._signature(self._ledger_files())
+                if merged["originals"] is not None:
+                    merged["originals"].update(key(e["path"]) for e in prepared if e.get("original"))
+        return prepared
+
+    def _batch(self, entries: list[dict]) -> list[dict]:
+        """Many files from one run (a 600,000-file deployment) become one entry pointing at a manifest of
+        [path, after_sha256], so the ledger doesn't grow by a line per file every deployment."""
+        groups: dict[str, list[dict]] = {}
+        for entry in entries:
+            if entry["action"] in ("create", "replace", "remove") and entry["original"] in (None, {"kind": "absent"}):
+                groups.setdefault(canon([entry["run"], entry.get("tag"), entry.get("mod"), entry["action"],
+                                         entry["original"]]), []).append(entry)
+        out = entries
+        for new in groups.values():
+            if len(new) >= BATCH_MIN:
+                out = self._batch_group(out, new)
+        return out
+
+    def _batch_group(self, entries: list[dict], new: list[dict]) -> list[dict]:
+        data = canon([[e["path"], e["after_sha256"]] for e in new]).encode("utf-8")
+        digest = hashlib.sha256(data).hexdigest()
+        self.manifests.mkdir(parents=True, exist_ok=True)
+        target = self.manifests / f"{digest}.json"
+        if not target.is_file():
+            temporary = target.with_suffix(".tmp")
+            with open(temporary, "wb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temporary, target)
+        batch = {"ts": new[0]["ts"], "run": new[0]["run"], "path": f"manifests/{digest}.json",
+                 "action": new[0]["action"], "manifest": digest, "count": len(new), "original": None,
+                 "each_original": new[0]["original"]}
+        for field in ("tag", "mod"):
+            if new[0].get(field):
+                batch[field] = new[0][field]
+        chosen = {id(e) for e in new}
+        out, placed = [], False
+        for entry in entries:
+            if id(entry) not in chosen:
+                out.append(entry)
+            elif not placed:
+                out.append(batch)
+                placed = True
+        return out
 
     def move_original(self, game_dir, source, destination, run: str, *, tag: str | None = None) -> dict:
         """Move an original file while preserving a journal-owned copy for reliable rollback."""
@@ -679,13 +845,12 @@ class Journal:
         tool_path = MANAGER_DIR / tool
         version = sha256_file(tool_path)[:16] if tool_path.is_file() else None
         stored = {name: self.store_input(value) for name, value in (inputs or {}).items()}
-        entries, _ = self.entries()
+        entries, _ = self._read_jsonl(self.ledger)
         return {"run": _dt.datetime.now().strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:6], "tool": tool,
                 "tool_version": version, "inputs": stored, "first_seq": (entries[-1]["seq"] + 1) if entries else 1}
 
     def finish_run(self, run: dict) -> dict:
-        entries, _ = self.entries()
-        mine = [e for e in entries if e["run"] == run["run"]]
+        mine = [e for path in self._ledger_files() for e in self._read_jsonl(path)[0] if e["run"] == run["run"]]
         span = "".join(e["hash"] for e in mine)
         return self._append(self.runs, {"ts": now(), "run": run["run"], "tool": run["tool"],
                                         "tool_version": run["tool_version"], "inputs": run["inputs"],
@@ -707,6 +872,32 @@ class Journal:
         tmp.write_text(json.dumps(mods, indent=1, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.mods_file)
         return mods[mod_key]
+
+    def mod_key(self, package: Path | str | None = None, archive: Path | str | None = None) -> str | None:
+        """The key a mod is journaled under: its archive's sha256 from the staged package's marker, else the
+        archive's name; registered in mods.json so the mod can be rolled back by unpacking its archive again."""
+        marker = {}
+        if package:
+            try:
+                marker = json.loads((Path(package) / ".mwmanager-stage.json").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                marker = {}
+        archive = archive or marker.get("archive_path") or marker.get("archive")
+        if marker.get("sha256"):
+            mod = f"sha256-{str(marker['sha256']).lower()[:16]}"
+        elif archive:
+            mod = "archive-" + re.sub(r"[^A-Za-z0-9._-]+", "_", Path(archive).stem)[:80]
+        elif package:
+            mod = "package-" + re.sub(r"[^A-Za-z0-9._-]+", "_", Path(package).name)[:80]
+        else:
+            return None
+        known = self.mods().get(mod, {})
+        fields = {"archive": str(archive) if archive else None, "archive_name": Path(archive).name if archive else None,
+                  "archive_sha256": str(marker["sha256"]).lower() if marker.get("sha256") else None,
+                  "staged": str(package) if package else None}
+        if any(v is not None and known.get(k) != v for k, v in fields.items()):
+            self.upsert_mod(mod, **fields)
+        return mod
 
     def import_stage_markers(self, staging: Path) -> list[str]:
         """Register every staged mod from its .mwmanager-stage.json (archive path + sha256)."""
@@ -826,6 +1017,10 @@ class Journal:
                 if k not in journaled:
                     report["unexplained"].append(k)
                 continue
+            if want.startswith("stat:"):
+                if not matches_after(path, want):
+                    report["changed"].append(rel_of(game_dir, path))
+                continue
             st, info = path.stat(), stats.get(k)
             same_quick = (info is not None and info["sha256"] == want and st.st_size == info["size"]
                           and st.st_mtime_ns == info["mtime_ns"])
@@ -869,9 +1064,14 @@ class Journal:
 
     def archive_ledger(self) -> Path | None:
         """After a verified rollback the install is the baseline again: start a new ledger, keep the old one."""
+        stamp = f"{_dt.datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4]}"
+        if self.mod_ledgers.is_dir():
+            (self.root / "history").mkdir(parents=True, exist_ok=True)
+            os.replace(self.mod_ledgers, self.root / "history" / f"mods-{stamp}")
+        _MERGED.pop(_ledger_key(self.root), None)
         if not self.ledger.is_file():
             return None
-        target = self.root / "history" / f"install-{_dt.datetime.now():%Y%m%d-%H%M%S}-{uuid.uuid4().hex[:4]}.jsonl"
+        target = self.root / "history" / f"install-{stamp}.jsonl"
         target.parent.mkdir(parents=True, exist_ok=True)
         os.replace(self.ledger, target)
         return target
@@ -943,9 +1143,8 @@ class Journal:
         steps, prerequisite_steps, refuse, used_backups = [], [], list(problems), []
         rollback_checkpoint = self.checkpoint_state(True)
         last_seq = {}                               # one pass: a per-path scan of the ledger was O(n^2)
-        for e in entries:
-            k = key(e["path"])
-            last_seq[k] = max(last_seq.get(k, e["seq"]), e["seq"])
+        for index, e in enumerate(entries):         # oldest first: the last change to a path wins
+            last_seq[key(e["path"])] = index
         for k, original in sorted(originals.items(), key=lambda kv: -last_seq[kv[0]]):
             if k == "morrowind.ini":
                 continue                         # the whole baseline INI is authoritative, including old ledgers

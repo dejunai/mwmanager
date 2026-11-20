@@ -832,8 +832,12 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
             digest = moved["sha256"]
             moves.append({"source": str(source), "target": str(target), "sha256": digest})
             if progress: progress("Moved shipped Siege at Firemoth.esp to Off/Official Add-Ons because Tamriel Rebuilt was deployed without Remove Firemoth.")
+        import mwmanager_journal
+        mod_journal = mwmanager_journal.Journal(manager_dir / "journal")
+        mod_of_package = {}
         for package, plugins in package_info:
             package_label = Path(package).name
+            mod_of_package[package_label] = mod_journal.mod_key(package)
             if progress:
                 progress(f"MWMANAGER-STAGE: Hardlinking {package_label}: scanning deployable files…")
             file_count = 0
@@ -847,6 +851,8 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
                 if not batch:
                     return
                 new_operations = tx.link_many(batch)
+                for operation in new_operations:
+                    operation["mod"] = mod_of_package[package_label]
                 operations.extend(new_operations)
                 linked.extend(batch_rel)
                 batch.clear()
@@ -887,6 +893,9 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
                     source_digest = None
                     target_digest = None
                     if target.exists():
+                        if target.is_file() and os.path.samefile(source, target):
+                            skipped.append(str(rel))      # already this link
+                            continue
                         if target.is_file() and target.stat().st_size == source.stat().st_size:
                             target_digest = sha256(target)
                             source_digest = sha256(source)

@@ -422,6 +422,22 @@ class WorkflowGuiTests(unittest.TestCase):
         self.assertEqual(deploy.call_args.kwargs["selected"], ["Selected.esm"])
         self.assertEqual(deploy.call_args.args[3], ["Selected.esm", "Unselected.esm"])
 
+    def test_plugin_deploy_reuses_this_sessions_preflight(self):
+        """Deploying queued plugins right after the major masters ran the whole preflight (hashing every master
+        and BSA) again, though nothing it checks had changed."""
+        self.app._preflight_signature = preflight_signature(self.app.settings["game_dir"])
+        jobs = []
+        self.app._run_progress_job = lambda title, initial, worker, complete: jobs.append(worker)
+        self.app._install_plugin_archives([])
+        lines = []
+        with mock.patch("preinstall.run_preinstall") as preflight:
+            try:
+                jobs[0](lines.append)
+            except Exception:
+                pass                            # only whether the preflight ran matters here
+        preflight.assert_not_called()
+        self.assertTrue(any("Reusing this session's successful preflight" in line for line in lines))
+
     def test_plugins_deployed_with_a_master_stay_active(self):
         self.stage()
         self.app._preflight_signature = preflight_signature(self.app.settings["game_dir"])

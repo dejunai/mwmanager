@@ -441,6 +441,95 @@ class RoundTripTests(Fixture):
         self.assertTrue(moved_source.is_file())
         self.assertFalse(moved_target.exists())
 
+    def test_a_big_hardlink_deployment_is_one_ledger_entry_and_is_not_rehashed(self):
+        """600,000 linked files were each hashed again to record them and added a ledger line each per deploy."""
+        self.journal.capture_baseline(self.game)
+        operations = []
+        for i in range(4):
+            source = write(self.manager / f"staging/voices/Sound/v{i}.mp3", f"voice {i}".encode())
+            target = self.game / f"Data Files/Sound/v{i}.mp3"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.link(source, target)
+            st = source.stat()
+            operations.append({"source": str(source), "target": str(target), "backup": None, "sha256": None,
+                               "verification": "hardlink", "size": st.st_size, "mtime_ns": st.st_mtime_ns})
+        lines_before = len(self.journal.ledger.read_text(encoding="utf-8").splitlines()) \
+            if self.journal.ledger.is_file() else 0
+        real = mj.sha256_file
+        hashed = []
+        with mock.patch.object(mj, "BATCH_MIN", 3), \
+                mock.patch.object(mj, "sha256_file", lambda path, *a, **k: hashed.append(Path(path).name) or real(path)):
+            self.journal.record_deployment(self.game, operations, tool="major_master_deploy.py", tag="major-master")
+        self.assertFalse([name for name in hashed if name.startswith("v")])
+        lines = self.journal.ledger.read_text(encoding="utf-8").splitlines()
+        self.assertEqual(len(lines) - lines_before, 1)
+        mj._LEDGER_CACHE.clear()
+        mj._MERGED.clear()
+        mj._MANIFESTS.clear()
+        entries, problems = self.journal.entries()
+        self.assertEqual(problems, [])
+        mine = {e["path"]: e for e in entries if e["path"].startswith("Data Files/Sound/")}
+        self.assertEqual(sorted(mine), [f"Data Files/Sound/v{i}.mp3" for i in range(4)])
+        self.assertTrue(all(e["after_sha256"].startswith("stat:") for e in mine.values()))
+        self.assertTrue(self.journal.verify(self.game, against="deployed")["ok"])
+        changed = self.game / "Data Files/Sound/v0.mp3"
+        changed.unlink()
+        write(changed, b"edited by hand, a different size")
+        self.assertIn("Data Files/Sound/v0.mp3", self.journal.verify(self.game, against="deployed")["changed"])
+        plan = self.journal.plan_rollback(self.game)
+        self.assertEqual(plan["refuse"], [])
+        self.journal.execute_rollback(self.game, plan)
+        self.assertFalse(any((self.game / f"Data Files/Sound/v{i}.mp3").exists() for i in range(4)))
+
+    def test_a_missing_batch_manifest_stops_rollback(self):
+        self.journal.capture_baseline(self.game)
+        with mock.patch.object(mj, "BATCH_MIN", 2):
+            run = self.journal.start_run("major_master_deploy.py")
+            self.journal.record_many([{"run": run["run"], "path": f"Data Files/n{i}.dds", "action": "create",
+                                       "after_sha256": "ab" * 32, "original": {"kind": "absent"}} for i in range(2)])
+        for manifest in self.journal.manifests.iterdir():
+            manifest.unlink()
+        mj._LEDGER_CACHE.clear()
+        mj._MERGED.clear()
+        mj._MANIFESTS.clear()
+        self.assertTrue(self.journal.entries()[1])
+        self.assertTrue(self.journal.plan_rollback(self.game)["refuse"])
+
+    def test_each_mod_has_its_own_ledger_and_only_game_originals_are_copied(self):
+        """Rollbacks per mod, not all in one file; a file another mod deployed comes back from that mod's archive,
+        so only a game original is copied into the journal."""
+        self.journal.capture_baseline(self.game)
+        first = write(self.game / "Data Files/Textures/shared.dds", b"mod A texture")
+        self.journal.record_deployment(self.game, [{"target": str(first), "backup": None}],
+                                       tool="plugin_install.py", tag="plugin-deployment", mod="sha256-aaaa")
+        backup_a = write(self.manager / "staging/b/Off/b/replaced/Textures/shared.dds", b"mod A texture")
+        first.write_bytes(b"mod B texture")
+        backup_esp = write(self.manager / "staging/b/Off/b/replaced/Existing Mod.esp", b"older mod")
+        esp = write(self.game / "Data Files/Existing Mod.esp", b"mod B plugin")
+        self.journal.record_deployment(self.game, [{"target": str(first), "backup": str(backup_a)},
+                                                   {"target": str(esp), "backup": str(backup_esp)}],
+                                       tool="plugin_install.py", tag="plugin-deployment", mod="sha256-bbbb")
+        self.assertTrue(self.journal.mod_ledger("sha256-aaaa").is_file())
+        self.assertTrue(self.journal.mod_ledger("sha256-bbbb").is_file())
+        install = self.journal.ledger.read_text(encoding="utf-8") if self.journal.ledger.is_file() else ""
+        self.assertNotIn("shared.dds", install)
+        originals = self.manager / "journal/originals"
+        self.assertFalse((originals / hashlib.sha256(b"mod A texture").hexdigest()).exists())
+        self.assertTrue((originals / hashlib.sha256(b"older mod").hexdigest()).is_file())   # a game original
+        mj._LEDGER_CACHE.clear()
+        mj._MERGED.clear()
+        entries, problems = self.journal.entries()
+        self.assertEqual(problems, [])
+        self.assertEqual([e.get("mod") for e in entries if e["path"].endswith("shared.dds")],
+                         ["sha256-aaaa", "sha256-bbbb"])
+        plan = self.journal.plan_rollback(self.game)
+        self.assertEqual(plan["refuse"], [])
+        self.journal.execute_rollback(self.game, plan)
+        self.assertFalse(first.exists())
+        self.assertEqual(esp.read_bytes(), b"older mod")
+        self.journal.archive_ledger()
+        self.assertFalse(self.journal.mod_ledgers.exists())
+
     def test_legacy_unknown_asset_backups_are_renamed_and_journaled(self):
         self.journal.capture_baseline(self.game)
         old = write(self.game / "Data Files/Off/Unknown Plugin/Reprocessed textures/Textures/old.dds", b"old")

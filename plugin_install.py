@@ -1168,9 +1168,12 @@ def record_deployment(manager: Path, item: dict, package: Path, operations: list
     _write_deployment_state(manager, state)
     if data_dir is not None:
         import mwmanager_journal
-        mwmanager_journal.Journal(manager / "journal").record_deployment(
+        journal = mwmanager_journal.Journal(manager / "journal")
+        entry["mod"] = journal.mod_key(package, source_archive)
+        _write_deployment_state(manager, state)
+        journal.record_deployment(
             Path(data_dir).parent, operations, tool="plugin_install.py", tag="plugin-deployment",
-            inputs={"archive": source_archive or label, "plugins": entry["plugins"]})
+            inputs={"archive": source_archive or label, "plugins": entry["plugins"]}, mod=entry["mod"])
     return entry
 
 
@@ -1210,7 +1213,8 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
     from major_master_deploy import unregister_archives
     manager, data_dir = manager.resolve(), data_dir.resolve()
     state = _read_deployment_state(manager)
-    kept, removed, restored, pending, tidy_packages = [], 0, 0, [], []
+    kept, removed, restored, pending, unpack = [], 0, 0, [], []
+    journal_records = []
     ini_path = data_dir.parent / "Morrowind.ini"
     catalog_path = manager / "game_catalog.sqlite3"
     state_path = _deployment_state_path(manager)
@@ -1283,10 +1287,12 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
                     os.replace(target, recovery)
                     recoveries.append((recovery, target, backup))
                     removed += 1
+                    journal_records.append((deployment.get("mod"), target, "remove"))
                 if backup and backup.is_file() and not target.exists():
                     target.parent.mkdir(parents=True, exist_ok=True)
                     os.replace(backup, target)
                     restored += 1
+                    journal_records.append((deployment.get("mod"), target, "replace"))
                     if recovery is None:
                         recoveries.append((None, target, backup))
             if operations_pending:
@@ -1295,7 +1301,8 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
             touched_plugins.update(deployment.get("plugins", []))
             touched_archives.update(deployment.get("archives", []))
             if deployment.get("staging_package"):
-                tidy_packages.append(deployment["staging_package"])
+                unpack.append({"package": deployment["staging_package"], "archive": deployment.get("archive"),
+                               "label": deployment.get("label")})
             unregister_archives(ini_path, deployment.get("registered_archives", []))
             if catalog_path.is_file():
                 with sqlite3.connect(catalog_path) as db:
@@ -1328,6 +1335,7 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
             for entry in state["deployments"] if entry.get("id") in remaining_ids
         ]
         _write_deployment_state(manager, state)
+        _journal_removal(manager, data_dir, journal_records)
     except BaseException:
         rollback_errors = []
         for recovery, target, backup in reversed(recoveries):
@@ -1370,7 +1378,38 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
             recovery.unlink(missing_ok=True)
     return {"removed": removed, "restored": restored,
             "pending": sum(len(item["operations"]) for item in pending),
-            "tidy_packages": sorted(set(tidy_packages), key=str.casefold)}
+            "unpack": unpack}
+
+
+def _journal_removal(manager: Path, data_dir: Path, records: list) -> None:
+    """Removed files and the files put back in their place, in each mod's own rollback ledger."""
+    import mwmanager_journal
+    journal = mwmanager_journal.Journal(manager / "journal")
+    if not records or not journal.has_baseline():
+        return
+    game = data_dir.parent
+    run = journal.start_run("plugin_install.py", {"operation": "remove deployment"})
+    journal.record_many([{"run": run["run"], "path": mwmanager_journal.rel_of(game, target), "action": action,
+                          "after_sha256": mwmanager_journal.stat_marker(target.stat()) if action == "replace" else None,
+                          "original": None, "tag": "plugin-removal", "mod": mod}
+                         for mod, target, action in records])
+    journal.finish_run(run)
+
+
+def unpack_again(manager: Path, package: Path, archive: str | Path | None) -> None:
+    """A removed mod's staged folder goes back to what its archive holds: deleted and unpacked again (its tidy,
+    options and repairs are redone when it is next deployed). Without its archive the folder is left as it is."""
+    staging = (manager / "staging" / "plugins").resolve()
+    package = Path(package).resolve()
+    if not package.is_relative_to(staging) or package == staging:
+        raise ValueError(f"{package}: outside plugin staging")
+    if not archive or not Path(archive).is_file():
+        raise FileNotFoundError(f"{package.name}: its archive is not available to unpack again"
+                                + (f" ({archive})" if archive else ""))
+    if package.exists():
+        from mwmanager_journal import wipe_folder
+        wipe_folder(package)
+    extract_archive({"archive": str(archive)}, package, manager)
 
 
 def steam_morrowind_roots() -> list[Path]:

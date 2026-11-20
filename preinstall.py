@@ -212,7 +212,7 @@ def detected_mod_files(game_dir: Path, manager_dir: Path | None = None,
 
     def is_managed(path: Path, rel: str) -> bool:
         expected = managed.get(mwmanager_journal.key(rel))
-        return bool(expected) and _sha256(path) == expected
+        return bool(expected) and mwmanager_journal.matches_after(path, expected)
 
     hashdb = mwmanager_journal.find_hashdb(game_dir)
     if hashdb:
