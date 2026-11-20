@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -159,6 +160,37 @@ class BrowserModule(unittest.TestCase):
                 "readyState": "complete", "description": "",
                 "text": "Sound_Data\nVersion\n2.0\nMain files\nSound_Data"}
         self.assertTrue(mwnexus_browser._capture_ready(page, 0))
+
+    def test_the_option_window_reads_the_page_through_the_browser_starting_it_if_needed(self):
+        """A plain request to Nexus is refused (HTTP 403) though the page opens fine in the MWManager browser: the
+        page is read there, and the browser is started when it isn't running."""
+        import mock_fomod
+
+        class Browser:
+            def __init__(self):
+                self.opened, self.calls = [], 0
+
+            def capture_page(self, mod_id, url=None):
+                self.calls += 1
+                if not self.opened:
+                    raise RuntimeError("The MWManager browser is closed. Click Open Nexus in MWManager browser first.")
+                return {"text": "Epic Plants description", "url": url}
+
+            def open_page(self, url):
+                self.opened.append(url)
+
+        browser = Browser()
+        url = "https://www.nexusmods.com/morrowind/mods/46180"
+        with mock.patch.object(mock_fomod.time, "sleep"):
+            page = mock_fomod._capture_with_browser(browser, "46180", url)
+        self.assertEqual(page["text"], "Epic Plants description")
+        self.assertEqual(browser.opened, [url])
+
+        class Broken(Browser):
+            def capture_page(self, mod_id, url=None):
+                raise RuntimeError("Nexus asked for verification")
+        with self.assertRaisesRegex(RuntimeError, "verification"):
+            mock_fomod._capture_with_browser(Broken(), "46180", url)
 
     def test_capture_navigation_rejects_non_nexus_urls(self):
         import mwnexus_browser

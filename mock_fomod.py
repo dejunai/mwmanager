@@ -162,12 +162,42 @@ def _plugin_masters(path: Path) -> set[str]:
         return set()
 
 
+SHIPPED_FOMODS = Path(__file__).resolve().with_name("fomods")   # <Nexus id>.xml: MWManager's own installer
+
+
+def _shipped_fomod(mod_dir: Path) -> Path | None:
+    """MWManager's own ModuleConfig for a mod that ships as loose BAIN folders whose valid combinations its readme
+    explains (fomods\\<Nexus id>.xml); a package's own FOMOD always wins."""
+    try:
+        mod_id = _nexus_mod_id(mod_dir)
+    except Exception:
+        mod_id = ""
+    if not mod_id:                    # a Nexus download keeps its id in its name: "...Replacer-43555-1-1"
+        match = re.search(r"-(\d{3,6})-\d", mod_dir.name)
+        mod_id = match.group(1) if match else ""
+    path = SHIPPED_FOMODS / f"{mod_id}.xml" if mod_id else None
+    return path if path is not None and path.is_file() else None
+
+
+def _shipped_source_root(mod_dir: Path, root) -> Path:
+    """Where a shipped installer's source folders are in the staged package (Tidy moved the numbered folders to
+    Extras\\<package>): the parent of the first one found."""
+    first = next((node.attrib.get("source", "") for node in root.iter()
+                  if node.tag.rsplit("}", 1)[-1].casefold() == "folder" and node.attrib.get("source")), "")
+    top = first.replace("\\", "/").split("/")[0].casefold()
+    for base, dirs, _files in os.walk(mod_dir):
+        dirs[:] = [d for d in dirs if d.casefold() != "off"]
+        if any(d.casefold() == top for d in dirs):
+            return Path(base)
+    return mod_dir
+
+
 def _has_fomod(mod_dir: Path) -> bool:
     for base, dirs, files in os.walk(mod_dir):
         dirs[:] = [d for d in dirs if d.casefold() != "off"]
         if Path(base).name.casefold() == "fomod" and any(f.casefold() == "moduleconfig.xml" for f in files):
             return True
-    return False
+    return _shipped_fomod(mod_dir) is not None
 
 
 def _fomod_config(mod_dir: Path) -> Path | None:
@@ -368,20 +398,22 @@ def parse_fomod_config(config: Path):
 
 def _discover_fomod(mod_dir: Path, installed: set[str]) -> list[dict]:
     """Translate a FOMOD ModuleConfig into the same choice records used by the mock installer UI."""
-    config = _fomod_config(mod_dir)
+    config = _fomod_config(mod_dir) or _shipped_fomod(mod_dir)
     if not config:
         return []
     try:
         root = parse_fomod_config(config)
     except (OSError, ET.ParseError):
         return []
+    shipped = config.parent == SHIPPED_FOMODS
     shared_docs = _read_docs([mod_dir / "Docs", mod_dir / "docs"])
     module_image_node = next(iter(_xml_local(root, "moduleImage")), None)
     module_image = _fomod_image_path(
         mod_dir, config, module_image_node.attrib.get("path") if module_image_node is not None else None)
     steps = _xml_local(root, "installStep")
     records = []
-    source_root = config.parent.parent if config.parent.name.casefold() == "fomod" else config.parent
+    source_root = (_shipped_source_root(mod_dir, root) if shipped
+                   else config.parent.parent if config.parent.name.casefold() == "fomod" else config.parent)
     for block in _xml_local(root, "requiredInstallFiles"):
         payload = _fomod_payload(mod_dir, block, source_root)
         if not payload:
@@ -421,7 +453,8 @@ def _discover_fomod(mod_dir: Path, installed: set[str]) -> list[dict]:
                 if option_type.casefold() in {"notusable", "not usable", "unusable"}:
                     # FOMOD authors sometimes encode readmes/changelogs as NotUsable entries.
                     continue
-                source_root = config.parent.parent if config.parent.name.casefold() == "fomod" else config.parent
+                if not shipped:
+                    source_root = config.parent.parent if config.parent.name.casefold() == "fomod" else config.parent
                 payload = _fomod_payload(mod_dir, plugin, source_root)
                 option_plugins = [src for src in payload.values() if src.suffix.casefold() in PLUGIN_EXTS]
                 masters = set().union(*(_plugin_masters(path) for path in option_plugins)) if option_plugins else set()
@@ -435,7 +468,7 @@ def _discover_fomod(mod_dir: Path, installed: set[str]) -> list[dict]:
                 missing = sorted(targets - installed)
                 compatible = sorted(targets & installed)
                 docs = _relevant_doc_excerpt(
-                    _read_docs([config.parent]) or shared_docs, label,
+                    (None if shipped else _read_docs([config.parent])) or shared_docs, label,
                     [Path(rel).name for rel in payload])
                 records.append({"key": f"{key}:{choice_index}", "group_key": key,
                                 "group_label": f"{step_name} — {group_name}",
@@ -1231,6 +1264,33 @@ MAINTAINER_NOTES = Path(__file__).resolve().with_name("mock_fomod_notes.json")
 def _maintainer_notes(item: dict) -> str:
     """MWManager's own notes for an option, from mock_fomod_notes.json: what the FOMOD, the readmes and the mod
     page do not say (a modder's resource, a patch nobody needs). Shown after all of them, never instead."""
+    notes = [entry if isinstance(entry, str) else str(entry.get("note", "")) for entry in _maintainer_entries(item)]
+    return "\n\n".join(dict.fromkeys(note.strip() for note in notes if note.strip()))
+
+
+def _maintainer_needs(item: dict) -> list[str]:
+    """Plugins an option needs that nothing in its files says (a patch of meshes for another mod): mock_fomod_notes
+    entries {"note": ..., "needs": [plugin, ...]}."""
+    return list(dict.fromkeys(str(name) for entry in _maintainer_entries(item) if isinstance(entry, dict)
+                              for name in entry.get("needs", [])))
+
+
+def _mark_maintainer_needs(records: list[dict], installed: set[str]) -> None:
+    """An option whose notes name a plugin it needs that isn't installed waits for it, like a missing master: the
+    batch holds it and looks for that mod's archive."""
+    have = {name.casefold() for name in installed}
+    for record in records:
+        needs = _maintainer_needs(record)
+        missing = [name for name in needs if name.casefold() not in have]
+        if missing:
+            record["needs_mods"] = missing
+            record["missing_masters"] = sorted(set(record.get("missing_masters") or []) | set(missing))
+        if needs:
+            record["targets"] = sorted(set(record.get("targets") or []) | {name.casefold() for name in needs})
+
+
+def _maintainer_entries(item: dict) -> list:
+    """The mock_fomod_notes.json values (a note, or {"note", "needs"}) that match this option."""
     try:
         mods = json.loads(MAINTAINER_NOTES.read_text(encoding="utf-8")).get("mods", [])
     except (OSError, ValueError):
@@ -1247,22 +1307,38 @@ def _maintainer_notes(item: dict) -> str:
         relative = ""
     names = {str(value).replace("\\", "/").casefold()
              for value in (item.get("label"), item.get("key"), path.name if path else "", relative) if value}
-    notes = []
+    entries = []
     for mod in mods:
         if not ((mod_id and str(mod.get("nexus_id", "")) == mod_id)
                 or any(fnmatch.fnmatch(mod_dir.name.casefold(), pattern.casefold())
                        for pattern in mod.get("packages", []))):
             continue
-        for pattern, text in mod.get("options", {}).items():
+        for pattern, value in mod.get("options", {}).items():
             pattern = pattern.replace("\\", "/").casefold()
             if any(fnmatch.fnmatch(name, pattern) for name in names):
-                notes.append(str(text).strip())
-    return "\n\n".join(dict.fromkeys(note for note in notes if note))
+                entries.append(value)
+    return entries
 
 
 def _nexus_mod_id(mod_dir: Path) -> str:
     match = re.search(r"/mods/(\d+)(?:/|$)", _nexus_page_url(mod_dir))
     return match.group(1) if match else ""
+
+
+def _capture_with_browser(browser, mod_id: str, url: str | None, wait: float = 30.0) -> dict:
+    """The rendered mod page from the MWManager browser, loading `url` there; the browser is started when it isn't
+    running (opening the page), and the capture waits for it to come up."""
+    deadline, opened = time.monotonic() + wait, False
+    while True:
+        try:
+            return browser.capture_page(mod_id, url=url or None)
+        except RuntimeError as exc:
+            if "browser is closed" not in str(exc) or not url or time.monotonic() >= deadline:
+                raise
+            if not opened:
+                browser.open_page(url)
+                opened = True
+            time.sleep(1)
 
 
 def _nexus_page_text(mod_dir: Path, *, refresh=False) -> str:
@@ -1636,6 +1712,10 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         mod_dir = Path(item.get("mod_dir") or item["path"])
         key = item["key"]
         cache_key = str(mod_dir.resolve()).casefold()
+        if _nexus_mod_id(mod_dir) and _nexus_page_url(mod_dir):
+            # Nexus refuses a plain request (HTTP 403, bot protection): read the page in the MWManager browser
+            read_nexus_browser_page(search_button)
+            return
         retrying = bool(_NEXUS_FETCH_ERRORS.get(cache_key))
         if retrying:
             # Once direct HTTP has failed, retry through the visible session so
@@ -1717,12 +1797,17 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         show(item)
 
         def capture():
+            cache_key = str(mod_dir.resolve()).casefold()
+            found, error = _NEXUS_TEXT_CACHE.get(cache_key, ""), ""
             try:
                 import mwnexus_browser
-                page = mwnexus_browser.capture_page(mod_id)
-                mwnexus_browser.cache_page(mod_id, page)
-                found = page["text"]
-                error = ""
+                if not found:
+                    cached = mwnexus_browser.cached_page(mod_id)
+                    found = str(cached.get("text", "")) if cached else ""
+                if not found:
+                    page = _capture_with_browser(mwnexus_browser, mod_id, _nexus_page_url(mod_dir))
+                    mwnexus_browser.cache_page(mod_id, page)
+                    found = page["text"]
             except Exception as exc:
                 found = ""
                 error = str(exc)
@@ -1854,8 +1939,14 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
             target.insert("end", f"FOMOD choice type: {item['option_type']}\n\n")
         if item["targets"]:
             target.insert("end", "Compatibility plugins: " + ", ".join(item["targets"]) + "\n\n")
-        if item.get("missing_masters"):
-            target.insert("end", "MISSING MASTERS: " + ", ".join(item["missing_masters"])
+        needs_mods = item.get("needs_mods") or []
+        if needs_mods:
+            target.insert("end", "NEEDS ANOTHER MOD: " + ", ".join(needs_mods)
+                          + "\nIf you choose this option, it waits until that mod is installed; MWManager looks for "
+                            "its archive in your downloads.\n\n")
+        masters_missing = [m for m in (item.get("missing_masters") or []) if m not in needs_mods]
+        if masters_missing:
+            target.insert("end", "MISSING MASTERS: " + ", ".join(masters_missing)
                           + "\nThis option may be deployed, but Morrowind may refuse to load it or abort at runtime.\n\n")
         if item.get("fomod_description"):
             target.insert("end", item["fomod_description"] + "\n\n")
@@ -1876,6 +1967,12 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
             if not (item.get("fomod_description") or description):
                 search_button.pack(side="left", fill="x", expand=True, padx=(6, 3), pady=(0, 6))
                 read_browser_button.pack(side="left", fill="x", expand=True, padx=(3, 6), pady=(0, 6))
+                mod_dir = Path(item.get("mod_dir") or item["path"])
+                looked = info_state.setdefault("looked_up", set())
+                if not page_text and str(mod_dir).casefold() not in looked and _nexus_mod_id(mod_dir) \
+                        and _nexus_page_url(mod_dir):
+                    looked.add(str(mod_dir).casefold())
+                    root.after(0, lambda: read_nexus_browser_page(search_button))
             else:
                 search_button.pack_forget()
                 read_browser_button.pack_forget()
@@ -2763,6 +2860,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         records.extend(_companion_records(mod_dir))
         records = _drop_superseded_choices(mod_dir, records, installed)
         _mark_grass_options(records, mod_dir, data_files)    # always shown; ticked only for a known groundcover
+        _mark_maintainer_needs(records, installed)        # a note's needed mod waits like a master
         held = set(entry.get("held", []))
         pending = [r for r in records if set(r["targets"]) & newly_relevant and r["key"] not in selected]
         ready = {r["key"] for r in pending if r["key"] in held} - held_options(records, held, installed)
@@ -2835,6 +2933,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         records.extend(_companion_records(mod_dir))
         records = _drop_superseded_choices(mod_dir, records, installed)
         _mark_grass_options(records, mod_dir, data_files)    # always shown; ticked only for a known groundcover
+        _mark_maintainer_needs(records, installed)        # a note's needed mod waits like a master
         if not records:
             continue
         plugin = next((p.name for p in sorted(mod_dir.iterdir(), key=lambda x: x.name.casefold())

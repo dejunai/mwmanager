@@ -1,5 +1,5 @@
 {
-  "about": "MWManager's own notes for option choices, shown in the option window after the FOMOD text, the packaged readmes and the mod page. A mod matches by its Nexus id or by a package-folder pattern; each option pattern is matched (case-insensitive, * and ? wildcards, / or \\) against the option's label, key, file name and path inside the package. '*' notes the whole package.",
+  "about": "MWManager's own notes for option choices, shown in the option window after the FOMOD text, the packaged readmes and the mod page. A mod matches by its Nexus id or by a package-folder pattern; each option pattern is matched (case-insensitive, * and ? wildcards, / or \\) against the option's label, key, file name and path inside the package. '*' notes the whole package. An option's value is a note, or {\"note\": ..., \"needs\": [plugin, ...]}: a chosen option waits until those plugins are installed, like a missing master.",
   "mods": [
     {
       "name": "AATL Data",
@@ -15,6 +15,26 @@
       "packages": ["Tamriel Rebuilt *"],
       "options": {
         "*Firemoth Remover*": "Only enable this plugin if you would prefer the official add-on version of Siege at Firemoth. Tamriel Rebuilt includes an extensive overhaul of that add-on, and this plugin removes it."
+      }
+    },
+    {
+      "name": "Epic Plants",
+      "nexus_id": 46180,
+      "packages": ["All-in-one-46180*", "Epic Plants*"],
+      "options": {
+        "*2D Moss*": "Significantly smaller files for users with lower-end systems. It overwrites the larger 3D moss meshes in the main mod. If your system is modern and capable, leave this unchecked."
+      }
+    },
+    {
+      "name": "Glow in the Dahrk",
+      "nexus_id": 45886,
+      "packages": ["Glow in the Dahrk*"],
+      "options": {
+        "*Windoors*": "Windoors is a very hard to find mod from a Russian author. If you do not have a copy, or a reasonable idea how to get it, don't install this patch.",
+        "Dark Molag Mar*": {
+          "note": "A patch for the separate mod Dark Molag Mar (on Nexus), not part of Glow in the Dahrk. Its meshes (Meshes\\rtfmm\\) only do something when Dark Molag Mar is installed; without it, leave this unchecked.",
+          "needs": []
+        }
       }
     }
   ]

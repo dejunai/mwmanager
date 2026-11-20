@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MWManager's own installer for Pherim's Kwama Eggs and Egg Sacs Replacer (Nexus 43555), which ships as BAIN
+     folders. From its readme: 00-Data Files always goes in (staged as the core); 01 bump-maps the eggs and the egg
+     sacs; 02 makes the sacs pulse, 03 is the pulsing sac bump-mapped (it goes in after 01, replacing 01's sac);
+     04 / 05 are the Graphic Herbalism mesh, plain / bump-mapped. Bump mapping is all or nothing, so every valid
+     combination is one choice. Within a choice the folders are listed in install order: a later one overrides. -->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <moduleName>Kwama Eggs and Egg Sacs Replacer</moduleName>
+  <installSteps order="Explicit">
+    <installStep name="Kwama eggs">
+      <optionalFileGroups order="Explicit">
+        <group name="Eggs and egg sacs" type="SelectExactlyOne">
+          <plugins order="Explicit">
+            <plugin name="Plain">
+              <description>The new meshes and higher-resolution textures only: no bump maps, egg sacs still.</description>
+              <typeDescriptor><type name="Recommended"/></typeDescriptor>
+            </plugin>
+            <plugin name="Plain, pulsing egg sacs">
+              <description>No bump maps; the egg sacs pulse so they look alive (02-Pulsing Animation).</description>
+              <files>
+                <folder source="02-Pulsing Animation" destination="" priority="1"/>
+              </files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Plain, for Graphic Herbalism">
+              <description>Install this if you use Graphic Herbalism. No bump maps, egg sacs still, plus the emptied egg sac mesh Graphic Herbalism shows once harvested (04-Graphic herbalism).</description>
+              <files>
+                <folder source="04-Graphic herbalism" destination="" priority="3"/>
+              </files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Plain, pulsing egg sacs, for Graphic Herbalism">
+              <description>Install this if you use Graphic Herbalism. No bump maps; pulsing egg sacs (02-Pulsing Animation), then the Graphic Herbalism egg sac mesh (04-Graphic herbalism).</description>
+              <files>
+                <folder source="02-Pulsing Animation" destination="" priority="1"/>
+                <folder source="04-Graphic herbalism" destination="" priority="3"/>
+              </files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Bump-mapped">
+              <description>Bump maps on the eggs and the egg sacs (01-bump-maps); egg sacs still. Bump maps need a bump-mapping setup (MGE XE shaders); with plain vanilla rendering choose a Plain option.</description>
+              <files>
+                <folder source="01-bump-maps" destination="" priority="1"/>
+              </files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Bump-mapped, pulsing egg sacs">
+              <description>Bump-mapped eggs (01-bump-maps), then the pulsing bump-mapped egg sac over 01's sac (03-Pulsing Animation Bump-mapped).</description>
+              <files>
+                <folder source="01-bump-maps" destination="" priority="1"/>
+                <folder source="03-Pulsing Animation Bump-mapped" destination="" priority="2"/>
+              </files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Bump-mapped, for Graphic Herbalism">
+              <description>Install this if you use Graphic Herbalism. Bump-mapped eggs and egg sacs (01-bump-maps), plus the bump-mapped Graphic Herbalism egg sac mesh (05-Graphic herbalism bump-mapped).</description>
+              <files>
+                <folder source="01-bump-maps" destination="" priority="1"/>
+                <folder source="05-Graphic herbalism bump-mapped" destination="" priority="3"/>
+              </files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+            <plugin name="Bump-mapped, pulsing egg sacs, for Graphic Herbalism">
+              <description>Install this if you use Graphic Herbalism. Bump-mapped eggs (01-bump-maps), the pulsing bump-mapped egg sac over 01's sac (03-Pulsing Animation Bump-mapped), then the bump-mapped Graphic Herbalism egg sac mesh (05-Graphic herbalism bump-mapped).</description>
+              <files>
+                <folder source="01-bump-maps" destination="" priority="1"/>
+                <folder source="03-Pulsing Animation Bump-mapped" destination="" priority="2"/>
+                <folder source="05-Graphic herbalism bump-mapped" destination="" priority="3"/>
+              </files>
+              <typeDescriptor><type name="Optional"/></typeDescriptor>
+            </plugin>
+          </plugins>
+        </group>
+      </optionalFileGroups>
+    </installStep>
+  </installSteps>
+</config>

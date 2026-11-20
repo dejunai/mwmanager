@@ -410,12 +410,17 @@ class GuiSmokeTests(unittest.TestCase):
                 mock.patch.object(self.app, "_run_progress_job",
                                   lambda title, text, worker, done: done(worker(lambda _m: None), None)), \
                 mock.patch.object(self.app, "_install_plugin_archives",
-                                  lambda items, then=None: calls.append(("install", items)) or then()), \
+                                  lambda items, then=None, **kw: calls.append(("install", items, kw)) or then()), \
                 mock.patch.object(self.app, "stage_major_masters",
                                   lambda **kw: calls.append(("options", kw))):
             self.app._resolve_waiting_options(after)
-        self.assertEqual(calls, [("install", [item]),
-                                 ("options", {"option_masters": ["OAAB_Data.esm"], "reuse_answers": True})])
+        self.assertEqual([c[:2] for c in calls], [("install", [item]),
+                                                  ("options", {"option_masters": ["OAAB_Data.esm"],
+                                                               "reuse_answers": True})])
+        # the window says why it opened: these mods are what the masters' chosen options need
+        self.assertEqual(calls[0][2]["title"], "Install mods your options need")
+        self.assertIn("OAAB_Data.esm", calls[0][2]["intro"])
+        self.assertIn("glow.7z", calls[0][2]["intro"])
         after.assert_not_called()                     # --full is offered after the masters deploy again
 
     def test_with_nothing_waiting_full_is_offered_straight_away(self):

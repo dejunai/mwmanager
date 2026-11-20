@@ -2588,7 +2588,7 @@ class ManagerGUI(tk.Tk):
                    command=lambda: close_then_install([item for item in items if not item["blocked"]])).pack(side="right", padx=(0, 6))
         ttk.Button(footer, text="Skip", command=dialog.destroy).pack(side="right", padx=(0, 6))
 
-    def _install_plugin_archives(self, items, *, accept_staged=False, then=None):
+    def _install_plugin_archives(self, items, *, accept_staged=False, then=None, title=None, intro=None):
         from plugin_install import (apply_plugin_compatibility, check_deploy_path_lengths, count_bsa_assets,
                                     deploy_package, extract_archive, deployment_label, has_altered_assets,
                                     altered_assets, settle_altered_assets,
@@ -3030,8 +3030,9 @@ class ManagerGUI(tk.Tk):
             if then:                                   # e.g. put in the master options these plugins were for
                 self.after(100, then)
 
-        job_title = "Accept staged files as ready" if accept_staged else "Deploy Plugins"
-        self._run_progress_job(job_title, "Preparing staged plugin deployment…", worker, completed)
+        job_title = title or ("Accept staged files as ready" if accept_staged else "Deploy Plugins")
+        self._run_progress_job(job_title, "Preparing staged plugin deployment…", worker, completed,
+                               description_override=intro)
 
     def remove_installed_plugins(self):
         from plugin_install import list_deployments
@@ -3733,6 +3734,17 @@ class ManagerGUI(tk.Tk):
         dialog.minsize(680, 600)
         masters = list(self.major_masters)
         reorder_warning_shown = False
+
+        def master_state():
+            return tuple(masters), frozenset(n.casefold() for n in masters
+                                             if n.casefold() in self.selected_major_masters)
+        saved_state = [master_state()]
+        save_button = {}
+
+        def update_save_label():
+            if "button" in save_button:
+                save_button["button"].configure(
+                    text="Save master order" if master_state() != saved_state[0] else "Done")
         try:
             saved_master_data = json.loads(MAJOR_MASTER_CONFIG.read_text(encoding="utf-8"))
             keywords = {name: saved_master_data.get(name, []) for name in masters}
@@ -3824,6 +3836,7 @@ class ManagerGUI(tk.Tk):
 
         def update_master_buttons(_event=None):
             """Every Major Masters button's enabled state, from the last refresh's scan."""
+            update_save_label()
             selection = tree.selection()
             update_deploy_button(last_scan.get("staged", {}), last_scan.get("unfinished", set()))
             self.remove_master_button.state(["!disabled"] if any(
@@ -4018,8 +4031,11 @@ class ManagerGUI(tk.Tk):
                                and name.casefold() in self.selected_major_masters]
             self.order = list(CORE) + installed_active + other
             self.save()
+            saved_state[0] = master_state()
             if close and not getattr(self, "_initializing_manager", False):
                 dialog.destroy()
+            else:
+                update_save_label()
             return True
 
         def saved_action(action):
@@ -4046,7 +4062,10 @@ class ManagerGUI(tk.Tk):
         self.remove_master_button.pack(side="left", padx=(6, 0))
         self.unstage_master_button = ttk.Button(footer_bottom, text="Unstage selected", command=unstage_selected)
         self.unstage_master_button.pack(side="left", padx=(6, 0))
-        ttk.Button(footer_bottom, text="Save master order", command=save_masters, width=22, style="MasterSave.TButton").pack(side="right")
+        save_button["button"] = ttk.Button(footer_bottom, text="Done", command=save_masters, width=22,
+                                           style="MasterSave.TButton")
+        save_button["button"].pack(side="right")
+        update_save_label()
         def close_masters():
             if getattr(self, "_active_job", None):
                 return
@@ -4361,6 +4380,9 @@ class ManagerGUI(tk.Tk):
                          f"Identical files already present: {len(result['skipped_identical']):,}"])
             if result["archives"]:
                 detail += ["", "Registered BSA archives:"] + [f"  • {name}" for name in result["archives"]]
+            masters_window = getattr(self, "_major_master_dialog", None)
+            if masters_window is not None and masters_window.winfo_exists():
+                masters_window.destroy()       # its job is done; on top, it hid this summary behind it
             messagebox.showinfo("Major masters deployed", "\n".join(detail), parent=self)
             view = getattr(self, "_job_view", None)
             if view is not None and getattr(view, "setup", False) and view.window.winfo_exists():
@@ -4411,7 +4433,12 @@ class ManagerGUI(tk.Tk):
             def put_options_in():
                 self.stage_major_masters(option_masters=masters, reuse_answers=True)
 
-            self._install_plugin_archives(items, then=put_options_in)
+            names = [Path(item["archive"]).name for item in items]
+            self._install_plugin_archives(
+                items, then=put_options_in, title="Install mods your options need",
+                intro=(f"Options you chose for {', '.join(masters)} need other mods, so these {len(names)} are installed "
+                       f"now: {', '.join(names[:6])}{' …' if len(names) > 6 else ''}. Their own options are asked "
+                       "first, then they are staged and deployed; after that the waiting options go into the masters."))
 
         if downloads is None:
             after()
@@ -4651,7 +4678,7 @@ class ManagerGUI(tk.Tk):
         render()
         dialog.wait_window()        # the caller's next prompt (run --full) waits until the review is closed
 
-    def _run_progress_job(self, title, initial_text, worker, on_complete):
+    def _run_progress_job(self, title, initial_text, worker, on_complete, description_override=None):
         """Run slow archive work away from Tk and keep the user informed while it runs."""
         running = getattr(self, "_active_job", None)
         if running:
@@ -4699,6 +4726,8 @@ class ManagerGUI(tk.Tk):
                 "Pre-deploy checks": "Recheck prerequisites before changing the live game.",
                 "Scanning major-master downloads": "Inspect downloaded archives and check versions before choosing what to stage.",
             }.get(title, "Process the staged files. Tidy applies automatically; option choices remain interactive.")
+        if description_override:
+            description = description_override
         control = JobControl()
         self._job_control = control
         view.begin(title, description, control)

@@ -408,6 +408,49 @@ class WorkflowGuiTests(unittest.TestCase):
             self.app.deploy_major_masters()
         job.assert_not_called()
 
+    def master_widgets(self):
+        def descendants(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from descendants(child)
+        return list(descendants(self.app._major_master_dialog))
+
+    def test_the_gold_button_says_done_until_the_master_order_changes(self):
+        """After a deployment the window came back with "Save master order" as the only way on, so nothing looked
+        finished; it reads Save only when there is something to save."""
+        self.stage()
+        self.app.open_major_masters()
+        widgets = self.master_widgets()
+        gold = next(w for w in widgets if isinstance(w, self.g.ttk.Button)
+                    and str(w.cget("style")) == "MasterSave.TButton")
+        self.assertEqual(gold.cget("text"), "Done")
+        tree = next(w for w in widgets if isinstance(w, self.g.ttk.Treeview))
+        tree.selection_set(tree.get_children()[0])
+        self.app.update()
+        with mock.patch.object(self.g.messagebox, "askyesno", return_value=True),                 mock.patch.object(self.g.messagebox, "showwarning"):          # the first move asks to confirm
+            next(w for w in widgets if isinstance(w, self.g.ttk.Button) and w.cget("text") == "Move down").invoke()
+        self.assertEqual(gold.cget("text"), "Save master order")
+
+    def test_a_finished_deployment_closes_the_masters_window(self):
+        """Its summary opened behind the Major Masters window, which stayed open."""
+        self.stage()
+        self.app._preflight_signature = preflight_signature(self.app.settings["game_dir"])
+        self.app.open_major_masters()
+        jobs = []
+        self.app._run_progress_job = lambda title, initial, worker, complete: jobs.append(complete)
+        with mock.patch.object(self.g.messagebox, "askyesno", return_value=True):
+            self.app.deploy_major_masters()
+        result = {"ready": ["Selected.esm"], "backed_up": [], "skipped_identical": [], "archives": [],
+                  "conflicts": [], "linked": ["Selected.esm"]}
+        with mock.patch.object(self.app, "save"), mock.patch.object(self.app, "refresh"), \
+                mock.patch.object(self.g, "write_gui_state"), mock.patch("mwmanager_dialogs.showinfo"), \
+                mock.patch.object(self.g.messagebox, "showinfo") as summary, \
+                mock.patch("mwmanager_dialogs.askyesno", return_value=False), \
+                mock.patch.object(self.app, "_resolve_waiting_options"):
+            jobs[0](result, None)
+        self.assertTrue(summary.called)
+        self.assertIsNone(getattr(self.app, "_major_master_dialog", None))
+
     def test_deploy_passes_only_selected_masters(self):
         self.stage()
         self.app._preflight_signature = preflight_signature(self.app.settings["game_dir"])
@@ -427,7 +470,7 @@ class WorkflowGuiTests(unittest.TestCase):
         now asks every archive first, then stages them all with the saved answers (no window)."""
         self.app._preflight_signature = preflight_signature(self.app.settings["game_dir"])
         jobs = []
-        self.app._run_progress_job = lambda title, initial, worker, complete: jobs.append(worker)
+        self.app._run_progress_job = lambda title, initial, worker, complete, **_kw: jobs.append(worker)
         downloads = Path(self.tmp.name) / "downloads"
         downloads.mkdir(exist_ok=True)
         items = []
@@ -469,7 +512,7 @@ class WorkflowGuiTests(unittest.TestCase):
         and BSA) again, though nothing it checks had changed."""
         self.app._preflight_signature = preflight_signature(self.app.settings["game_dir"])
         jobs = []
-        self.app._run_progress_job = lambda title, initial, worker, complete: jobs.append(worker)
+        self.app._run_progress_job = lambda title, initial, worker, complete, **_kw: jobs.append(worker)
         self.app._install_plugin_archives([])
         lines = []
         with mock.patch("preinstall.run_preinstall") as preflight:
