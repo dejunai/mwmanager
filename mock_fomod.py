@@ -2261,15 +2261,20 @@ def _activate(mod_dir: Path, plugin: str, records: list[dict], chosen: set[str],
             desired.update(_payload_files(option))      # ascending number: higher groups win overlaps
     new_state = {}
     kept_in_extras = None
+    made_dirs = set()                 # one mkdir per folder, not per file: a voice pack puts thousands in each
     last_report = time.monotonic()
     for done, (rel, source) in enumerate(desired.items()):
         if time.monotonic() - last_report >= 15:          # voice packs add tens of thousands of files
             print(f"  {mod_dir.name}: adding option files {done:,} of {len(desired):,}…", flush=True)
             last_report = time.monotonic()
         destination = mod_dir / rel
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        if destination.parent not in made_dirs:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            made_dirs.add(destination.parent)
         backup_rel = reusable.get(rel)
-        if destination.exists() and source.resolve() == destination.resolve():
+        # the same path, compared as text: two resolve() calls were about 40% of each file's time
+        if destination.exists() and os.path.normcase(os.path.abspath(source)) == \
+                os.path.normcase(os.path.abspath(destination)):
             new_state[rel] = {"backup": backup_rel, "source": str(source)}
             continue
         restore_from = None

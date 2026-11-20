@@ -309,6 +309,32 @@ class KeptCoreTests(unittest.TestCase):
             self.assertTrue(os.path.samefile(mod / "Textures" / "rock.dds", kept))
 
 
+class OptionFileSpeedTests(unittest.TestCase):
+    def test_adding_option_files_does_no_resolve_or_mkdir_per_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mod = Path(tmp) / "Pack"
+            option = mod / "Extras" / "Pack" / "01 Voices"
+            files = {}
+            for i in range(40):
+                source = option / "Sound" / "Vo" / f"v{i}.mp3"
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_bytes(b"v")
+                files[f"Sound/Vo/v{i}.mp3"] = source
+            record = {"key": "voices", "number": 1, "path": option}
+            resolves, mkdirs = [], []
+            real_resolve, real_mkdir = Path.resolve, Path.mkdir
+            with mock.patch.object(mock_fomod, "_payload_files", return_value=files), \
+                    mock.patch.object(Path, "resolve", lambda self, *a, **k: resolves.append(self)
+                                      or real_resolve(self, *a, **k)), \
+                    mock.patch.object(Path, "mkdir", lambda self, *a, **k: mkdirs.append(self)
+                                      or real_mkdir(self, *a, **k)):
+                mock_fomod._activate(mod, "Pack", [record], {"voices"}, {}, Path(tmp) / "backups")
+            self.assertEqual(sorted(p.name for p in mod.joinpath("Sound", "Vo").iterdir())[:2],
+                             ["v0.mp3", "v1.mp3"])
+            self.assertLess(len(resolves), 5)                 # was 2 per file
+            self.assertLess(len(mkdirs), 5)                   # was 1 per file
+
+
 class SoundsFolderTests(unittest.TestCase):
     def test_a_misnamed_sounds_folder_is_renamed_and_reported(self):
         tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
