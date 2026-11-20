@@ -37,6 +37,38 @@ class LayerReportTests(unittest.TestCase):
 
 
 
+
+class NonAsciiRename(unittest.TestCase):
+    def test_a_renamed_files_original_goes_to_off_plugin_non_ascii(self):
+        import tempfile
+        mwmanager_upstream.compose()
+        import mwdialog_assets
+        with tempfile.TemporaryDirectory() as tmp:
+            mod = Path(tmp, "Voices-123-1")
+            (mod / "Sound" / "Vo").mkdir(parents=True)
+            (mod / "Voices.esp").write_bytes(b"TES3")
+            (mod / "Sound" / "Vo" / "café.mp3").write_bytes(b"original")
+            (mod / "Sound" / "Vo" / "cafe.mp3").write_bytes(b"renamed earlier")
+            said = []
+            mwdialog_assets.rename_ascii(str(mod), str(mod / "Sound" / "Vo" / "café.mp3"), "Sound\\Vo\\café.mp3",
+                                         "Sound\\Vo\\cafe.mp3", said.append)
+            kept = mod / "Off" / "Voices" / "non-ascii" / "Sound" / "Vo" / "café.mp3"
+            self.assertEqual(kept.read_bytes(), b"original")
+            self.assertFalse((mod / "Off" / "Voices" / "names").exists())
+            self.assertIn(os.path.join("Off", "Voices", "non-ascii", "Sound", "Vo", "café.mp3"), said[0])
+
+            # an original an earlier version kept in Off\<plugin>\names\ still counts: no second copy
+            (mod / "Sound" / "Vo" / "thé.mp3").write_bytes(b"again")
+            (mod / "Sound" / "Vo" / "the.mp3").write_bytes(b"renamed earlier")
+            old = mod / "Off" / "Voices" / "names" / "Sound" / "Vo" / "thé.mp3"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"first original")
+            mwdialog_assets.rename_ascii(str(mod), str(mod / "Sound" / "Vo" / "thé.mp3"), "Sound\\Vo\\thé.mp3",
+                                         "Sound\\Vo\\the.mp3", said.append)
+            self.assertFalse((mod / "Sound" / "Vo" / "thé.mp3").exists())
+            self.assertEqual(old.read_bytes(), b"first original")
+            self.assertFalse((mod / "Off" / "Voices" / "non-ascii" / "Sound" / "Vo" / "thé.mp3").exists())
+
 class TidyApplyProgress(unittest.TestCase):
     """A 54,000-move package sat silent for about a minute before its first progress line."""
 

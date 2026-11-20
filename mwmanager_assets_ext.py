@@ -257,17 +257,21 @@ def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
         os.replace(full, new_full)
         operations.append({"src": full, "dst": new_full})
     elif os.path.exists(full):
-        # If this path was renamed earlier, keep the old-named source under the feature-specific Off tree.
+        # If this path was renamed earlier, keep the old-named source in Off\<plugin>\non-ascii\<old path>.
         import mwmanager as _manager
-        keep = _manager.off_dest(root, "names", None, rel)
-        os.makedirs(os.path.dirname(keep), exist_ok=True)
-        if os.path.exists(keep):
+        keep = _manager.off_dest(root, "non-ascii", None, rel)
+        kept_before = _manager.off_dest(root, "names", None, rel)      # where earlier versions kept it
+        if os.path.exists(keep) or os.path.exists(kept_before):
             os.remove(full)
             operations.append({"duplicate": new_full, "restore": full})
+            log(f"{rel}: ASCII replacement {new_rel} already exists and the original is already kept; "
+                "removed the redundant copy")
         else:
+            os.makedirs(os.path.dirname(keep), exist_ok=True)
             os.replace(full, keep)
             operations.append({"src": full, "dst": keep})
-        log(f"{rel}: ASCII replacement {new_rel} already exists; moved the redundant source to Off\\names\\")
+            log(f"{rel}: ASCII replacement {new_rel} already exists; moved the original to "
+                f"{os.path.relpath(keep, root)}")
     # drop the old folders when emptied
     d = os.path.dirname(full)
     while os.path.normcase(d) != os.path.normcase(root) and os.path.isdir(d) and not os.listdir(d):
