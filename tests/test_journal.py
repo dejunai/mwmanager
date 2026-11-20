@@ -166,6 +166,22 @@ class BaselineTests(Fixture):
         self.assertFalse(partial.exists())
         self.assertEqual((self.game / "Morrowind.exe").read_bytes(), b"vanilla exe")
 
+    def test_mge_distant_land_is_left_alone_when_mge_stays(self):
+        self.journal.capture_baseline(self.game)
+        write(self.game / "mgeXE.toml", b"[graphics]\nvsync = \"immediate\"\n")
+        self.journal.capture_prerequisites(self.game)
+        land = write(self.game / "Data Files/distantland/terrain.bin", b"generated for the modded load order")
+        write(self.game / "mgeXE.toml", b"[graphics]\nvsync = \"immediate\"\n[distant_land]\non = true\n")
+        report = self.journal.verify(self.game, against="prerequisites", full_hash=True)
+        self.assertEqual((report["changed"], report["extra"], report["unexplained"]), ([], [], []))
+        keep = self.journal.plan_rollback(self.game)
+        self.assertEqual(keep["unexplained"], [])
+        self.journal.execute_rollback(self.game, keep)
+        self.assertTrue(land.exists())                         # regenerate it later; not removed with MGE kept
+        store_only = self.journal.plan_rollback(self.game, preserve_prerequisites=False)
+        self.assertIn(("delete", "Data Files/distantland/terrain.bin"),
+                      {(step["op"], step["path"]) for step in store_only["prerequisite_steps"]})
+
     def test_rollback_skips_a_journal_original_when_current_file_matches_prerequisite_checkpoint(self):
         plugin = self.game / "Data Files/XE Sky Variations.esp"
         self.journal.capture_baseline(self.game)
