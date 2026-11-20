@@ -85,14 +85,26 @@ class PendingOptionsTests(unittest.TestCase):
                     patch.stop()
             self.assertEqual((package / "Sound/Vo/hello.mp3").read_bytes(), b"voice")
 
-    def test_only_a_companion_with_options_of_its_own_is_unpacked_to_ask(self):
-        record = {"companion": {"archive": "Voices.7z"}}
-        with mock.patch("core_addons._members", return_value=(["Sound/Vo/a.mp3", "Sound/Vo/b.mp3"], None)):
-            self.assertFalse(mock_fomod._companion_has_options(record))
-        with mock.patch("core_addons._members", return_value=(["fomod/ModuleConfig.xml", "Data/x.esp"], None)):
-            self.assertTrue(mock_fomod._companion_has_options(record))
-        with mock.patch("core_addons._members", return_value=(["010 HD Worldspace/Textures/a.dds"], None)):
-            self.assertTrue(mock_fomod._companion_has_options(record))
+    def test_the_ask_only_pass_unpacks_no_companion(self):
+        """Voice packs were unpacked in the options pass (they have options of their own), so the next archive's
+        options waited for gigabytes of files: every companion now waits for the second pass."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "stage" / "Voices"
+            put(package / "Extras/01 Voices/Sound/Vo/hello.mp3", b"voice")
+            data = root / "game" / "Data Files"
+            data.mkdir(parents=True)
+            record = {"key": "option:1", "path": package / "Extras/01 Voices", "label": "Voices", "targets": [],
+                      "number": 1, "companion": {"archive": str(root / "VoicePack.7z")}}
+            with mock.patch("nexus_updates.check_and_offer_update", return_value=False), \
+                    mock.patch.object(mock_fomod, "_has_fomod", return_value=False), \
+                    mock.patch.object(mock_fomod, "_discover", return_value=[record]), \
+                    mock.patch.object(mock_fomod, "_discover_plugin_choices", return_value=[]), \
+                    mock.patch.object(mock_fomod, "_show_selector", return_value={"option:1"}), \
+                    mock.patch.object(mock_fomod, "_materialize_companions") as unpack, \
+                    mock.patch.dict(os.environ, {"MWMANAGER_OPTIONS_ASK_ONLY": "1"}):
+                mock_fomod.process_staging(package.parent, data, root / "outputs")
+            unpack.assert_not_called()
 
     def test_answers_survive_a_failed_companion_extraction(self):
         with tempfile.TemporaryDirectory() as tmp:

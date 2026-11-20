@@ -153,6 +153,34 @@ def plan_needed_archives(package_name: str, outputs: Path, downloads, manager_di
     return items
 
 
+SHORT_NAME_LIMIT = 40          # a staged package's folder and its Extras folder repeat this name in every path
+
+
+def short_package_name(archive: Path) -> str:
+    """A download's mod name without Vortex's Nexus id, version and stamp ("Better Telvanni Crystal V2 4k", not
+    "...-59196-1-0-1780326665"), cut to SHORT_NAME_LIMIT: the full name, twice in a staged path (package folder and
+    Extras), pushed textures past Windows' 260 characters."""
+    from vortex_tidy import mod_name
+    name = mod_name(Path(archive).stem)
+    name = re.sub(r"[^A-Za-z0-9._ -]+", "_", name).strip(" .")
+    return name[:SHORT_NAME_LIMIT].rstrip(" .") or "plugin"
+
+
+def staging_folder_name(item: dict) -> str:
+    """staging/plugins/<short mod name>-<Nexus id>: unique per mod (a new version replaces the old one), short enough
+    that the textures below stay inside Windows' 260 characters."""
+    archive = Path(item["archive"])
+    mod_id = str(item.get("nexus_mod_id") or "").strip()
+    if not mod_id.isdigit():
+        from plugin_install import _nexus_ids_from_archive_name
+        mod_id = _nexus_ids_from_archive_name(archive)[0] or ""
+    if not mod_id:
+        match = re.search(r"-(\d{3,7})-", archive.stem)
+        mod_id = match.group(1) if match else ""
+    name = short_package_name(archive)
+    return f"{name}-{mod_id}" if mod_id else name
+
+
 def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *, only: str | None = None,
                    reopen: bool = False, env=None, quiet=None, on_line=None, log=None,
                    ask_only: bool = False) -> int | None:
@@ -1263,6 +1291,7 @@ class ManagerGUI(tk.Tk):
         tools_menu.add_command(label="Save setup profile…", command=self.save_install_profile)
         tools_menu.add_command(label="Apply setup profile…", command=self.apply_install_profile)
         tools_menu.add_separator()
+        tools_menu.add_command(label="Install mods your options need…", command=self.install_waiting_option_mods)
         tools_menu.add_command(label="Preview staged files…", command=self.preview_staged_install)
         tools_menu.add_command(label="Compare staged update…", command=self.compare_staged_update)
         menu.add_cascade(label="Tools", menu=tools_menu)
@@ -2789,13 +2818,14 @@ class ManagerGUI(tk.Tk):
             unpacking = {}                   # archive -> (thread, result, folder): the next one, unpacked early
 
             def destination_for(index, item):
+                """staging/plugins/<short mod name>-<Nexus id>. A folder an earlier run named after the whole
+                download ("<download name> [n]") is still found."""
                 archive = Path(item["archive"])
-                safe_stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .") or f"plugin-{index}"
-                destination = staging_root / f"{safe_stem} [{index}]"
+                destination = staging_root / staging_folder_name(item)
                 if not destination.is_dir():
+                    old_name = re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .")
                     matching_stages = [path for path in staging_root.iterdir()
-                                       if path.is_dir() and path.name.casefold().startswith(
-                                           (safe_stem + " [").casefold())]
+                                       if path.is_dir() and path.name.casefold().startswith((old_name + " [").casefold())]
                     if len(matching_stages) == 1:
                         destination = matching_stages[0]
                 completed_stage = next((entry for entry in _read_ready_plugin_stages()
@@ -2872,6 +2902,7 @@ class ManagerGUI(tk.Tk):
                     unpack_ahead(index + 1, items[index])
                 ask_env = os.environ.copy()
                 ask_env["MWMANAGER_SOURCE_ARCHIVE"] = str(archive.resolve())
+                ask_env["MWMANAGER_PLUGIN_NAME"] = short_package_name(archive)
                 run_tidy_steps(py, staging_root, data_dir, progress, f"Options for {archive.name}",
                                only=package.name, env=ask_env, quiet=quiet, log=log_install_phase, ask_only=True)
                 return package, prepared, install_plugins
@@ -2927,6 +2958,7 @@ class ManagerGUI(tk.Tk):
                         tidy_env = os.environ.copy()
                         tidy_env["MWMANAGER_SOURCE_ARCHIVE"] = str(archive.resolve())
                         tidy_env["MWMANAGER_REUSE_FOMOD"] = "1"        # the answers given in phase A
+                        tidy_env["MWMANAGER_PLUGIN_NAME"] = short_package_name(archive)
                         batch_names.append(package.name)
                         tidy_env["MWMANAGER_INSTALL_BATCH"] = os.pathsep.join(batch_names)
                         tidy_mod_count = run_tidy_steps(py, staging_root, data_dir, progress,
@@ -4404,6 +4436,13 @@ class ManagerGUI(tk.Tk):
 
         self._setup_begin("major_masters_deployed")
         self._run_progress_job("Deploy Major Masters", "Hardlinking selected masters and their assets…", worker, completed)
+
+    def install_waiting_option_mods(self):
+        """Tools menu: the queue of mods that chosen major-master options wait on (outputs\\
+        mwmanager_pending_options.json), started by hand - it otherwise runs only right after a major-master
+        deployment, so a batch that stopped could not be picked up again."""
+        self.status.set("Looking for the mods your chosen options need…")
+        self._resolve_waiting_options(lambda: None)
 
     def _resolve_waiting_options(self, after):
         """The masters are deployed with every option that needs nothing more. Options chosen that wait on

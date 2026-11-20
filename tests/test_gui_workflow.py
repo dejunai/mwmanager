@@ -474,10 +474,10 @@ class WorkflowGuiTests(unittest.TestCase):
         downloads = Path(self.tmp.name) / "downloads"
         downloads.mkdir(exist_ok=True)
         items = []
-        for name in ("A.7z", "B.7z"):
+        for name in ("A.7z", "B.7z", "A-123-1-1.7z"):        # the third has the first one's mod name
             (downloads / name).write_bytes(b"7z")
             items.append({"archive": str(downloads / name), "plugins": [name[0] + ".esp"]})
-        calls = []
+        calls, names = [], []
 
         class Stop(Exception):
             pass
@@ -486,6 +486,7 @@ class WorkflowGuiTests(unittest.TestCase):
             env = kwargs.get("env") or {}
             calls.append((Path(env["MWMANAGER_SOURCE_ARCHIVE"]).name, "ask" if kwargs.get("ask_only") else
                           "stage" if env.get("MWMANAGER_REUSE_FOMOD") == "1" else "?"))
+            names.append((env.get("MWMANAGER_PLUGIN_NAME"), kwargs.get("only")))
             if not kwargs.get("ask_only"):
                 raise Stop
             return 1
@@ -503,7 +504,9 @@ class WorkflowGuiTests(unittest.TestCase):
             self.app._install_plugin_archives(items)
             with self.assertRaises(Stop):
                 jobs[0](lambda _line: None)
-        self.assertEqual(calls, [("A.7z", "ask"), ("B.7z", "ask"), ("A.7z", "stage")])
+        self.assertEqual(calls, [("A.7z", "ask"), ("B.7z", "ask"), ("A-123-1-1.7z", "ask"), ("A.7z", "stage")])
+        # tidy gets the short name; the staging folder is "<short name>-<Nexus id>", not the download name
+        self.assertEqual(names, [("A", "A"), ("B", "B"), ("A", "A-123"), ("A", "A")])
         # B unpacked in the background while A's options were asked, and was used without a question
         self.assertEqual(unpacked["B.7z"], "MWManager unpack ahead")
 

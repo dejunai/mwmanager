@@ -52,9 +52,20 @@ NUMBERED_OPTION = re.compile(r"^(\d{2})(?:\s*-\s*|\s+)(.+)$", re.I)
 VORTEX_FILES = {"__folder_managed_by_vortex", ".mwmanager-stage.json"}
 
 
+PACKAGE_NAME_LIMIT = 40      # the Extras\\<name> folder repeats it in every path below it
+
+
 def package_name(folder):
-    """Use the processing identity, staged primary master, Vortex name, then the download-folder name."""
-    fallback = mod_name(os.path.basename(folder.rstrip("\\/")))
+    """Use the processing identity, staged primary master, Vortex name, then the download-folder name - without
+    MWManager's " [n]" staging suffix, so the Nexus id and version are stripped too, and at most 40 characters."""
+    name = _package_name(folder)
+    return name[:PACKAGE_NAME_LIMIT].rstrip(" .") or name
+
+
+def _package_name(folder):
+    base = re.sub(r"\s*\[\d+\]$", "", os.path.basename(folder.rstrip("\\/")))
+    base = re.sub(r"-\d{3,7}$", "", base)            # staging/plugins/<name>-<Nexus id>
+    fallback = mod_name(base)
     established = os.environ.get("MWMANAGER_PLUGIN_NAME", "").strip()
     if established:
         return BAD_CHARS.sub("_", established).rstrip(" .") or fallback

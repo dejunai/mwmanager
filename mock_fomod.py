@@ -2763,27 +2763,9 @@ def _legacy_answer_groups(records: list[dict]) -> set[str]:
 
 def _ask_only() -> bool:
     """MWMANAGER_OPTIONS_ASK_ONLY=1: a batch's first pass. Each package's options are asked and the answers saved;
-    nothing is staged (the second pass applies them without asking, with MWMANAGER_REUSE_FOMOD=1)."""
+    nothing is staged or unpacked, companions included (the second pass applies the answers without asking, with
+    MWMANAGER_REUSE_FOMOD=1, and unpacks the companions; their own options windows open then)."""
     return os.environ.get("MWMANAGER_OPTIONS_ASK_ONLY") == "1"
-
-
-def _companion_has_options(record: dict) -> bool:
-    """Whether a companion's archive has options of its own (a FOMOD, or numbered top folders), from its file list:
-    only those are unpacked in the ask-only pass, for their own options window. A voice pack stays packed."""
-    from core_addons import _members, _seven_zip
-    archive = Path(record["companion"]["archive"])
-    names, error = _members(archive, _seven_zip(Path(__file__).resolve().parent))
-    if error:
-        return True                                     # can't tell: unpack it and look
-    tops = set()
-    for name in names:
-        parts = [p for p in name.replace("\\", "/").split("/") if p]
-        if any(p.casefold() == "moduleconfig.xml" for p in parts[-1:]) and \
-                any(p.casefold() == "fomod" for p in parts[:-1]):
-            return True
-        if len(parts) > 1:
-            tops.add(parts[0])
-    return any(OPTION_RE.match(top) for top in tops)
 
 
 def _reuse_saved_answers() -> bool:
@@ -2980,11 +2962,8 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         # Keep the answers even if a long companion extraction below fails.
         _save_answer_file(output_dir, selection_identity, set(chosen), records, answer)
         if _ask_only():
-            # first pass of a batch: a companion with options of its own is unpacked for its window; the rest
-            # (voice packs) and every option's files wait for the second pass
-            asking = {r["key"] for r in records if r.get("companion") and r["key"] in set(chosen) - held
-                      and _companion_has_options(r)}
-            _materialize_companions(mod_dir, records, asking, output_dir, installed)
+            # first pass of a batch: only the answers. Every companion (voice packs are gigabytes) is unpacked in the
+            # second pass, with the option files; a companion's own options window opens then.
             record_pending_options(output_dir, mod_dir, records, set(chosen), installed)
             print(f"  {mod_dir.name}: {len(chosen)} option(s) chosen; staged after the batch's other choices")
             continue

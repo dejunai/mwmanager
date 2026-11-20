@@ -423,6 +423,15 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertIn("glow.7z", calls[0][2]["intro"])
         after.assert_not_called()                     # --full is offered after the masters deploy again
 
+    def test_the_waiting_options_queue_can_be_started_from_the_tools_menu(self):
+        """A batch that stopped (a path too long) left the queue on disk, with no way to start it again."""
+        labels = [self.app.tools_menu.entrycget(i, "label") for i in range(self.app.tools_menu.index("end") + 1)
+                  if self.app.tools_menu.type(i) == "command"]
+        self.assertIn("Install mods your options need…", labels)
+        with mock.patch.object(self.app, "_resolve_waiting_options") as resolve:
+            self.app.install_waiting_option_mods()
+        resolve.assert_called_once()
+
     def test_with_nothing_waiting_full_is_offered_straight_away(self):
         after = mock.Mock()
         with mock.patch.object(self.app, "_archive_downloads_folder", return_value=self.g.APP_DIR / "dl"), \
