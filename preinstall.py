@@ -543,6 +543,80 @@ In Game tab:
 
 Review the remaining settings for your system, save, and close MGEXEgui when finished."""
 
+MGE_APPLY_QUESTION = """MWManager can apply its recommended MGE XE starting settings for you:
+
+- mgeXE.toml: VSync off, shaders on, crosshair autohide on.
+- Morrowind.ini: frame limiter 300, Allow yes to all, screenshots on, light attenuation Constant 0.382 and Quadratic 2.619 (Linear 0 when per-pixel lighting is on).
+
+The shader preset (“Very High” with Depth of Field) and “Pause rendering in menus” stay your choice in MGEXEgui.
+
+Apply them now? No shows the recommendations and opens MGEXEgui."""
+
+MGE_RECOMMENDED_TOML = {"graphics": {"vsync": '"immediate"'}, "render": {"enable_shaders": "true"},
+                        "runtime": {"crosshair_autohide": "true"}}
+MGE_RECOMMENDED_INI = {"General": {"Max FPS": "300", "AllowYesToAll": "1", "Screen Shot Enable": "1"},
+                       "LightAttenuation": {"UseConstant": "1", "ConstantValue": "0.382",
+                                            "UseQuadratic": "1", "QuadraticValue": "2.619"}}
+
+
+def _set_values(path: Path, values: dict, sep: str, encoding: str) -> list[str]:
+    """Set keys inside [section]s of an INI/TOML file, keeping every other line, comment and line ending."""
+    if not path.is_file():
+        return []
+    text = path.read_text(encoding=encoding, errors="surrogateescape", newline="")
+    eol = "\r\n" if "\r\n" in text else "\n"
+    lines = text.splitlines(keepends=True)
+    if lines and not lines[-1].endswith("\n"):
+        lines[-1] += eol
+    pending = {s.casefold(): (s, {k.casefold(): (k, v) for k, v in kv.items()}) for s, kv in values.items()}
+    out, changed, section, insert_at = [], [], None, 0
+
+    def add_missing():
+        name, keys = pending.pop(section, (None, {}))
+        out[insert_at:insert_at] = [f"{k}{sep}{v}{eol}" for k, v in keys.values()]
+        changed.extend(f"{name}.{k}" for k, _ in keys.values())
+
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            add_missing()
+            section = stripped[1:-1].strip().casefold()
+            out.append(line)
+            insert_at = len(out)
+            continue
+        if section in pending and "=" in stripped and not stripped.startswith(("#", ";")):
+            k = stripped.split("=", 1)[0].strip()
+            item = pending[section][1].pop(k.casefold(), None)
+            if item and stripped.split("=", 1)[1].strip() != item[1]:
+                line = f"{k}{sep}{item[1]}{line[len(line.rstrip(chr(13) + chr(10))):]}"
+                changed.append(f"{pending[section][0]}.{k}")
+        out.append(line)
+        if section is not None and stripped and not stripped.startswith(("#", ";")):
+            insert_at = len(out)
+    add_missing()
+    for name, keys in list(pending.values()):  # sections the file lacked
+        out.append(f"[{name}]{eol}")
+        out.extend(f"{k}{sep}{v}{eol}" for k, v in keys.values())
+        changed.extend(f"{name}.{k}" for k in keys)
+    if changed:
+        temporary = path.with_name(path.name + ".tmp")
+        temporary.write_text("".join(out), encoding=encoding, errors="surrogateescape", newline="")
+        os.replace(temporary, path)
+    return changed
+
+
+def apply_recommended_mge_settings(game_dir: Path) -> list[str]:
+    """Write MWManager's recommended MGE XE starting settings; returns the keys that changed."""
+    import tomllib
+    toml_path, ini = Path(game_dir) / "mgeXE.toml", {s: dict(kv) for s, kv in MGE_RECOMMENDED_INI.items()}
+    changed = _set_values(toml_path, MGE_RECOMMENDED_TOML, " = ", "utf-8")
+    try:
+        if tomllib.loads(toml_path.read_text(encoding="utf-8")).get("distant_land", {}).get("per_pixel_lighting"):
+            ini["LightAttenuation"]["LinearValue"] = "0.000"
+    except (OSError, tomllib.TOMLDecodeError):
+        pass
+    return changed + _set_values(Path(game_dir) / "Morrowind.ini", ini, "=", "cp1252")
+
 
 def _prereq_ready(key: str, game_dir: Path) -> bool:
     found = mwmanager_prereqs.detect(game_dir)
@@ -562,6 +636,8 @@ def _run_prereq_program(path: Path, progress, runner=subprocess.run, reference: 
             progress(f"Preflight: {path.name} exited with code {code}.")
             return False
         return True
+    if reference:
+        progress(reference)
     try:
         result = runner([str(path)], cwd=str(path.parent), check=False)
     except OSError as exc:
@@ -647,8 +723,19 @@ def _post_prerequisite(key: str, game_dir: Path, progress, latest: str | None,
     if key == "mge_xe":
         exe = next((Path(game_dir) / name for name in mwmanager_prereqs.MGE_EXECUTABLES
                     if (Path(game_dir) / name).is_file()), None)
-        if exe and progress.ask_yes_no("Configure MGE XE", MGE_GUIDANCE + "\n\nOpen MGEXEgui now?"):
+        if not exe:
+            return True
+        if not progress.ask_yes_no("Apply recommended MGE XE settings", MGE_APPLY_QUESTION):
             return _run_prereq_program(exe, progress, runner, MGE_GUIDANCE)
+        toml_path = Path(game_dir) / "mgeXE.toml"
+        if not toml_path.is_file():
+            progress("Preflight: MGEXEgui writes mgeXE.toml on its first run; save and close it to continue.")
+            _run_prereq_program(exe, progress, runner)
+        changed = apply_recommended_mge_settings(game_dir)
+        progress("Preflight: recommended MGE XE settings applied"
+                 + (f" ({', '.join(changed)})." if changed else "; they were already set."))
+        if not toml_path.is_file():
+            progress("Preflight: mgeXE.toml still does not exist, so only the Morrowind.ini settings were applied.")
     return True
 
 

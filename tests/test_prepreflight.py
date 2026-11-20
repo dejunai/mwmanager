@@ -702,11 +702,12 @@ class PreflightTests(Base):
         game = self.tmp / "game"
         write(game / "Morrowind Code Patch.exe", b"MZ")
         write(game / "MGEXEgui.exe", b"MZ")
-        progress = Progress(yes_no=[True, True])
+        progress = Progress(yes_no=[True, False])  # declining the MGE apply offer shows guidance and opens the GUI
         runner = mock.Mock(return_value=types.SimpleNamespace(returncode=0))
         self.assertTrue(preinstall._post_prerequisite("mcp_beta", game, progress, LATEST, runner=runner))
         self.assertTrue(preinstall._post_prerequisite("mge_xe", game, progress, LATEST, runner=runner))
-        mcp_text, mge_text = progress.asked[0][2], progress.asked[1][2]
+        mcp_text, mge_text = progress.asked[0][2], "\n".join(progress.lines)
+        self.assertEqual(progress.asked[1][1], "Apply recommended MGE XE settings")
         for text in ("Beta", "Game mechanics", "Over the shoulder 3rd person camera",
                      "NPC AI casts zero cost powers", "Don't loot on dispose", "Level-up skills tooltip",
                      "International", "Bugs", "Apply chosen patches"):
@@ -722,7 +723,7 @@ class PreflightTests(Base):
         game = self.tmp / "game"
         write(game / "Morrowind Code Patch.exe", b"MZ")
         write(game / "MGEXEgui.exe", b"MZ")
-        progress = Progress(yes_no=[True, True])
+        progress = Progress(yes_no=[True, False])
         launched = []
 
         def run_with_reference(path, title, guidance):
@@ -737,6 +738,31 @@ class PreflightTests(Base):
         self.assertIn("Apply chosen patches", launched[0][2])
         self.assertIn("frame limiter to 300", launched[1][2])
         self.assertIn("Quadratic 2.619", launched[1][2])
+
+    def test_accepting_the_mge_offer_writes_recommended_settings_and_keeps_the_rest(self):
+        game = self.tmp / "game"
+        write(game / "MGEXEgui.exe", b"MZ")
+        write(game / "mgeXE.toml", "# keep me\r\n[graphics]\r\nvsync = \"one\"\r\nborderless = true\r\n\r\n"
+                                   "[render]\r\nenable_shaders = false\r\n\r\n[distant_land]\r\n"
+                                   "per_pixel_lighting = true\r\n")
+        write(game / "Morrowind.ini", b"[General]\r\nMax FPS=240\r\nEditor Starting Cell=Caf\xe9\r\n"
+                                      b"[LightAttenuation]\r\nLinearValue=3.0\r\n")
+        progress = Progress(yes_no=[True])
+        runner = mock.Mock(side_effect=AssertionError("the TOML exists, so MGEXEgui is not opened"))
+        self.assertTrue(preinstall._post_prerequisite("mge_xe", game, progress, LATEST, runner=runner))
+        toml = (game / "mgeXE.toml").read_bytes()
+        self.assertIn(b'vsync = "immediate"\r\nborderless = true\r\n', toml)
+        self.assertIn(b"enable_shaders = true\r\n", toml)
+        self.assertIn(b"[runtime]\r\ncrosshair_autohide = true\r\n", toml)
+        self.assertTrue(toml.startswith(b"# keep me\r\n"))
+        ini = (game / "Morrowind.ini").read_bytes()
+        self.assertIn(b"Max FPS=300\r\nEditor Starting Cell=Caf\xe9\r\nAllowYesToAll=1\r\nScreen Shot Enable=1\r\n",
+                      ini)
+        self.assertIn(b"LinearValue=0.000\r\n", ini)
+        self.assertIn(b"QuadraticValue=2.619\r\n", ini)
+        before = ini
+        self.assertEqual(preinstall.apply_recommended_mge_settings(game), [])
+        self.assertEqual((game / "Morrowind.ini").read_bytes(), before)
 
     def test_nothing_installed_lists_pages_in_install_order(self):
         game = self.tmp / "bare"
