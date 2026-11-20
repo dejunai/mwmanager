@@ -1696,26 +1696,36 @@ def apply(moves, staging, progress=None, head_extra=None):
     """Make the moves, journaling each. progress (a list) gets the index of every move done, as it is done,
     so an interrupted run knows what is left. Returns the moves that failed."""
     done, failed, packing = 0, [], {}
-    plugins = sorted({_path_plugin(src, staging) for src, _dst, _why in moves if _path_plugin(src, staging)},
-                     key=str.casefold)
     total = len(moves)
-    last_reported = -1
+    if total and os.environ.get("MWMANAGER_GUI") == "1":
+        print(f"MWMANAGER-PROGRESS: Applying Tidy moves 0 of {total:,}",
+              file=sys.stderr, flush=True)
+    # Planned moves are named under staging, so their package is the first part of the path text. A realpath
+    # per move (two per move here before) took about a minute of silence for a 54,000-move Tamriel_Data.
+    root = os.path.abspath(staging)
+
+    def package_of(src):
+        try:
+            rel = os.path.relpath(os.path.abspath(src), root)
+        except ValueError:                       # another drive
+            return _path_plugin(src, staging)
+        return _path_plugin(src, staging) if rel.startswith(os.pardir) else rel.split(os.sep, 1)[0]
+
+    plugins = sorted({name for src, _dst, _why in moves if (name := package_of(src))}, key=str.casefold)
+    last_reported, last_time = -1, time.monotonic()
 
     def mark(index, *, force=False, record=True):
-        nonlocal last_reported
+        nonlocal last_reported, last_time
         if record and progress is not None:
             progress.append(index)
         if (os.environ.get("MWMANAGER_GUI") == "1"
                 and (force or index == 0 or ((index + 1) % 2000 == 0 and index != total - 1)
-                     or index == total - 1)
+                     or index == total - 1 or time.monotonic() - last_time >= 5)   # a slow stretch still reports
                 and index != last_reported):
             print(f"MWMANAGER-PROGRESS: Applying Tidy moves {index + 1:,} of {total:,}",
                   file=sys.stderr, flush=True)
-            last_reported = index
+            last_reported, last_time = index, time.monotonic()
 
-    if total and os.environ.get("MWMANAGER_GUI") == "1":
-        print(f"MWMANAGER-PROGRESS: Applying Tidy moves 0 of {total:,}",
-              file=sys.stderr, flush=True)
     head = {"run": time.strftime("%Y-%m-%d %H:%M:%S"), "staging": staging, "plugins": plugins}
     head.update(head_extra or {})
     with open(JOURNAL, "a", encoding="utf-8") as j:
@@ -1736,7 +1746,7 @@ def apply(moves, staging, progress=None, head_extra=None):
                         target = why.removeprefix("identical duplicate from ")
                         os.remove(src)
                         j.write(json.dumps({"duplicate": target, "restore": src,
-                                            "plugin": _path_plugin(src, staging)}) + "\n")
+                                            "plugin": package_of(src)}) + "\n")
                         j.flush()
                         done += 1
                         mark(i)
@@ -1763,7 +1773,7 @@ def apply(moves, staging, progress=None, head_extra=None):
                                 else:
                                     os.chmod(base, stat.S_IREAD | stat.S_IWRITE | stat.S_IEXEC)
                                 os.rmdir(base)
-                            j.write(json.dumps({"rmdir": base, "plugin": _path_plugin(base, staging)}) + "\n")
+                            j.write(json.dumps({"rmdir": base, "plugin": package_of(base)}) + "\n")
                             j.flush()
                     mark(i)
                     continue
@@ -1775,22 +1785,22 @@ def apply(moves, staging, progress=None, head_extra=None):
                         os.link(src, dst)
                     except OSError:
                         shutil.copy2(src, dst)
-                    j.write(json.dumps({"link": dst, "source": src, "plugin": _path_plugin(src, staging)}) + "\n")
+                    j.write(json.dumps({"link": dst, "source": src, "plugin": package_of(src)}) + "\n")
                     j.flush()
                     if PACKING_MARK in why:
-                        packing.setdefault(_path_plugin(src, staging), []).append((src, dst, why))
+                        packing.setdefault(package_of(src), []).append((src, dst, why))
                     done += 1
                     mark(i)
                     continue
                 # journaled (on disk) before the move: a crash between the two never leaves a move --undo can't see
-                j.write(json.dumps({"src": src, "dst": dst, "plugin": _path_plugin(src, staging)}) + "\n")
+                j.write(json.dumps({"src": src, "dst": dst, "plugin": package_of(src)}) + "\n")
                 j.flush()
                 os.fsync(j.fileno())
                 os.rename(src, dst)          # staging stays on one drive, so moves are cheap
                 if os.path.isdir(dst):
                     moved_dirs.append((os.path.abspath(src), os.path.abspath(dst)))
                 if PACKING_MARK in why:
-                    packing.setdefault(_path_plugin(src, staging), []).append((src, dst, why))
+                    packing.setdefault(package_of(src), []).append((src, dst, why))
                 done += 1
                 mark(i)
                 if NO_DIFFUSE_WARNING in why:

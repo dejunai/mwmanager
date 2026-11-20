@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +34,34 @@ class LayerReportTests(unittest.TestCase):
                 problems.append(f"{layer}: {name} now replaces an upstream name (new override or upstream "
                                 f"name clash)")
         self.assertEqual(problems, [], "\n".join(problems))
+
+
+
+class TidyApplyProgress(unittest.TestCase):
+    """A 54,000-move package sat silent for about a minute before its first progress line."""
+
+    def test_progress_starts_before_any_path_lookup_and_names_each_package(self):
+        import contextlib
+        import io
+        import os
+        import tempfile
+        tidy = mwmanager_upstream.compose_tidy()
+        with tempfile.TemporaryDirectory() as staging:
+            moves = []
+            for i in range(3):
+                src = Path(staging, "Tamriel Data", f"f{i}.dds")
+                src.parent.mkdir(exist_ok=True)
+                src.write_bytes(b"x")
+                moves.append((str(src), str(Path(staging, "Tamriel Data", "Textures", f"f{i}.dds")), "texture"))
+            err = io.StringIO()
+            journal = Path(staging, "journal.jsonl")
+            with mock.patch.dict(os.environ, {"MWMANAGER_GUI": "1"}), \
+                    mock.patch.dict(tidy.__dict__, {"JOURNAL": str(journal)}), \
+                    mock.patch.object(tidy, "_path_plugin", side_effect=AssertionError("disk lookup per move")), \
+                    contextlib.redirect_stderr(err):
+                tidy.apply(moves, staging)
+            self.assertTrue(err.getvalue().startswith("MWMANAGER-PROGRESS: Applying Tidy moves 0 of 3"))
+            self.assertIn('"plugins": ["Tamriel Data"]', journal.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
