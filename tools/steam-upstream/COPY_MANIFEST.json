@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-20 (America/Los_Angeles); bug reports list dirty records (--clean) and a master's own header faults; an .omwaddon rename is not a bug report",
+  "SyncedAt": "2026-11-20 (America/Los_Angeles); mwpluginpatches: Seyda Neen Coast Guard contraband bulk turn-in (coastGuardContraband)",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -226,24 +226,24 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\config.lua",
-      "Bytes": 7793,
-      "SHA256": "e816667d52b67c92e77c0bcf9398c0e4c68c005286b84ec32e653899a82bea25",
+      "Bytes": 8712,
+      "SHA256": "e4ab19e6ac8e772118322364dfb93cc395a72b85d4b30451323a43132d7e2d6c",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\config.lua",
-      "SourceModified": "2026-11-20T03:22:57"
+      "SourceModified": "2026-11-20T06:18:17"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\main.lua",
-      "Bytes": 4015,
-      "SHA256": "9c17efbcfbe766dfb60c62a73f435cab94944e674833233a522a4f982c392148",
+      "Bytes": 4294,
+      "SHA256": "582c308a241193e96f755bbd49b9415d4c819fa75c2031a0c8213670eb1bd22a",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\main.lua",
-      "SourceModified": "2026-11-20T03:22:57"
+      "SourceModified": "2026-11-20T06:18:17"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\mcm.lua",
-      "Bytes": 15242,
-      "SHA256": "f2a49ae8cec2710f26780b51fd969175f7dc02154d7c4cbd6f439cbad55a1480",
+      "Bytes": 18472,
+      "SHA256": "e3452cfce7ac11c2d9e49411f87dc8bc496698a5dd9eeb4de1d08c7fc0e63297",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\mcm.lua",
-      "SourceModified": "2026-11-20T03:22:58"
+      "SourceModified": "2026-11-20T06:18:17"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\autoStartup.lua",
@@ -342,6 +342,13 @@
       "Bytes": 1904,
       "SHA256": "e3794b714be23deafdfdccdcead4b97e0c16a462202c00c8432326122c2d0cba",
       "SourceModified": "2026-11-20T03:22:57"
+    },
+    {
+      "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\coastGuardContraband.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\coastGuardContraband.lua",
+      "Bytes": 10303,
+      "SHA256": "ef69ce86db36c5e890d34d9bbdc2bb60513bfaef87d43ab3b9251cb7a0f208ce",
+      "SourceModified": "2026-11-20T06:25:03"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwsaveguard\\main.lua",
@@ -1189,6 +1196,13 @@
       "Bytes": 1270,
       "SHA256": "21a49bc59e8f9da210f13d5e8122872aaf186a51f37074bac40e0827fca8bb20",
       "SourceModified": "2026-11-20T06:09:21"
+    },
+    {
+      "RelativePath": "tests\\test_coast_guard_contraband.py",
+      "Source": "<Steam Morrowind>\\tests\\test_coast_guard_contraband.py",
+      "Bytes": 3354,
+      "SHA256": "0091deb786da67ed27715b45bd5cd2b15c11514ed32f75d42d1b99b52f274ae3",
+      "SourceModified": "2026-11-20T06:25:24"
     }
   ]
 }
