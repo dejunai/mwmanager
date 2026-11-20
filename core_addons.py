@@ -42,6 +42,10 @@ NEXUS_MOD_IDS = {
 }
 # Exclusive variants: the same ESM published as separate Nexus mods; exactly one is installed.
 MASTER_VARIANTS = {"tamriel_data.esm": {"HD": 59927, "SD": 44537}}
+MASTER_VARIANT_NOTES = {"tamriel_data.esm": {
+    "HD": "high-resolution textures: sharper, but a much larger download (several GB) and more video memory",
+    "SD": "vanilla-resolution textures: matches the original game's look, a far smaller download, "
+          "lighter on video memory"}}
 MASTER_VARIANT_CHOICES = "mwmanager_master_variants.json"     # {"tamriel_data.esm": "SD"}: the user's pick
 
 
@@ -831,7 +835,7 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                 if nexus_detail:
                     reasons = "; ".join(filter(None, (reasons, nexus_detail)))
                 variant = variants.get(row["name"].casefold())
-                if variant:
+                if variant and len(variant["available"]) > 1:
                     others = ", ".join(v for v in variant["available"] if v != variant["using"])
                     reasons = "; ".join(filter(None, (f"{variant['using']} in use, {others} also downloaded",
                                                       reasons)))
@@ -894,6 +898,56 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
             result["selected"] = selected
             root.destroy()
 
+        download_status = ttk.Label(buttons, text="", wraplength=420)
+
+        def run_download(name, mod_id, file_id=None, on_done=None):
+            """Download in the hidden MWManager browser; it only appears for a Nexus check or sign-in."""
+            import threading
+            import mwnexus_browser
+            box = {"message": f"Starting the download of {name}…"}
+
+            def work():
+                try:
+                    fid = file_id or nexus_main_file(mod_id)["fileId"]
+                    box["file"] = mwnexus_browser.download_file(
+                        nexus_file_page(mod_id, fid), plan.get("downloads_dir"),
+                        lambda message: box.__setitem__("message", message))
+                except Exception as exc:  # network, Nexus API, browser: all reported the same way
+                    box["error"] = str(exc)
+                finally:
+                    mwnexus_browser.close_browser()
+
+            def cancel():
+                mwnexus_browser.close_browser_in_background()   # closing the browser cancels the download
+                root.destroy()
+
+            for child in buttons.winfo_children():
+                if isinstance(child, ttk.Button):
+                    child.state(["disabled"])
+            root.protocol("WM_DELETE_WINDOW", cancel)
+            threading.Thread(target=work, daemon=True).start()
+
+            def poll():
+                if not root.winfo_exists():
+                    return
+                download_status.configure(text=box["message"])
+                if "file" in box:
+                    if on_done:
+                        on_done()
+                    result["selected"] = "rescan"
+                    root.destroy()
+                elif "error" in box:
+                    download_status.configure(text="")
+                    root.protocol("WM_DELETE_WINDOW", root.destroy)
+                    for child in buttons.winfo_children():
+                        if isinstance(child, ttk.Button):
+                            child.state(["!disabled"])
+                    update_action()
+                    messagebox.showerror("Download failed", f"{name}: {box['error']}", parent=root)
+                else:
+                    root.after(300, poll)
+            poll()
+
         def nexus_action():
             item_id = tree.focus()
             if item_id not in item_ids:
@@ -901,14 +955,20 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
             row = rows[item_ids.index(item_id)]
             if not row.get("page"):
                 return
+            nexus = row.get("nexus", {})
+            if nexus.get("status") == "outdated" or row.get("path") is None:
+                mod_id = nexus.get("mod_id") or master_mod_id(row["name"], Path(row.get("path") or "").name)
+                if mod_id:
+                    run_download(row["name"], mod_id, nexus.get("file_id"))
+                    return
             try:
                 import mwnexus_browser
                 mwnexus_browser.open_page(row["page"], download_dir=plan.get("downloads_dir"))
                 messagebox.showinfo(
-                    "Download in the MWManager browser",
-                    f"Download {row['name']} from the page that opened. It saves into:\n\n"
+                    "Check Nexus in the MWManager browser",
+                    f"{row['name']}: the Nexus page opened. Anything you download saves into:\n\n"
                     f"{plan.get('downloads_dir')}\n\n"
-                    "Click OK when the download has finished. MWManager then closes the browser "
+                    "Click OK when you are done. MWManager then closes the browser "
                     "and rescans the archive folder.", parent=root)
                 # Closing WebView2 cancels a running download, so wait unless the user says otherwise.
                 while (pending := mwnexus_browser.active_downloads()) and messagebox.askyesno(
@@ -923,6 +983,36 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                 return
             result["selected"] = "rescan"
             root.destroy()
+
+        def offer_other_variant():
+            """One variant downloaded and no remembered choice: describe the other and offer to switch."""
+            if not root.winfo_exists():
+                return
+            for row in rows:
+                key = row["name"].casefold()
+                variant = variants.get(key)
+                if not variant or row["installed"] or len(variant["available"]) != 1 \
+                        or key in master_variant_choices(manager_dir):
+                    continue
+                mine = variant["using"]
+                other = next(label for label in MASTER_VARIANTS[key] if label != mine)
+                notes = MASTER_VARIANT_NOTES.get(key, {})
+                answer = messagebox._prompt(
+                    f"{row['name']}: {other} version available",
+                    f"You downloaded the {mine} version of {row['name']} ({notes.get(mine, mine)}).\n\n"
+                    f"Nexus also has the {other} version ({notes.get(other, other)}).\n\n"
+                    f"Download the {other} version and use it instead of {mine}? The {mine} archive stays in "
+                    "your downloads but is no longer staged.",
+                    "question",
+                    [(f"Download {other}", "download"), (f"Keep {mine}", "keep"),
+                     (f"Keep {mine}, don't ask again", "remember")], "keep", "keep", parent=root)
+                if answer == "remember":
+                    choose_master_variant(manager_dir, row["name"], mine)
+                elif answer == "download":
+                    run_download(row["name"], MASTER_VARIANTS[key][other],
+                                 on_done=lambda name=row["name"], label=other:
+                                 choose_master_variant(manager_dir, name, label))
+                return                      # one prompt per review; a download rescans and reopens it
 
         action_button = ttk.Button(buttons, command=nexus_action)
 
@@ -959,8 +1049,9 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
 
         tree.bind("<<TreeviewSelect>>", update_action, add="+")
         action_button.pack(side="left")
-        if variants:
+        if any(len(v["available"]) > 1 for v in variants.values()):
             swap_button.pack(side="left", padx=(6, 0))
+        download_status.pack(side="left", padx=(10, 0))
         # Start on the first outdated row so its Update button is live without a hidden selection step.
         outdated = [item_ids[i] for i, row in enumerate(rows)
                     if not row["installed"] and row.get("nexus", {}).get("status") == "outdated"]
@@ -985,6 +1076,7 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         root.geometry(f"{width}x{height}+{x}+{y}")
         root.after(300, lambda: root.attributes("-topmost", False))
         root.focus_force()
+        root.after(400, offer_other_variant)
         if parent is not None:
             root.grab_set()
         if parent is not None:
@@ -1187,6 +1279,25 @@ def _archive_rank(path: Path) -> tuple:
     return (version is not None, version_key, upload_key, mtime, path.name.casefold())
 
 
+def nexus_file_page(mod_id: int, file_id: int) -> str:
+    """The Nexus page that offers one file's download button."""
+    return f"https://www.nexusmods.com/morrowind/mods/{int(mod_id)}?tab=files&file_id={int(file_id)}"
+
+
+def nexus_main_file(mod_id: int, timeout: float = 8) -> dict:
+    """A Nexus mod's primary file (else its newest MAIN file): fileId, name, version, sizeInBytes."""
+    game = _nexus_query('query { game(domainName: "morrowind") { id } }', {}, timeout)
+    data = _nexus_query('query($g: ID!) { f: modFiles(modId: "%d", gameId: $g) '
+                        '{ fileId name version date primary category sizeInBytes } }' % int(mod_id),
+                        {"g": str(game["game"]["id"])}, timeout)
+    files = data.get("f") or []
+    main = [f for f in files if f.get("primary")] or \
+        [f for f in files if str(f.get("category", "")).upper() == "MAIN"]
+    if not main:
+        raise RuntimeError(f"Nexus lists no main file for mod {mod_id}")
+    return max(main, key=lambda f: int(f.get("date") or 0))
+
+
 def nexus_page(master: str, archive_name: str = "") -> str | None:
     mod_id = master_mod_id(master, archive_name)
     return f"https://www.nexusmods.com/morrowind/mods/{mod_id}?tab=files" if mod_id else None
@@ -1294,7 +1405,7 @@ def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8
         aliases = " ".join(
             f'v{i}: mod(modId: "{ids[name]}", gameId: $gameId) {{ version }} '
             f'm{i}: modFiles(modId: "{ids[name]}", gameId: $gameId) '
-            '{ name version date primary category }'
+            '{ fileId name version date primary category }'
             for i, name in enumerate(sorted(found)))
         data = _nexus_query(f"query($gameId: ID!) {{ {aliases} }}", {"gameId": game_id}, timeout)
         latest_by_master = {}
@@ -1346,6 +1457,8 @@ def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8
                          else "; archive filename has no comparable version"))
             statuses[master.casefold()] = {"status": status, "latest": latest_text,
                                            "detail": detail, "page": nexus_page(master, archive.name),
+                                           "mod_id": ids.get(master.casefold()),
+                                           "file_id": (latest or {}).get("fileId"),
                                            "verified_at": verified_at}
         item["nexus"] = statuses
     return plan
@@ -1537,7 +1650,7 @@ def scan_downloads(downloads_dir: str | os.PathLike, manager_dir: str | os.PathL
     for key in MASTER_VARIANTS:
         have = sorted({_variant_label(key, Path(item["archive"]).name) for item in found
                        if key in {p.casefold() for p in item["plugins"]}} - {None})
-        if key in winners and len(have) > 1:
+        if key in winners and have:
             master_variants[key] = {"available": have,
                                     "using": _variant_label(key, Path(winners[key]["archive"]).name)}
     selected_paths = {item["archive"] for item in winners.values()}

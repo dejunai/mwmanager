@@ -174,7 +174,7 @@ class DialogHook(unittest.TestCase):
 
 
 class DownloadTracking(unittest.TestCase):
-    """Closing the browser mid-download cancels it, so the review must see running downloads."""
+    """Closing the browser mid-download cancels it, so callers must see running downloads and their end."""
 
     def test_running_downloads_are_reported_until_they_finish(self):
         class Event(list):
@@ -183,21 +183,47 @@ class DownloadTracking(unittest.TestCase):
                 return self
 
         class Operation:
-            State = "CoreWebView2DownloadState.InProgress"
-            StateChanged = Event()
+            def __init__(self):
+                self.State = "CoreWebView2DownloadState.InProgress"
+                self.BytesReceived, self.TotalBytesToReceive = 0, 100
+                self.StateChanged, self.BytesReceivedChanged = Event(), Event()
 
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.dict(os.environ, {"LOCALAPPDATA": tmp}), \
                 mock.patch.object(B, "_tracked_browser_pid", return_value=1234):
-            root, op, active = B._root(), Operation(), set()
-            B._track_download(root, active, r"K:\dl\Tamriel Rebuilt 26.11.19.7z", op)
-            self.assertEqual(B.active_downloads(), [r"K:\dl\Tamriel Rebuilt 26.11.19.7z"])
+            root, op = B._root(), Operation()
+            state = {"active": set(), "progress": {}, "finished": [], "failed": []}
+            B._track_download(root, state, r"K:\dl\TR.7z", op)
+            self.assertEqual(B.active_downloads(), [r"K:\dl\TR.7z"])
+            op.BytesReceived = 40
+            op.BytesReceivedChanged[0](op, None)
+            self.assertEqual(state["progress"][r"K:\dl\TR.7z"], [40, 100])
             op.State = "CoreWebView2DownloadState.Completed"
             op.StateChanged[0](op, None)
             self.assertEqual(B.active_downloads(), [])
-            B._track_download(root, active, "x.7z", Operation())
+            self.assertEqual(state["finished"], [r"K:\dl\TR.7z"])
+            B._track_download(root, state, "x.7z", Operation())
             with mock.patch.object(B, "_tracked_browser_pid", return_value=0):
                 self.assertEqual(B.active_downloads(), [])  # stale file from a closed browser
+
+    def test_download_file_returns_the_finished_file_and_reports_progress(self):
+        def browser_answers(url, command):
+            B._write_json(B._root() / "response.json",
+                          {"id": command["id"], "message": "Downloading TR.7z: 5 MB"})
+            B._write_json(B._root() / "response.json", {"id": command["id"], "file": r"K:\dl\TR.7z"})
+
+        messages = []
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"LOCALAPPDATA": tmp}), \
+                mock.patch.object(B, "_tracked_browser_pid", side_effect=[0, 1234, 1234]), \
+                mock.patch.object(B, "_launch_if_needed", side_effect=browser_answers) as launch, \
+                mock.patch.object(B.importlib.util, "find_spec", return_value=object()):
+            found = B.download_file("https://www.nexusmods.com/morrowind/mods/42145?tab=files&file_id=1",
+                                    tmp, messages.append)
+        self.assertEqual(found, Path(r"K:\dl\TR.7z"))
+        self.assertEqual(launch.call_args.args[1]["action"], "download")
+        with self.assertRaises(ValueError):
+            B.download_file("https://example.com/x.7z", ".")
 
 
 if __name__ == "__main__":

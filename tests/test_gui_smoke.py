@@ -354,6 +354,22 @@ class GuiSmokeTests(unittest.TestCase):
         self.app._major_master_dialog.destroy()
         setup.destroy()
 
+    def test_a_job_hides_major_masters_and_restores_it_after(self):
+        setup = tk.Toplevel(self.app)
+        self.app._setup_view = mock.Mock(window=setup)
+        self.app._job_view = self.app._setup_view
+        self.app.open_major_masters()
+        self.pump()
+        masters = self.app._major_master_dialog
+        self.app._set_job_controls(True)
+        self.pump()
+        self.assertFalse(masters.winfo_viewable())      # the owned window would otherwise cover the job window
+        self.app._set_job_controls(False)
+        self.pump()
+        self.assertTrue(masters.winfo_viewable())
+        masters.destroy()
+        setup.destroy()
+
     def test_reopened_major_master_options_advance_to_deploy(self):
         package = self.g.APP_DIR / "staging" / "major_masters" / "Tamriel Data"
         package.mkdir(parents=True)

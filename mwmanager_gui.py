@@ -4808,7 +4808,22 @@ class ManagerGUI(tk.Tk):
                         self._busy_menu_states.append(
                             (menu, index, menu.entrycget(index, "state")))
                         menu.entryconfigure(index, state="disabled")
+            # An owned window stays above its owner on Windows, so the Major Masters window would cover the job
+            # window; hide it while the job runs (its buttons are disabled anyway) and bring the job forward.
+            masters = getattr(self, "_major_master_dialog", None)
+            self._masters_hidden_for_job = bool(masters is not None and masters.winfo_exists()
+                                                and masters.winfo_viewable())
+            if self._masters_hidden_for_job:
+                masters.withdraw()
+            if view is not None and view.window.winfo_exists():
+                view.window.deiconify()
+                view.window.lift()
         else:
+            masters = getattr(self, "_major_master_dialog", None)
+            if getattr(self, "_masters_hidden_for_job", False) and masters is not None and masters.winfo_exists():
+                masters.deiconify()
+                masters.lift()
+            self._masters_hidden_for_job = False
             for widget, previous in getattr(self, "_busy_widget_states", []):
                 try:
                     widget.state(["!disabled"])

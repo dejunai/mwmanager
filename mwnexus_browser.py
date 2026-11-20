@@ -181,16 +181,36 @@ def _terminate_pid(pid: int) -> bool:
         return False
 
 
-def _track_download(root: Path, active: set, target: str, operation) -> None:
-    """Record a WebView2 download in downloads.json until it leaves the InProgress state."""
-    active.add(target)
-    _write_json(root / "downloads.json", {"active": sorted(active)})
+def _write_downloads(root: Path, state: dict) -> None:
+    _write_json(root / "downloads.json", {"active": sorted(state["active"]), "progress": state["progress"],
+                                          "finished": state["finished"], "failed": state["failed"]})
+
+
+def _track_download(root: Path, state: dict, target: str, operation) -> None:
+    """Record a WebView2 download in downloads.json: progress while running, then finished or failed."""
+    state["active"].add(target)
+    state["progress"][target] = [0, 0]
+    _write_downloads(root, state)
+    last = {"write": 0.0}
+
+    def received(sender, _event):
+        try:
+            state["progress"][target] = [int(sender.BytesReceived), int(sender.TotalBytesToReceive or 0)]
+        except (TypeError, ValueError):
+            return
+        if time.monotonic() - last["write"] > 0.5:          # every chunk would rewrite the file thousands of times
+            last["write"] = time.monotonic()
+            _write_downloads(root, state)
 
     def changed(sender, _event):
-        if "InProgress" not in str(sender.State):
-            active.discard(target)
-            _write_json(root / "downloads.json", {"active": sorted(active)})
+        status = str(sender.State)
+        if "InProgress" in status:
+            return
+        state["active"].discard(target)
+        state["finished" if "Completed" in status else "failed"].append(target)
+        _write_downloads(root, state)
 
+    operation.BytesReceivedChanged += received
     operation.StateChanged += changed
 
 
@@ -199,6 +219,60 @@ def active_downloads() -> list[str]:
     if not _tracked_browser_pid():
         return []
     return list(_read_json(_root() / "downloads.json").get("active", []))
+
+
+# Runs on a Nexus file page (?tab=files&file_id=N): reports the page and clicks its download button once.
+DOWNLOAD_JS = r"""
+(() => {
+  const text = ((document.body && document.body.innerText) || '').slice(0, 20000);
+  let clicked = window.__mwmClicked || '';
+  if (!clicked && document.readyState === 'complete') {
+    const visible = e => e.offsetParent !== null;
+    const label = e => (e.innerText || e.textContent || '').trim();
+    const els = Array.from(document.querySelectorAll('button, a, [role=button]')).filter(visible);
+    const el = document.querySelector('#slowDownloadButton') || els.find(e => /^slow download$/i.test(label(e)));
+    if (el) { el.click(); clicked = window.__mwmClicked = label(el) || 'slow download'; }
+  }
+  return JSON.stringify({url: location.href, title: document.title, readyState: document.readyState,
+                         text: text, clicked: clicked});
+})()
+"""
+
+
+def download_file(url: str, download_dir, progress=None, timeout: float = 4 * 3600) -> Path:
+    """Download a Nexus file in the background browser; it shows itself only for a security check or login.
+
+    Returns the finished file. The browser stays open (hidden): call close_browser() afterwards.
+    """
+    progress = progress or (lambda _message: None)
+    if not _valid_nexus_url(url):
+        raise ValueError("Only an approved Nexus HTTPS page can be downloaded from.")
+    if importlib.util.find_spec("webview") is None:
+        raise RuntimeError("MWManager's embedded browser is not installed (requirements-nexus-browser.txt).")
+    root = _root()
+    request_id = secrets.token_hex(16)
+    command = {"id": request_id, "action": "download", "url": url,
+               "download_dir": str(Path(download_dir).resolve())}
+    if _tracked_browser_pid():
+        _write_json(root / "command.json", command)
+    else:
+        _launch_if_needed(url, command)
+    deadline, last_message = time.monotonic() + timeout, ""
+    while time.monotonic() < deadline:
+        response = _read_json(root / "response.json")
+        if response.get("id") == request_id:
+            if response.get("error"):
+                raise RuntimeError(str(response["error"]))
+            if response.get("file"):
+                return Path(response["file"])
+            message = str(response.get("message", ""))
+            if message and message != last_message:
+                last_message = message
+                progress(message)
+        if not _tracked_browser_pid():
+            raise RuntimeError("The MWManager browser was closed before the download finished.")
+        time.sleep(0.3)
+    raise RuntimeError("The download did not finish in time.")
 
 
 def close_browser(timeout: float = 5.0, force: bool = True) -> str:
@@ -440,8 +514,8 @@ def _run_embedded_browser() -> None:
     command_file = root / "command.json"
     last_command = ""
     closed = {"value": False}
-    active_files: set[str] = set()
-    _write_json(root / "downloads.json", {"active": []})
+    downloads = {"active": set(), "progress": {}, "finished": [], "failed": []}
+    _write_downloads(root, downloads)
 
     class BrowserApi:
         # pywebview exposes every *public* attribute of js_api to the page and
@@ -461,7 +535,8 @@ def _run_embedded_browser() -> None:
 
     api = BrowserApi()
     initial = _read_json(command_file)
-    last_command = str(initial.get("id", ""))
+    # a first "download" command still has to run once the window exists; "open" is done by loading its URL
+    last_command = "" if initial.get("action") == "download" else str(initial.get("id", ""))
     url = initial.get("url", "https://www.nexusmods.com/morrowind/")
     if not _valid_browser_url(url):
         url = "https://www.nexusmods.com/morrowind/"
@@ -487,12 +562,13 @@ def _run_embedded_browser() -> None:
                     target = folder / f"{stem} ({number}){suffix}"
                     number += 1
             args.ResultFilePath = str(target)
-            _track_download(root, active_files, str(target), args.DownloadOperation)
+            _track_download(root, downloads, str(target), args.DownloadOperation)
 
         edgechromium.EdgeChrome.on_download_starting = download_to_component
     window = webview.create_window(
         "MWManager — Prerequisite Browser", url=url, js_api=api,
         width=1180, height=820, min_size=(760, 520), confirm_close=False,
+        hidden=initial.get("action") == "download",
     )
     api._window = window
 
@@ -549,6 +625,46 @@ def _run_embedded_browser() -> None:
             "Wait for Nexus to finish loading, then retry."
         )
 
+    def download(command_id: str, url: str):
+        """Load a file page hidden, click its download button, and report until the file is complete."""
+        def say(**fields):
+            _write_json(root / "response.json", {"id": command_id, **fields})
+
+        def new_results():
+            return (set(downloads["finished"]) | set(downloads["failed"])) - known
+
+        known = set(downloads["finished"]) | set(downloads["failed"])
+        window.hide()
+        window.load_url(url)
+        started, shown = time.monotonic(), False
+        say(message="Opening the Nexus file page…")
+        while not closed["value"] and not downloads["active"] and not new_results():
+            page, _detail = run_script(DOWNLOAD_JS, 10)
+            blocked = bool(page) and is_challenge(str(page.get("title", "")), str(page.get("text", "")))
+            stuck = time.monotonic() - started > 30          # no download button found: login or a changed page
+            if (blocked or stuck) and not shown:
+                window.show()
+                shown = True
+            elif shown and page and not blocked and page.get("clicked"):
+                window.hide()                                 # the proper page is back: carry on unseen
+                shown = False
+            say(message="Nexus needs you in the MWManager browser: complete the security check or sign in, "
+                        "then click Slow download if it does not start." if shown else
+                        "Waiting for Nexus to start the download…")
+            time.sleep(1.0)
+        window.hide()
+        while not closed["value"] and downloads["active"]:
+            for target in sorted(downloads["active"]):
+                got, total = downloads["progress"].get(target, [0, 0])
+                size = f"{got / 2**20:,.0f} MB" + (f" of {total / 2**20:,.0f} MB" if total else "")
+                say(message=f"Downloading {Path(target).name}: {size}")
+            time.sleep(0.5)
+        new = [f for f in downloads["finished"] if f not in known]
+        if new:
+            say(file=new[-1], message=f"Downloaded {Path(new[-1]).name}")
+        else:
+            say(error="The download failed or was cancelled in the MWManager browser.")
+
     def service_requests():
         nonlocal last_command
         while not closed["value"]:
@@ -572,6 +688,15 @@ def _run_embedded_browser() -> None:
                         closed["value"] = True
                         window.destroy()
                         return
+                    elif command.get("action") == "download":
+                        folder = str(command.get("download_dir", "")).strip()
+                        target_url = str(command.get("url", ""))
+                        if not folder or not _valid_nexus_url(target_url):
+                            _write_json(root / "response.json", {"id": command_id, "error": "Refused the download."})
+                        else:
+                            download_folder["path"] = Path(folder)
+                            download_folder["path"].mkdir(parents=True, exist_ok=True)
+                            threading.Thread(target=download, args=(command_id, target_url), daemon=True).start()
                     elif command.get("action") == "capture":
                         try:
                             capture_url = str(command.get("url", ""))
