@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-20 (America/Los_Angeles); mwpluginpatches door-lock exits; tidy splash rule",
+  "SyncedAt": "2026-11-20 (America/Los_Angeles); tidy splash rule: cap at 2048, 24-bit, lossless re-encode when 10% smaller",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -443,10 +443,10 @@
     },
     {
       "RelativePath": "mwdialog_assets.py",
-      "Bytes": 113727,
-      "SHA256": "c33fae105873d30be5dcef205f403743f110d32a2efd338463b1cf936b24be92",
+      "Bytes": 115391,
+      "SHA256": "73ac91c268153d57b15c608e761de00d233a293cde51e62a7178b034a4cbb82d",
       "Source": "<Steam Morrowind>\\mwdialog_assets.py",
-      "SourceModified": "2026-11-20T10:27:05"
+      "SourceModified": "2026-11-20T10:43:50"
     },
     {
       "RelativePath": "mwdialog_backup.py",
@@ -1222,9 +1222,9 @@
     {
       "RelativePath": "tests\\test_splash_screens.py",
       "Source": "<Steam Morrowind>\\tests\\test_splash_screens.py",
-      "Bytes": 3807,
-      "SHA256": "0584bca0f1896b9aca39e2f7a19227a7d7eb1a01cf88207093c87e786440df9d",
-      "SourceModified": "2026-11-20T10:27:02"
+      "Bytes": 4642,
+      "SHA256": "70f988f615ce37bf7fe262266073a07c39a1d2792bb124638824d50ca7973156",
+      "SourceModified": "2026-11-20T10:43:31"
     }
   ]
 }

@@ -444,8 +444,8 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                         continue
                     new = open(out, "rb").read()
                     os.remove(out)
-            if kind == "splash":                      # at most 1024 wide, RLE TGA; a DDS/BMP... becomes a .tga
-                if not texconv:
+            if kind == "splash":                      # at most 2048 wide, 24-bit RLE TGA; a DDS/BMP... becomes a .tga
+                if not texconv and splash_needs_texconv(full):
                     skipped.append(f"{rel} (texconv.exe not found)")
                     continue
                 os.makedirs(tmp, exist_ok=True)

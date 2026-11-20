@@ -249,8 +249,8 @@ class TidySteps(unittest.TestCase):
         self.assertTrue((root / "Textures" / "floor.tga").exists())
         self.assertTrue(Path(operations[0]["dst"]).is_file() and "Off" in Path(operations[0]["dst"]).parts)
 
-    def test_a_wide_splash_tga_becomes_a_1024_wide_rle_tga_with_the_original_in_off(self):
-        """The game shows only TGA splashes (a DDS beside one was never used): at most 1024 wide, RLE when smaller,
+    def test_a_wide_splash_tga_becomes_a_2048_wide_rle_tga_with_the_original_in_off(self):
+        """The game shows only TGA splashes (a DDS beside one was never used): at most 2048 wide, RLE when smaller,
         rewritten in place and journaled, the original kept in the mod's Off."""
         import struct
         texconv = Path(r"G:\Program Files\Steam\steamapps\common\Morrowind\texconv.exe")
@@ -258,9 +258,9 @@ class TidySteps(unittest.TestCase):
             self.skipTest("texconv.exe not available")
         root = self.staging / "ModA-1-1-0"
         big, small = root / "Splash" / "big.tga", root / "Splash" / "small.tga"
-        for path, width in ((big, 2048), (small, 1024)):
+        for path, width in ((big, 4096), (small, 1024)):
             mk(path, struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, width, 8, 24, 0)
-               + bytes([40, 80, 120]) * (width * 8))
+               + (bytes([40, 80, 120]) * (width * 8) if width > 2048 else bytes(range(256)) * (width * 8 * 3 // 256)))
         operations = []
         assets = self.t._scanner.asset_health_module()
         _issues, fixes = assets.check_folder(str(root), self.t._scanner, str(self.data), set())
@@ -272,7 +272,7 @@ class TidySteps(unittest.TestCase):
                 self.assertEqual(assets.apply_folder(str(root), splash, self.t._scanner, str(self.data.parent),
                                                      "ModA", journal_ops=operations), (1, []))
         data = big.read_bytes()
-        self.assertEqual(struct.unpack_from("<HH", data, 12) + (data[16],), (1024, 4, 24))
+        self.assertEqual(struct.unpack_from("<HH", data, 12) + (data[16],), (2048, 4, 24))
         self.assertEqual(len(operations), 1)
         self.assertTrue(Path(operations[0]["backup"]).is_file() and "Off" in Path(operations[0]["backup"]).parts)
         _issues, again = assets.check_folder(str(root), self.t._scanner, str(self.data), set())
