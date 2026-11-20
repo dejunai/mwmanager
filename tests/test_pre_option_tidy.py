@@ -350,6 +350,17 @@ class TotspOptionTests(unittest.TestCase):
                          ("totsp_patch_for_purists", (4, 0, 2)))
 
 
+class WaitingOptionMods(unittest.TestCase):
+    def test_a_mod_staged_as_a_plugin_counts_for_a_masters_waiting_option(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            staging = Path(tmp) / "staging"
+            oaab = staging / "major_masters" / "OAAB_Data 49042"
+            oaab.mkdir(parents=True)
+            self.assertFalse(mock_fomod._mod_is_staged("glow in the dahrk (mod)", oaab))
+            (staging / "plugins" / "Glow in the Dahrk-45886-3-3-0").mkdir(parents=True)
+            self.assertTrue(mock_fomod._mod_is_staged("glow in the dahrk (mod)", oaab))
+
+
 class OptionFileSpeedTests(unittest.TestCase):
     def test_adding_option_files_does_no_resolve_or_mkdir_per_file(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -874,9 +874,11 @@ def _needed_mod(description: str) -> str | None:
 
 
 def _mod_is_staged(needed: str, mod_dir: Path) -> bool:
-    """A package for that mod is staged next to this one (needed_mods.names_mod: words or Nexus id)."""
+    """A package for that mod is staged next to this one (needed_mods.names_mod: words or Nexus id). Plugins
+    install into staging/plugins and masters into staging/major_masters: either one counts for the other."""
     from needed_mods import names_mod
-    roots = {mod_dir.parent, mod_dir.parent.parent}
+    staging = mod_dir.parent.parent
+    roots = {mod_dir.parent, staging, staging / "plugins", staging / "major_masters"}
     try:
         return any(names_mod(needed, p.name) for root in roots if root.is_dir() for p in root.iterdir()
                    if p.is_dir() and p != mod_dir)
@@ -886,8 +888,10 @@ def _mod_is_staged(needed: str, mod_dir: Path) -> bool:
 
 def _installed_plugins(data_files: Path, prior: set[str]) -> set[str]:
     found = set(prior)
+    from major_master_deploy import ASSET_FOLDERS     # plugins are never in Sound, Textures...: skip them
     for base, dirs, files in os.walk(data_files):
-        dirs[:] = [d for d in dirs if d.casefold() not in {"off", "extras", "docs", "screenshots", "openmw"}]
+        dirs[:] = [d for d in dirs if d.casefold() not in {"off", "extras", "docs", "screenshots", "openmw"}
+                   and d.casefold() not in ASSET_FOLDERS]
         found.update(Path(name).name.casefold() for name in files
                      if Path(name).suffix.casefold() in PLUGIN_EXTS)
     return found

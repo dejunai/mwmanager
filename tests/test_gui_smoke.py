@@ -370,6 +370,63 @@ class GuiSmokeTests(unittest.TestCase):
         masters.destroy()
         setup.destroy()
 
+    def waiting_setup(self):
+        import json
+        import mock_fomod
+        staging = self.g.APP_DIR / "staging" / "major_masters" / "OAAB_Data 49042"
+        staging.mkdir(parents=True, exist_ok=True)
+        (staging / "OAAB_Data.esm").write_bytes(b"TES3")
+        outputs = self.g.APP_DIR / "outputs"
+        outputs.mkdir(parents=True, exist_ok=True)
+        (outputs / mock_fomod.PENDING_FILE).write_text(json.dumps({"OAAB_Data 49042": {
+            "fomod:0:1:6": {"label": "Glow in the Dahrk", "needs": ["glow in the dahrk (mod)"],
+                            "status": "waiting"}}}), encoding="utf-8")
+        downloads = self.g.APP_DIR / "dl"
+        downloads.mkdir(exist_ok=True)
+        (downloads / "Glow in the Dahrk-45886-3-3-0-1765851739.7z").write_bytes(b"7z")
+        return downloads
+
+    def test_waiting_options_queue_each_needed_archive_once(self):
+        downloads = self.waiting_setup()
+        found = {"glow in the dahrk (mod)": downloads / "Glow in the Dahrk-45886-3-3-0-1765851739.7z"}
+        tried = set()
+        with mock.patch("needed_mods.find_needed", return_value=found), \
+                mock.patch("needed_mods.archive_index", return_value={}):
+            args = (self.g.APP_DIR / "staging" / "major_masters", self.g.APP_DIR / "outputs", downloads,
+                    self.g.APP_DIR, ["OAAB_Data.esm"], tried, lambda _m: None)
+            items, masters = self.g.waiting_option_archives(*args)
+            again, _masters = self.g.waiting_option_archives(*args)
+        self.assertEqual([Path(i["archive"]).name for i in items], ["Glow in the Dahrk-45886-3-3-0-1765851739.7z"])
+        self.assertEqual(masters, ["OAAB_Data.esm"])
+        self.assertEqual(again, [])                       # tried once: no loop
+
+    def test_after_the_masters_deploy_waiting_mods_install_then_the_options_go_in(self):
+        self.waiting_setup()
+        item = {"archive": "glow.7z", "plugins": []}
+        after = mock.Mock()
+        calls = []
+        with mock.patch.object(self.app, "_archive_downloads_folder", return_value=self.g.APP_DIR / "dl"), \
+                mock.patch.object(self.g, "waiting_option_archives", return_value=([item], ["OAAB_Data.esm"])), \
+                mock.patch.object(self.app, "_run_progress_job",
+                                  lambda title, text, worker, done: done(worker(lambda _m: None), None)), \
+                mock.patch.object(self.app, "_install_plugin_archives",
+                                  lambda items, then=None: calls.append(("install", items)) or then()), \
+                mock.patch.object(self.app, "stage_major_masters",
+                                  lambda **kw: calls.append(("options", kw))):
+            self.app._resolve_waiting_options(after)
+        self.assertEqual(calls, [("install", [item]),
+                                 ("options", {"option_masters": ["OAAB_Data.esm"], "reuse_answers": True})])
+        after.assert_not_called()                     # --full is offered after the masters deploy again
+
+    def test_with_nothing_waiting_full_is_offered_straight_away(self):
+        after = mock.Mock()
+        with mock.patch.object(self.app, "_archive_downloads_folder", return_value=self.g.APP_DIR / "dl"), \
+                mock.patch.object(self.g, "waiting_option_archives", return_value=([], [])), \
+                mock.patch.object(self.app, "_run_progress_job",
+                                  lambda title, text, worker, done: done(worker(lambda _m: None), None)):
+            self.app._resolve_waiting_options(after)
+        after.assert_called_once()
+
     def test_reopened_major_master_options_advance_to_deploy(self):
         package = self.g.APP_DIR / "staging" / "major_masters" / "Tamriel Data"
         package.mkdir(parents=True)

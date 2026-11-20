@@ -84,6 +84,28 @@ def _atomic_write(path: Path, data: bytes) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def waiting_option_archives(staging: Path, outputs: Path, downloads, manager_dir: Path, major_masters,
+                            tried: set[str], progress=print) -> tuple[list[dict], list[str]]:
+    """(archives to install, masters to reprocess) for the options of staged major masters that wait on another
+    mod. An archive tried before in this session is not queued again, so a need that can't be met ends the
+    loop; the mods those archives need in turn are queued by the plugin batch itself (plan_needed_archives)."""
+    import mock_fomod
+    try:
+        pending = json.loads((Path(outputs) / mock_fomod.PENDING_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return [], []
+    majors = {m.casefold(): m for m in major_masters}
+    items, masters = [], []
+    for package in sorted((p for p in Path(staging).iterdir() if p.is_dir()), key=lambda p: p.name.casefold()) \
+            if Path(staging).is_dir() else []:
+        entries = pending.get(package.name) if isinstance(pending, dict) else None
+        if not any(isinstance(v, dict) and v.get("status") == "waiting" for v in (entries or {}).values()):
+            continue
+        masters += [majors[p.name.casefold()] for p in package.iterdir() if p.name.casefold() in majors]
+        items += plan_needed_archives(package.name, outputs, downloads, manager_dir, tried, major_masters, progress)
+    return items, masters
+
+
 def plan_needed_archives(package_name: str, outputs: Path, downloads, manager_dir: Path, queued: set[str],
                          major_masters=(), progress=print) -> list[dict]:
     """Batch step 3: batch items for the download archives that hold what this package's held options need
@@ -2557,7 +2579,7 @@ class ManagerGUI(tk.Tk):
                    command=lambda: close_then_install([item for item in items if not item["blocked"]])).pack(side="right", padx=(0, 6))
         ttk.Button(footer, text="Skip", command=dialog.destroy).pack(side="right", padx=(0, 6))
 
-    def _install_plugin_archives(self, items, *, accept_staged=False):
+    def _install_plugin_archives(self, items, *, accept_staged=False, then=None):
         from plugin_install import (apply_plugin_compatibility, check_deploy_path_lengths, count_bsa_assets,
                                     deploy_package, extract_archive,
                                     pack_package_assets, pull_updated_steam_luas,
@@ -2890,6 +2912,8 @@ class ManagerGUI(tk.Tk):
             self._update_action_buttons()
             self.status.set(f"Deployed {result['processed']} archive(s). Generate Patches reflects the updated plugin set.")
             messagebox.showinfo("Plugins deployed", f"Processed {result['processed']} archive(s) in batches of 15 mods.", parent=self)
+            if then:                                   # e.g. put in the master options these plugins were for
+                self.after(100, then)
 
         job_title = "Accept staged files as ready" if accept_staged else "Deploy Plugins"
         self._run_progress_job(job_title, "Preparing staged plugin deployment…", worker, completed)
@@ -4241,13 +4265,52 @@ class ManagerGUI(tk.Tk):
                                        "order now? It rebuilds the patches and may take a while.", parent=self):
                     self.generate_patches(mode="full", force=True)
 
+            def next_step():                    # options waiting on another mod first, then --full
+                self._resolve_waiting_options(offer_full)
+
             if view is not None and getattr(view, "setup", False):
-                view.then = offer_full          # offered once this job has fully settled
+                view.then = next_step           # offered once this job has fully settled
             else:
-                offer_full()
+                next_step()
 
         self._setup_begin("major_masters_deployed")
         self._run_progress_job("Deploy Major Masters", "Hardlinking selected masters and their assets…", worker, completed)
+
+    def _resolve_waiting_options(self, after):
+        """The masters are deployed with every option that needs nothing more. Options chosen that wait on
+        another mod: find those mods in the downloads, install them (Deploy Plugins; the mods they in turn need
+        are queued there), then put the waiting options in and deploy the masters again. When nothing waits,
+        or nothing new can be found, `after` runs (the offer to run --full)."""
+        downloads = self._archive_downloads_folder()
+        tried = self.__dict__.setdefault("_waiting_option_archives_tried", set())
+
+        def worker(progress):
+            return waiting_option_archives(APP_DIR / "staging" / "major_masters", APP_DIR / "outputs", downloads,
+                                           APP_DIR, self.major_masters, tried, progress)
+
+        def completed(result, error):
+            if error:
+                self.status.set(f"Options waiting on other mods were not followed up: {error}")
+                after()
+                return
+            items, masters = result
+            if not items:
+                if masters:
+                    self.status.set(f"{', '.join(masters)}: some chosen options still wait on mods that are not in "
+                                    "your downloads (a Nexus search was opened for each).")
+                after()
+                return
+
+            def put_options_in():
+                self.stage_major_masters(option_masters=masters, reuse_answers=True)
+
+            self._install_plugin_archives(items, then=put_options_in)
+
+        if downloads is None:
+            after()
+            return
+        self._run_progress_job("Options waiting on other mods", "Looking for the mods your chosen options need…",
+                               worker, completed)
 
     def remove_deployed_major_masters(self):
         """Remove only masters deployed by MWManager and restore replaced files."""
@@ -5060,7 +5123,7 @@ class ManagerGUI(tk.Tk):
         have = self._staged_major_master_names() | deployed_master_names()
         return [name for name in self.major_masters if name.casefold() in wanted and name.casefold() not in have]
 
-    def stage_major_masters(self, *, force_scan=False, option_masters=None):
+    def stage_major_masters(self, *, force_scan=False, option_masters=None, reuse_answers=False):
         """Review downloaded major masters and unpack selected archives into MWManager staging."""
         initializing = bool(getattr(self, "_initializing_manager", False))
         staging = APP_DIR / "staging" / "major_masters"
@@ -5248,13 +5311,24 @@ class ManagerGUI(tk.Tk):
                                        "reopen. Select them and use Find and stage archives instead.")
                 self._set_master_stage_ready(names, False)
                 from major_master_deploy import _package_roots, assert_package_disposable, restore_packed_assets
-                for package, masters in _package_roots(staging, list(names)):
-                    assert_package_disposable(package, staging, game_data_files, APP_DIR, self.major_masters,
-                                              check_dependencies=False)
-                    begin_package_step(package, "tidied")
-                    begin_package_step(package, "bsa_checked")
-                    restore_packed_assets(package)
-                    process_package(progress, py, quiet_options(), package, masters, reopen=True)
+                # options waiting on a mod that is now staged: the saved choices go in without the window
+                previous_reuse = os.environ.get("MWMANAGER_REUSE_FOMOD")
+                if reuse_answers:
+                    os.environ["MWMANAGER_REUSE_FOMOD"] = "1"
+                try:
+                    for package, masters in _package_roots(staging, list(names)):
+                        assert_package_disposable(package, staging, game_data_files, APP_DIR, self.major_masters,
+                                                  check_dependencies=False)
+                        begin_package_step(package, "tidied")
+                        begin_package_step(package, "bsa_checked")
+                        restore_packed_assets(package)
+                        process_package(progress, py, quiet_options(), package, masters, reopen=True)
+                finally:
+                    if reuse_answers:
+                        if previous_reuse is None:
+                            os.environ.pop("MWMANAGER_REUSE_FOMOD", None)
+                        else:
+                            os.environ["MWMANAGER_REUSE_FOMOD"] = previous_reuse
                 self._set_master_stage_ready(names, True)
                 return names
 
