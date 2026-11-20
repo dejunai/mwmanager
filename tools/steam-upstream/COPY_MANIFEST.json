@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-20 (America/Los_Angeles); .esm reference persistence kept (Clean_Piran the one exception), tidy CELL reference repairs, expandedSounds, door-lock compatibility",
+  "SyncedAt": "2026-11-20 (America/Los_Angeles); CELL reference repairs moved from tidy to --fix (an .esm's misplaced copy deleted in the ESM patch); --fix findings in bug reports",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -436,10 +436,10 @@
     },
     {
       "RelativePath": "mwdialog_assets.py",
-      "Bytes": 114311,
-      "SHA256": "64cf0745434758b45b64683e00ab111a19caf5dd398c52b3b24fac4ac4822cc1",
+      "Bytes": 107267,
+      "SHA256": "7e70d37f19c16682e04f1a0742930d9d93188c1baf6823666f60d64e7fa5c95c",
       "Source": "<Steam Morrowind>\\mwdialog_assets.py",
-      "SourceModified": "2026-11-20T04:44:07"
+      "SourceModified": "2026-11-20T05:41:12"
     },
     {
       "RelativePath": "mwdialog_backup.py",
@@ -492,10 +492,10 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 516548,
-      "SHA256": "d0b32ccbb5b7a0f7fc7f898e3fed1c7db22c557f48a309a975eba22044bf68ea",
+      "Bytes": 525791,
+      "SHA256": "8d97391df1226e3b740aae579c429449a83f87acdf906c8622a050b9a58fabfd",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
-      "SourceModified": "2026-11-20T04:44:38"
+      "SourceModified": "2026-11-20T05:43:23"
     },
     {
       "RelativePath": "mwdialog_check.rules.txt",
@@ -660,10 +660,10 @@
     },
     {
       "RelativePath": "mwdialog_records.py",
-      "Bytes": 23887,
-      "SHA256": "bf13f12b2379ae2cc99736aa60064e665270397c2b4a01bbdbbdcf4ff69ee5a3",
+      "Bytes": 29144,
+      "SHA256": "d8ae1fcb267d8553030d500db5d2057a5e343c422ce8e3690265dcf81b2f561b",
       "Source": "<Steam Morrowind>\\mwdialog_records.py",
-      "SourceModified": "2026-11-14T08:25:28"
+      "SourceModified": "2026-11-20T05:36:13"
     },
     {
       "RelativePath": "mwdialog_reduced_textures.txt",
@@ -1179,9 +1179,9 @@
     {
       "RelativePath": "tests\\test_cell_ref_repairs.py",
       "Source": "<Steam Morrowind>\\tests\\test_cell_ref_repairs.py",
-      "Bytes": 2907,
-      "SHA256": "47112dc4e2d504622173641ead8274304943d88f7ef5f0a63406b9d87e8cc2a5",
-      "SourceModified": "2026-11-20T04:45:28"
+      "Bytes": 5742,
+      "SHA256": "b82cc1466014d705398f604c9fe522296aa98ba639c895da92f1252e85fd4a05",
+      "SourceModified": "2026-11-20T05:43:51"
     }
   ]
 }

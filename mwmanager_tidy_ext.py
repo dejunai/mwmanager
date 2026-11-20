@@ -995,73 +995,6 @@ def _tidy_backup_original(path, staging, original_bytes):
     return backup
 
 
-def _repair_late_reference_scales(data):
-    """Move XSCL before a reference's terminal DATA/DELE; MGE XE rejects it afterward (core: mwdialog_assets)."""
-    import mwdialog_assets
-    return mwdialog_assets._late_scales(data, _scanner)
-
-
-def _repair_duplicate_exterior_references(data):
-    """Drop exact duplicate own references from the wrong exterior cell (core: mwdialog_assets)."""
-    import mwdialog_assets
-    return mwdialog_assets._duplicate_placements(data, _scanner)
-
-
-def repair_malformed_cell_references(staging, *, apply_changes):
-    """Repair staged CELL reference layouts that make MGE XE reject or discard placements."""
-    plugins = scales = duplicates = unresolved = 0
-    for base, dirs, files in os.walk(staging):
-        dirs[:] = [d for d in dirs if d.casefold() != "off"]
-        for filename in files:
-            if os.path.splitext(filename)[1].casefold() not in (".esp", ".esm"):
-                continue
-            path = os.path.join(base, filename)
-            try:
-                original = Path(path).read_bytes()
-                rewritten, scale_count = _repair_late_reference_scales(original)
-                rewritten, duplicate_count, ambiguous_count = _repair_duplicate_exterior_references(rewritten)
-            except (OSError, ValueError, struct.error, getattr(_scanner, "FormatError", ValueError)):
-                continue
-            unresolved += ambiguous_count
-            if ambiguous_count:
-                print(f"  WARNING: {os.path.relpath(path, staging)} has {ambiguous_count} ambiguous duplicate "
-                      "exterior reference(s); left unchanged")
-            if not scale_count and not duplicate_count:
-                continue
-            plugins += 1
-            scales += scale_count
-            duplicates += duplicate_count
-            fixes = []
-            if scale_count:
-                fixes.append(f"move {scale_count} XSCL field(s) before reference DATA/DELE")
-            if duplicate_count:
-                fixes.append(f"remove {duplicate_count} exact duplicate placement(s) from the wrong exterior cell")
-            print(f"  Repair {os.path.relpath(path, staging)}: " + "; ".join(fixes))
-            if apply_changes:
-                backup = _tidy_backup_original(path, staging, original)
-                _scanner.validate_plugin_bytes(rewritten)
-                temporary = path + ".mwmanager-tidy.tmp"
-                try:
-                    Path(temporary).write_bytes(rewritten)
-                    shutil.copystat(path, temporary)
-                    os.replace(temporary, path)  # replace the staged hardlink without changing a deployed copy
-                finally:
-                    try:
-                        os.remove(temporary)
-                    except OSError:
-                        pass
-                with open(JOURNAL, "a", encoding="utf-8") as journal:
-                    journal.write(json.dumps({"restore": path, "backup": backup,
-                                              "plugin": _path_plugin(path, staging),
-                                              "reason": "restore original CELL reference order during tidy undo"}) + "\n")
-    if not apply_changes and plugins:
-        print(f"  Plan: {plugins} staged plugin(s) need CELL reference repair "
-              f"({scales} late XSCL field(s), {duplicates} misplaced duplicate placement(s)).")
-    if not apply_changes and unresolved:
-        print(f"  Plan: {unresolved} ambiguous duplicate exterior reference(s) need manual review.")
-    return plugins
-
-
 def align_master_versions(staging, data_files, *, apply_changes):
     """Raise staged ESP headers to the newest HEDR version among their available masters."""
     lookup = {}
@@ -1280,7 +1213,6 @@ def run_plan(args):
     # the player can't act on single planned moves: a count here, every move in the plan file
     planned = sum(1 for ln in lines if "  ->  " in ln)
     print(f"  {planned:,} planned move(s); each is listed in {PLAN}")
-    repair_malformed_cell_references(args.staging, apply_changes=False)
     update_omwaddon_masters(args.staging, apply_changes=False)
     game_data_files = args.game_data_files or os.environ.get("MWMANAGER_DATA_FILES")
     align_master_versions(args.staging, game_data_files, apply_changes=False)
@@ -2472,7 +2404,6 @@ def mwmanager_main(argv=None):
         rc = apply_main(args)
     if rc == 2:
         return rc
-    repair_malformed_cell_references(args.staging, apply_changes=True)
     update_omwaddon_masters(args.staging, apply_changes=True)
     align_master_versions(args.staging, GAME_DATA_FILES, apply_changes=True)
     return rc
