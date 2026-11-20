@@ -309,6 +309,47 @@ class KeptCoreTests(unittest.TestCase):
             self.assertTrue(os.path.samefile(mod / "Textures" / "rock.dds", kept))
 
 
+class TotspOptionTests(unittest.TestCase):
+    """Solstheim Tomb of the Snow Prince: a FOMOD whose sources Tidy keeps in Extras, and a newer patch in place."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.mod = Path(tmp.name) / "TOTSP"
+        self.src = self.mod / "Extras" / "totsp"
+        for rel in ("100 Patch - Patch for Purists/TOTSP_Patch_for_Purists_4.0.2.esp",
+                    "102 Patch - abot's Boats/TOTSP_abotBoats.esp"):
+            (self.src / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.src / rel).write_bytes(b"TES3")
+        self.mod.joinpath("TOTSP_Patch_for_Purists_5.0.6.esp").write_bytes(b"TES3")
+
+    def option(self, key, label, rel):
+        name = Path(rel).name
+        return {"key": key, "label": label, "number": 101, "required": False, "group_key": "fomod:1:1",
+                "path": self.src / "fomod", "payload_files": {}, "all_payload_files": {name: self.src / rel},
+                "targets": [], "compatible": [], "missing_masters": [], "mod_dir": self.mod}
+
+    def test_fomod_sources_in_extras_are_not_offered_again(self):
+        records = [self.option("pfp", "Patch for Purists 4.0.2", "100 Patch - Patch for Purists/"
+                                                                 "TOTSP_Patch_for_Purists_4.0.2.esp"),
+                   self.option("boats", "AbotBoats", "102 Patch - abot's Boats/TOTSP_abotBoats.esp")]
+        nested = mock_fomod._discover_plugin_choices(self.mod, set(), mock_fomod._represented_option_sources(records))
+        self.assertEqual([n["label"] for n in nested if n["label"].startswith("Extras")], [])
+
+    def test_an_option_for_an_older_version_of_a_plugin_here_is_left_out(self):
+        records = [self.option("pfp", "Patch for Purists 4.0.2", "100 Patch - Patch for Purists/"
+                                                                 "TOTSP_Patch_for_Purists_4.0.2.esp"),
+                   self.option("boats", "AbotBoats", "102 Patch - abot's Boats/TOTSP_abotBoats.esp")]
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as said:
+            kept = mock_fomod._drop_superseded_choices(self.mod, records)
+        self.assertEqual([r["key"] for r in kept], ["boats"])
+        self.assertIn("TOTSP_Patch_for_Purists_5.0.6.esp in this package is a newer version", said.getvalue())
+        self.mod.joinpath("TOTSP_Patch_for_Purists_5.0.6.esp").unlink()   # without the newer one: offered
+        self.assertEqual(len(mock_fomod._drop_superseded_choices(self.mod, records)), 2)
+        self.assertEqual(mock_fomod._plugin_version("TOTSP_Patch_for_Purists_4.0.2.esp"),
+                         ("totsp_patch_for_purists", (4, 0, 2)))
+
+
 class OptionFileSpeedTests(unittest.TestCase):
     def test_adding_option_files_does_no_resolve_or_mkdir_per_file(self):
         with tempfile.TemporaryDirectory() as tmp:

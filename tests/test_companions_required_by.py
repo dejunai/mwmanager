@@ -180,7 +180,7 @@ class Companions(unittest.TestCase):
         self.assertIn("newer wins", voice[0]["group_label"])
         self.assertIn("only adds the lines", voice[0]["docs"])
         music = next(r for r in records if "Music" in r["label"])
-        self.assertNotIn("group_key", music)                       # music is not a voice pack
+        self.assertEqual((music["group_key"], music["group_label"]), ("companion:music", "Music packs"))
         self.assertEqual([r["number"] for r in records], sorted(r["number"] for r in records))
 
         def pack(name, lines):
@@ -257,8 +257,10 @@ class Companions(unittest.TestCase):
         (package / ".mwmanager-stage.json").write_text(json.dumps({"companions": list(found.values())}),
                                                        encoding="utf-8")
         records = mock_fomod._companion_records(package)
-        hd, voice = sorted(records, key=lambda r: r["label"])
-        self.assertTrue(hd["label"].startswith("HD pack available:"))
+        hd = next(r for r in records if r["group_key"] == "companion:hd")
+        voice = next(r for r in records if r["group_key"] == "companion:voice")
+        self.assertEqual(hd["group_label"], "HD packs")              # the kind is the heading, not the row
+        self.assertIn("HD pack available", hd["badges"])
         self.assertEqual(voice["label"], "OAAB Data")       # nothing follows the master's name: the whole title
         self.assertEqual((voice["group_key"], voice["selection_type"], voice["recommended"]),
                          ("companion:voice", "SelectAny", True))

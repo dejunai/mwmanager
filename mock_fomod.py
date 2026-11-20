@@ -998,12 +998,48 @@ def _represented_option_sources(records: list[dict]) -> set[Path]:
         payload = record.get("payload_files")
         if payload is None:
             payload = _payload_files(record)
-        for source in payload.values():
+        # a FOMOD option's plugin files are in all_payload_files only (payload_files leaves plugins out)
+        for source in list(payload.values()) + list((record.get("all_payload_files") or {}).values()):
             try:
                 represented.add(Path(source).resolve())
             except (OSError, TypeError):
                 continue
     return represented
+
+
+_VERSIONED_PLUGIN = re.compile(r"^(.*?)[ _-]v?(\d+(?:\.\d+)+)$", re.I)
+
+
+def _plugin_version(name: str) -> tuple[str, tuple[int, ...]] | None:
+    """("totsp_patch_for_purists", (4, 0, 2)) for TOTSP_Patch_for_Purists_4.0.2.esp; None without a version."""
+    match = _VERSIONED_PLUGIN.match(Path(name).stem)
+    return (match.group(1).casefold(), tuple(int(n) for n in match.group(2).split("."))) if match else None
+
+
+def _drop_superseded_choices(mod_dir: Path, records: list[dict]) -> list[dict]:
+    """Leave out an optional choice whose every plugin is an older version of a plugin this package has already
+    (TOTSP's "Patch for Purists 4.0.2" once its own TOTSP_Patch_for_Purists_5.0.6.esp is in place)."""
+    newest: dict[str, tuple[tuple[int, ...], str]] = {}
+    try:
+        present = [p.name for p in mod_dir.iterdir() if p.is_file() and p.suffix.casefold() in PLUGIN_EXTS]
+    except OSError:
+        present = []
+    for name in present:
+        found = _plugin_version(name)
+        if found and found[1] > newest.get(found[0], ((), ""))[0]:
+            newest[found[0]] = (found[1], name)
+    kept = []
+    for record in records:
+        plugins = [n for n in (record.get("all_payload_files") or record.get("payload_files") or {})
+                   if Path(n).suffix.casefold() in PLUGIN_EXTS]
+        versions = [_plugin_version(Path(n).name) for n in plugins]
+        newer = [newest[v[0]][1] for v in versions if v and v[0] in newest and newest[v[0]][0] > v[1]]
+        if record.get("required") or not plugins or len(newer) != len(plugins):
+            kept.append(record)
+            continue
+        print(f"  {mod_dir.name}: not offering '{record.get('label') or record['key']}': "
+              f"{', '.join(sorted(set(newer)))} in this package is a newer version of it.", flush=True)
+    return kept
 
 
 def _discover_plugin_choices(mod_dir: Path, installed: set[str],
@@ -2124,12 +2160,15 @@ def _companion_records(mod_dir: Path) -> list[dict]:
             badges.append("Older than the master")
             docs += "\n\nWarning: " + companion["warning"]
         record = {"key": "companion:" + archive.name, "path": None, "number": 950 + order,
-                  "label": f"{companion['label']}: {companion.get('name') or archive.stem}",
+                  "label": companion.get("short") or companion.get("name") or archive.stem,
                   "required": False, "core_bundle": False, "has_plugin_payload": False,
                   "has_master_payload": False, "informational_utility": False, "targets": [],
                   "compatible": [], "missing_masters": [], "docs": docs, "mod_dir": mod_dir,
-                  "badges": badges, "outputs": set(), "group_label": "Companion downloads",
-                  "companion": companion}
+                  "badges": badges, "outputs": set(), "companion": companion,
+                  # one box per kind; the heading says what the files are, so a row is only the file's name
+                  "group_key": "companion:" + str(companion.get("kind") or "extra"), "selection_type": "SelectAny",
+                  "group_label": {"hd": "HD packs", "music": "Music packs"}.get(
+                      companion.get("kind"), "Extra files from the same Nexus mod")}
         if companion.get("kind") == "voice":
             # all voice packs in one box, all chosen; each row names only the NPCs it voices
             docs += f"\n\nFull name: {companion.get('name') or archive.stem}"
@@ -2590,6 +2629,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
                    else _discover(mod_dir, installed))
         records.extend(_discover_plugin_choices(mod_dir, installed, _represented_option_sources(records)))
         records.extend(_companion_records(mod_dir))
+        records = _drop_superseded_choices(mod_dir, records)
         held = set(entry.get("held", []))
         pending = [r for r in records if set(r["targets"]) & newly_relevant and r["key"] not in selected]
         ready = {r["key"] for r in pending if r["key"] in held} - held_options(records, held, installed)
@@ -2660,6 +2700,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             # automatically and _show_selector can return without opening a window.
             records[0]["required"] = True
         records.extend(_companion_records(mod_dir))
+        records = _drop_superseded_choices(mod_dir, records)
         if not records:
             continue
         plugin = next((p.name for p in sorted(mod_dir.iterdir(), key=lambda x: x.name.casefold())
