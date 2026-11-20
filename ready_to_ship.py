@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-MARKER = "REMOVE BEFORE " + "SHIPPING"          # split so this file does not find itself
+MARKER = "remove before " + "shipping"          # split so this file does not find itself; matched in any case
 
 
 def markers():
@@ -22,7 +22,7 @@ def markers():
         except (OSError, UnicodeDecodeError):
             continue                                # binary or unreadable: no comments to find
         found += [f"{name}:{number}: {line.strip()}"
-                  for number, line in enumerate(text.splitlines(), 1) if MARKER in line]
+                  for number, line in enumerate(text.splitlines(), 1) if MARKER in line.casefold()]
     return found
 
 

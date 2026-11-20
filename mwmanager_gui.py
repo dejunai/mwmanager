@@ -924,9 +924,18 @@ def deployed_master_names() -> set[str]:
 
 
 def ordered_signature(plugin_names: list[str], order: list[str], active_names: set[str], game_dir: str) -> str:
+    data_dir = Path(game_dir) / "Data Files"
+
+    def stamp(name):                             # a plugin replaced in place changes the signature too
+        try:
+            info = (data_dir / name).stat()
+            return [info.st_size, info.st_mtime_ns]
+        except OSError:
+            return None
+
     payload = {
         "game_dir": str(Path(game_dir).resolve()).casefold(),
-        "plugins": sorted(name.casefold() for name in plugin_names),
+        "plugins": sorted([name.casefold(), stamp(name)] for name in plugin_names),
         "order": [(name.casefold(), name.casefold() in active_names) for name in order],
     }
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
@@ -5431,6 +5440,18 @@ class ManagerGUI(tk.Tk):
             game_changed = str(old_game.resolve()).casefold() != str(game.resolve()).casefold()
             old_downloads = str(self.settings.get("archive_downloads_dir", ""))
             downloads_changed = old_downloads.casefold() != str(downloads).casefold()
+            choice = False
+            if game_changed and not first_run:      # ask before saving, so Cancel changes nothing
+                choice = messagebox.askyesnocancel(
+                    "Morrowind folder has changed",
+                    "MWManager needs to check the new game folder before it can use it.\n\n"
+                    "Yes: save and restart MWManager now.\n"
+                    "No: save and check the new folder in this session.\n"
+                    "Cancel: go back to Options without saving.",
+                    parent=dialog,
+                )
+                if choice is None:
+                    return
             self.settings["game_dir"] = str(game)
             self.settings["archive_downloads_dir"] = str(downloads) if downloads_var.get().strip() else ""
             self.settings[BSA_OFFER_SETTING] = bsa_offer
@@ -5463,24 +5484,9 @@ class ManagerGUI(tk.Tk):
             write_settings(self.settings)
             dialog.destroy()
             if game_changed:
-                choice = messagebox.askyesnocancel(
-                    "Morrowind folder has changed",
-                    "MWManager must restart to reinitialize preflight against the selected game folder.\n\n"
-                    "Yes restarts MWManager, sets first_run to 1, and uses the saved INI paths.\n"
-                    "No continues in this session without restarting.\n"
-                    "Cancel disables MWManager controls until you close it.",
-                    parent=self,
-                )
-                if choice is None:
-                    self._cancel_until_restart()
-                    return
                 if choice:
-                    self.settings["first_run"] = 1
-                    write_settings(self.settings)
                     self._restart_manager()
                     return
-                self.settings["first_run"] = 1
-                write_settings(self.settings)
                 ini_order = read_game_ini_order(game)
                 self.order = ini_order or read_order()
                 self.active_names = {name.casefold() for name in ini_order} if ini_order else set()

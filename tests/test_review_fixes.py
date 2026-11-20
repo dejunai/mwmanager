@@ -467,5 +467,25 @@ class JobCancellationTests(unittest.TestCase):
         terminate.assert_called_once_with(process)
 
 
+class PerplexityFixTests(unittest.TestCase):
+    def test_replacing_a_plugin_in_place_changes_the_signature(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plugin = Path(tmp, "Data Files", "A.esp")
+            plugin.parent.mkdir()
+            plugin.write_bytes(b"TES3")
+            before = mwmanager_gui.ordered_signature(["A.esp"], ["A.esp"], {"a.esp"}, tmp)
+            plugin.write_bytes(b"TES3 changed")
+            self.assertNotEqual(before, mwmanager_gui.ordered_signature(["A.esp"], ["A.esp"], {"a.esp"}, tmp))
+
+    def test_ready_to_ship_finds_markers_in_any_case(self):
+        import ready_to_ship
+        with tempfile.TemporaryDirectory() as tmp:
+            Path(tmp, "a.py").write_text("# Remove before " + "shipping\n", encoding="utf-8")
+            listed = mock.Mock(stdout=b"a.py\0")
+            with mock.patch.object(ready_to_ship, "ROOT", Path(tmp)), \
+                    mock.patch.object(ready_to_ship.subprocess, "run", return_value=listed):
+                self.assertEqual(len(ready_to_ship.markers()), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -849,7 +849,7 @@ def extract_archive(item: dict, destination: Path, manager: Path) -> Path:
             if linked:
                 raise ValueError(f"Archive contains symbolic links or junctions: "
                                  + ", ".join(linked[:10]))
-            result = subprocess.run([seven_zip, "x", str(archive), f"-o{temporary}", "-y"],
+            result = subprocess.run([seven_zip, "x", f"-o{temporary}", "-y", "--", str(archive)],
                                     capture_output=True, text=True, errors="replace", timeout=7200,
                                     **_quiet_subprocess_options())
             if result.returncode:
