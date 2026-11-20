@@ -198,6 +198,20 @@ class WorkflowGuiTests(unittest.TestCase):
             view.append(detail)
         self.assertIn("Applying Tidy moves 2,000", view.activity.get())
 
+    def test_tiny_counters_do_not_flip_the_bar_and_a_finished_counter_lets_it_move(self):
+        from mwmanager_workflow import JobView
+        view = JobView(self.app)
+        view.begin("Deploy", "", None)
+        for package in ("A", "B", "C"):                          # one 0-of-1 / 1-of-1 pair per package
+            view.append(f"Tidy {package}: Applying Tidy moves 0 of 1")
+            view.append(f"Tidy {package}: Applying Tidy moves 1 of 1")
+        self.assertEqual(str(view.progress["mode"]), "indeterminate")
+        view.append("Tidy D: Applying Tidy moves 6,578 of 6,578")
+        self.assertEqual(str(view.progress["mode"]), "determinate")
+        view.append("Hardlinking selected masters and their assets")
+        self.assertEqual(str(view.progress["mode"]), "indeterminate")
+        view.finish()
+
     def test_cancel_waits_for_safe_boundary_and_all_actions_restore(self):
         started, release = threading.Event(), threading.Event()
         done = []

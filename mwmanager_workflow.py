@@ -71,6 +71,9 @@ def log_tone(message):
     return "progress"
 
 
+MIN_COUNTER = 20          # smaller counters ("1 of 1", "3 of 10") are left to the moving bar
+
+
 def progress_fraction(message):
     """Only explicit counters are determinate; never invent time estimates."""
     match = re.search(r"(?:^|\b)(\d[\d,]*)(?:\s+of\s+|\s*/\s*)(\d[\d,]*)\b", message, re.I)
@@ -247,9 +250,15 @@ class JobView:
                 self.log.see("end")
             self.log.configure(state="disabled")
         fraction = progress_fraction(text)
-        if fraction and (text.startswith("MWMANAGER-STAGE:") or is_action_line(text)):
+        # a counter only fills the bar when it counts enough to show progress; "0 of 1" then "1 of 1" (one per
+        # package) flipped it empty to full over and over. Once a counter is done, the bar moves on its own again.
+        if fraction and fraction[1] >= MIN_COUNTER and (text.startswith("MWMANAGER-STAGE:") or is_action_line(text)):
             self.progress.stop()
             self.progress.configure(mode="determinate", maximum=fraction[1], value=fraction[0])
+        elif (str(self.progress.cget("mode")) == "determinate" and is_action_line(text)
+              and float(self.progress.cget("value")) >= float(self.progress.cget("maximum"))):
+            self.progress.configure(mode="indeterminate", value=0)
+            self.progress.start(50)
 
     def refresh_phases(self):
         if not self.setup:
