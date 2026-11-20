@@ -2211,23 +2211,14 @@ def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str]
         target = mod_dir.parent.parent / "companions" / re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .")
         if not target.is_dir():
             size = archive.stat().st_size
-            note = "; a large pack can take several minutes…" if size >= LARGE_ARCHIVE_BYTES else "…"
-            print(f"  {mod_dir.name}: extracting {record['label']} ({size / 1048576:,.0f} MB){note}", flush=True)
-            started, failure = time.monotonic(), []
-
-            def extract():
-                try:
-                    extract_archive({"archive": str(archive)}, target, Path(__file__).resolve().parent)
-                except BaseException as exc:          # re-raised on this thread below
-                    failure.append(exc)
-            worker = threading.Thread(target=extract, daemon=True)
-            worker.start()
-            while worker.join(30) or worker.is_alive():      # a heartbeat every 30 s while 7-Zip works
-                print(f"  {mod_dir.name}: still extracting {archive.name} "
-                      f"({int(time.monotonic() - started) // 60} min {int(time.monotonic() - started) % 60} s)…",
-                      flush=True)
-            if failure:
-                raise failure[0]
+            # 7-Zip can't say how far it is: one line before it, no timer
+            if size >= LARGE_ARCHIVE_BYTES:
+                print(f"  {mod_dir.name}: working through {record['label']} ({size / 1048576:,.0f} MB), "
+                      "please be patient...", flush=True)
+            else:
+                print(f"  {mod_dir.name}: extracting {record['label']} ({size / 1048576:,.0f} MB)...", flush=True)
+            started = time.monotonic()
+            extract_archive({"archive": str(archive)}, target, Path(__file__).resolve().parent)
             print(f"  {mod_dir.name}: extracted {archive.name} in {int(time.monotonic() - started)} s.", flush=True)
         record["path"] = _data_root(target)
         record["payload_files"] = _payload_files({"path": record["path"]})
