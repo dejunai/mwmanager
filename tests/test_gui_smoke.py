@@ -486,6 +486,20 @@ class GuiSmokeTests(unittest.TestCase):
                                    "archive_source": "unmanaged"}])
         self.assertEqual(self.errors, [])
 
+    def test_minimizing_under_a_modal_dialog_releases_the_grab_until_restored(self):
+        # with the grab held, Tk ignores the taskbar's restore and the window stays minimized for good
+        dialog = tk.Toplevel(self.app)
+        dialog.transient(self.app)
+        dialog.grab_set()
+        self.pump(0.2)
+        self.app.iconify()
+        self.pump(0.3)
+        self.assertIsNone(self.app.grab_current())
+        self.app.deiconify()
+        self.pump(0.3)
+        self.assertIs(self.app.grab_current(), dialog)
+        dialog.destroy()
+
     def test_options_window_has_always_pack_bsa_checkbox_off_by_default(self):
         self.app.settings.pop(self.g.ALWAYS_BSA_SETTING, None)
         before = set(self.app.winfo_children())

@@ -967,6 +967,20 @@ class ToolTip:
 
 
 class ManagerGUI(tk.Tk):
+    def _release_grab_when_minimized(self, event):
+        if event.widget is self and self.state() == "iconic":
+            holder = self.grab_current()
+            if holder is not None:
+                self._grab_while_minimized = holder
+                holder.grab_release()
+
+    def _regrab_when_restored(self, event):
+        if event.widget is not self or self._grab_while_minimized is None:
+            return
+        holder, self._grab_while_minimized = self._grab_while_minimized, None
+        if holder.winfo_exists():
+            holder.grab_set()
+
     def __init__(self):
         super().__init__()
         apply_theme(self)
@@ -976,6 +990,10 @@ class ManagerGUI(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         center(self, None, 900, 620)                     # the main window: middle of the desktop
         self.minsize(760, 500)
+        # Tk drops the taskbar's restore while a dialog holds the grab: hand the grab back only once restored
+        self._grab_while_minimized = None
+        self.bind("<Unmap>", self._release_grab_when_minimized, add="+")
+        self.bind("<Map>", self._regrab_when_restored, add="+")
         self.settings = read_settings()
         self.gui_state = read_gui_state()
         self.order = read_order()
