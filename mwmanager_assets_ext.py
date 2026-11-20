@@ -444,8 +444,20 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                         continue
                     new = open(out, "rb").read()
                     os.remove(out)
+            if kind == "splash":                      # at most 1024 wide, RLE TGA; a DDS/BMP... becomes a .tga
+                if not texconv:
+                    skipped.append(f"{rel} (texconv.exe not found)")
+                    continue
+                os.makedirs(tmp, exist_ok=True)
+                new = splash_tga(full, texconv, tmp)
             if not new:
                 continue
+            to_tga = kind == "splash" and not full.lower().endswith(".tga")
+            if to_tga:
+                replacement = os.path.splitext(full)[0] + ".tga"
+                if os.path.exists(replacement):
+                    skipped.append(f"{rel} (a TGA of that name exists already)")
+                    continue
             if kind == "snd" and job.get("mp3"):
                 replacement = os.path.splitext(full)[0] + ".mp3"
                 if os.path.exists(replacement):
@@ -469,7 +481,7 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                 os.remove(full)
                 if journal_ops is not None:
                     journal_ops.append({"restore": full, "backup": backup})
-            elif (kind == "snd" and job.get("mp3")) or (kind == "tex" and job.get("convert")):
+            elif (kind == "snd" and job.get("mp3")) or (kind == "tex" and job.get("convert")) or to_tga:
                 partial = replacement + ".mwmanager-tmp"
                 with open(partial, "wb") as output:
                     output.write(new)
@@ -497,6 +509,8 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                     details = f"rewrote {count} absolute texture path(s)"
                 elif kind == "tex":
                     details = "repaired or converted DDS texture (including requested size/format/mipmap changes)"
+                elif kind == "splash":
+                    details = f"splash screen made an RLE TGA at most {SPLASH_MAX_WIDTH} wide"
                 elif kind == "snd":
                     details = ("converted WAV to same-stem MP3" if job.get("mp3") else
                                "converted sound to Morrowind-compatible encoding" if not job.get("strip") else
