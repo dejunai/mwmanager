@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-19 (America/Los_Angeles); refreshed to 2556ed8; mwdialog_luafix.py and tests\\test_luafix.py refreshed to b7b71aa",
+  "SyncedAt": "2026-11-19 (America/Los_Angeles); refreshed to 2556ed8; mwdialog_luafix.py and tests\\test_luafix.py refreshed to b7b71aa; mwpluginpatches sound overrides and tests\\test_sound_overrides.py refreshed to 3aeb1c6",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -226,24 +226,24 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\config.lua",
-      "Bytes": 5477,
-      "SHA256": "b5f98d43914591e0fd19f2223fb295d56b4909104773544b37cb2b8cf11b15eb",
+      "Bytes": 6032,
+      "SHA256": "7caecb24f22abb8b37603ed02e4d87606c5dba52ccf75d590565b3fe054062b1",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\config.lua",
-      "SourceModified": "2026-11-15T01:57:33"
+      "SourceModified": "2026-11-19T19:39:52"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\main.lua",
-      "Bytes": 2345,
-      "SHA256": "85e2c1c411586ada91520c465a8de8d58e7f5419ff072fa8cc30a505673463f8",
+      "Bytes": 2884,
+      "SHA256": "f6a59518bfab2f5925ec20eb3f195f2d4296755071e47d121a5e0f93673e4274",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\main.lua",
-      "SourceModified": "2026-11-15T01:57:42"
+      "SourceModified": "2026-11-19T19:39:52"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\mcm.lua",
-      "Bytes": 10412,
-      "SHA256": "aaa21000e0b3ef1bb0ed06331c4df2bc8298215b43a18c971ba0f1aff643516c",
+      "Bytes": 12058,
+      "SHA256": "9c76a92cb8e07e80e6625d336f8aec8afcabad9de2afd8c4491816433834c412",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\mcm.lua",
-      "SourceModified": "2026-11-15T02:17:42"
+      "SourceModified": "2026-11-19T19:39:52"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\autoStartup.lua",
@@ -300,6 +300,20 @@
       "SHA256": "46e746c6a210021f78f7de6cf2c8a518b18e8bd6a6536f23872c4bd4fdc2d726",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\ysmirShield.lua",
       "SourceModified": "2026-11-14T09:27:42"
+    },
+    {
+      "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\caveDripSound.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\caveDripSound.lua",
+      "Bytes": 2487,
+      "SHA256": "7107d5abc89e9b3b39e1979fe4283970bd0a795a849d1c19a215a73f51063231",
+      "SourceModified": "2026-11-19T19:39:17"
+    },
+    {
+      "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\swampSound.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\swampSound.lua",
+      "Bytes": 3245,
+      "SHA256": "d86f86827361b5931f1a865f6e23515eaebeac72c5bfbfb566a41e4c9fd100ed",
+      "SourceModified": "2026-11-19T19:39:31"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwsaveguard\\main.lua",
@@ -1104,6 +1118,13 @@
       "Bytes": 1947,
       "SHA256": "a804e5f27e38468a45c20f8592d7d1c4d179254a460ebdb03b8c0234b0b62d31",
       "SourceModified": "2026-11-19T16:40:52"
+    },
+    {
+      "RelativePath": "tests\\test_sound_overrides.py",
+      "Source": "<Steam Morrowind>\\tests\\test_sound_overrides.py",
+      "Bytes": 4100,
+      "SHA256": "85dc85bf1906e3f7b29933825b8b9f4f13498c00d454af8366b34046fc7aea54",
+      "SourceModified": "2026-11-19T19:40:14"
     }
   ]
 }
