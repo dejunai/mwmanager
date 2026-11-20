@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-19 (America/Los_Angeles); refreshed to 2556ed8; mwdialog_luafix.py and tests\\test_luafix.py refreshed to b7b71aa; mwpluginpatches sound overrides and tests\\test_sound_overrides.py refreshed to 3aeb1c6",
+  "SyncedAt": "2026-11-19 (America/Los_Angeles); refreshed to 2556ed8; mwdialog_luafix.py and tests\\test_luafix.py refreshed to b7b71aa; mwpluginpatches sound overrides and tests\\test_sound_overrides.py refreshed to 3aeb1c6; mwdialog_check.py: cell-conflict status lines (upstream, without the Steam root's pending conflict-prompt edit)",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -463,10 +463,10 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 511857,
-      "SHA256": "c18521ebb7315613fc231d3e202feac29fc79c71a05a271584504ca26ce0e9a5",
+      "Bytes": 512219,
+      "SHA256": "9f8ab6f307fb7c4c6317653d4e02c270635d8edafdd35a20219fd003c5fc9dca",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
-      "SourceModified": "2026-11-19T15:47:44"
+      "SourceModified": "2026-11-19T21:18:26"
     },
     {
       "RelativePath": "mwdialog_check.rules.txt",
