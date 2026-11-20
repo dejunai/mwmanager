@@ -680,6 +680,18 @@ class GuiTidySteps(unittest.TestCase):
             self.assertEqual(order.read_bytes(), b"old order\n")
             self.assertEqual(rules.read_bytes(), b"old rules\n")
 
+    def test_first_manual_move_creates_only_that_user_rule(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            owner = mock.Mock()
+            owner.pending_order_rules = [("A.esp", "B.esp")]
+            with mock.patch.object(self.gui, "APP_DIR", base):
+                self.gui.ManagerGUI._write_manual_order_rules(owner)
+            text = (base / "mwmanager_rules.txt").read_text(encoding="cp1252")
+            self.assertIn("[Order]\nA.esp\nB.esp", text.replace("\r\n", "\n"))
+            self.assertFalse(any(name in text for name in self.gui.END_PATCHES))
+            self.assertNotIn(self.gui.ESM_FIX_PATCH, text)
+
 
 if __name__ == "__main__":
     unittest.main()

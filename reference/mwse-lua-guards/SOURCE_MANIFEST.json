@@ -236,9 +236,9 @@
     {
       "Path": "mods/mwpluginpatches/config.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\config.lua",
-      "SHA256": "e4ab19e6ac8e772118322364dfb93cc395a72b85d4b30451323a43132d7e2d6c",
-      "Length": 8712,
-      "SourceModified": "2026-11-20T06:18:17"
+      "SHA256": "1467501d625a45dceb08b23bf346d6f1ac4c71a3d64cdb05ff43784d7109b79a",
+      "Length": 8716,
+      "SourceModified": "2026-11-20T08:30:48"
     },
     {
       "Path": "mods/mwpluginpatches/main.lua",
@@ -250,9 +250,9 @@
     {
       "Path": "mods/mwpluginpatches/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\mcm.lua",
-      "SHA256": "e3452cfce7ac11c2d9e49411f87dc8bc496698a5dd9eeb4de1d08c7fc0e63297",
-      "Length": 18472,
-      "SourceModified": "2026-11-20T06:18:17"
+      "SHA256": "3ae283affc1371662875daf92921dd7d20e585555053cacb6d790c52847370af",
+      "Length": 18474,
+      "SourceModified": "2026-11-20T08:25:58"
     },
     {
       "Path": "mods/mwpluginpatches/patches/autoStartup.lua",
@@ -271,9 +271,9 @@
     {
       "Path": "mods/mwpluginpatches/patches/doorLockCompatibility.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\doorLockCompatibility.lua",
-      "SHA256": "1c34bcab0de9f9110a00b1a481e7d4ac2fbe165f2bc9e8d2669c4661b0d2b001",
-      "Length": 2283,
-      "SourceModified": "2026-11-20T03:00:10"
+      "SHA256": "496fb979bc3445c1a933cf7e8cabd8a9cb8bf04613ed4c345c06542cc29e9baa",
+      "Length": 3294,
+      "SourceModified": "2026-11-20T07:36:31"
     },
     {
       "Path": "mods/mwpluginpatches/patches/jiubDelay.lua",
@@ -362,9 +362,9 @@
     {
       "Path": "mods/mwquicktoggle/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwquicktoggle\\main.lua",
-      "SHA256": "06a5a1f0233acc8a4c4c70eac38b7e572d03de336f7202149692093ef1f81196",
-      "Length": 4013,
-      "SourceModified": "2026-11-18T02:34:28"
+      "SHA256": "2c9d9540982b0ed11127af8384133413963c066f5bb22444d0c753017df26024",
+      "Length": 5959,
+      "SourceModified": "2026-11-20T07:53:35"
     },
     {
       "Path": "mods/mwsaveguard/main.lua",

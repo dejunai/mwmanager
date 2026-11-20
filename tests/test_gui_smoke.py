@@ -209,7 +209,7 @@ class GuiSmokeTests(unittest.TestCase):
         data.mkdir(parents=True)
         (game / "Morrowind.exe").write_bytes(b"MZ")
         for name in ("Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm", "Tamriel_Data.esm", "A Mod.esp",
-                     "New Mod.esp", "mwmanager Multipatch.esp"):
+                     "New Mod.esp", "mwdialog_check Multipatch.esp"):
             (data / name).write_bytes(b"TES3")
         (base / "mwmanager_core_addons.json").write_text(json.dumps({"tamriel_data.esm": ["tamriel data"]}))
         (base / "mwmanager_gui_state.json").write_text(json.dumps({

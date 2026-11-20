@@ -93,7 +93,7 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         self.assertEqual(self.m.backup_root_for(str(staged), str(self.data)), str(staged))
 
     def test_plugin_backup_of_a_generated_patch_goes_to_mwmanager(self):
-        patch = self.data / "mwmanager Multipatch.esp"
+        patch = self.data / "mwdialog_check Multipatch.esp"
         patch.write_bytes(b"TES3")
         bak = self.m.backup_path(str(patch))
         self.assertNotInGame(bak)
@@ -317,13 +317,13 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         import mwmanager_journal
         journal = mwmanager_journal.Journal(self.manager / "journal")
         journal.capture_baseline(self.game)
-        generated = self.data / "mwmanager Multipatch.esp"
+        generated = self.data / "mwdialog_check Multipatch.esp"
         self.m.write_plugin_bytes(str(generated), b"TES3" + struct.pack("<III", 0, 0, 0))
         entries, problems = journal.entries()
         self.assertEqual(problems, [])
         self.assertEqual((entries[-1]["action"], entries[-1]["tag"]), ("create", "plugin-write"))
         plan = journal.plan_rollback(self.game)
-        self.assertIn(("delete", "Data Files/mwmanager Multipatch.esp"),
+        self.assertIn(("delete", "Data Files/mwdialog_check Multipatch.esp"),
                       {(step["op"], step["path"]) for step in plan["steps"]})
 
     def test_backups_of_files_that_are_not_shipped_go_to_mwmanager(self):

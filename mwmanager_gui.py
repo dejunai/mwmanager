@@ -44,12 +44,15 @@ OFFICIAL_SHIPPED_ESPS = (
     "entertainers.esp", "LeFemmArmor.esp", "master_index.esp", "Siege at Firemoth.esp",
 )
 END_PATCHES = (
-    "mwmanager PlaceholderCell ESP Patch.esp",
-    "mwmanager Cell Fixes.esp",
-    "mwmanager Performers Patch.esp",
-    "mwmanager Multipatch.esp",
+    "mwdialog_check AutoMerge.esp",
+    "mwdialog_check Cell Fixes.esp",
+    "mwdialog_check PlaceholderCell ESP Patch.esp",
+    "mwdialog_check Multipatch.esp",
 )
 LOCKED_PATCHES = {ESM_FIX_PATCH.casefold(), *(name.casefold() for name in END_PATCHES)}
+USER_RULES_TEMPLATE = ("; MWManager load-order rules\n"
+                       "; Add [Order], [NearStart], [NearEnd], or [Exact] rules as needed.\n"
+                       "; Without custom rules, installed order is preserved wherever masters and mlox allow it.\n")
 MERGE_RECORD = APP_DIR / "mwmanager_merged.txt"
 MAJOR_MASTER_CONFIG = APP_DIR / "mwmanager_core_addons.json"
 GUI_STATE_FILE = APP_DIR / "mwmanager_gui_state.json"
@@ -3683,9 +3686,7 @@ class ManagerGUI(tk.Tk):
         rules_path = APP_DIR / "mwmanager_rules.txt"
         current = rules_path.read_text(encoding="cp1252") if rules_path.is_file() else ""
         if not current.strip():
-            current = ("; MWManager load-order rules\n\n"
-                       "[NearStart]\n" + ESM_FIX_PATCH + "\n\n[NearEnd]\n" +
-                       "\n".join((END_PATCHES[2], END_PATCHES[0], END_PATCHES[3])) + "\n")
+            current = USER_RULES_TEMPLATE
         fresh = []
         seen = set()
         for first, second in reversed(self.pending_order_rules):
@@ -3702,11 +3703,8 @@ class ManagerGUI(tk.Tk):
         """Open the exact rules file used by mwmanager.py --sort in the user's editor."""
         rules_path = APP_DIR / "mwmanager_rules.txt"
         if not rules_path.exists():
-            default = ("; MWManager load-order rules\n\n"
-                       "[NearStart]\n" + ESM_FIX_PATCH + "\n\n[NearEnd]\n" +
-                       "\n".join((END_PATCHES[2], END_PATCHES[0], END_PATCHES[3])) + "\n")
             try:
-                rules_path.write_text(default, encoding="cp1252", newline="\r\n")
+                rules_path.write_text(USER_RULES_TEMPLATE, encoding="cp1252", newline="\r\n")
             except OSError as exc:
                 messagebox.showerror("Could not create sort rules", str(exc), parent=self)
                 return

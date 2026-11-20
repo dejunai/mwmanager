@@ -93,6 +93,7 @@
   "backup_candidates",
   "backup_path",
   "cell_fixes_report_path",
+  "compute_order",
   "dates_undo_path",
   "doubled_rules_path",
   "off_dest",

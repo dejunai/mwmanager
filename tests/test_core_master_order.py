@@ -1,5 +1,4 @@
-"""Patch for Purists is a major master: first in MWManager's priority list (right after Bloodmoon.esm), and
-mwmanager_rules.txt has the sort rule that puts it there. Temporary folders only; nothing real is touched."""
+"""Patch for Purists is a major master in MWManager's priority list. Temporary folders only."""
 import json
 import struct
 import sys
@@ -182,24 +181,11 @@ class PriorityList(unittest.TestCase):
 
 
 class SortPlacesIt(unittest.TestCase):
-    def test_rules_file_puts_it_right_after_bloodmoon(self):
+    def test_shipped_rules_do_not_contain_install_specific_master_order(self):
         import mwmanager as m
-        with tempfile.TemporaryDirectory() as tmp, mwmanager_upstream.use_manager_dir(tmp):
-            df = Path(tmp) / "game" / "Data Files"
-            df.mkdir(parents=True)
-            layout = [("Morrowind.esm", []), ("Tribunal.esm", ["Morrowind.esm"]), ("Bloodmoon.esm", ["Morrowind.esm"]),
-                      ("AATL_Data.esm", ["Morrowind.esm"]), ("Tamriel_Data.esm", ["Morrowind.esm"]),
-                      ("OAAB_Data.esm", ["Morrowind.esm"]), (PFP, ["Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm"]),
-                      ("A Mod.esp", ["Morrowind.esm"])]
-            plugins = []
-            for name, masters in layout:
-                plugin(df / name, masters)
-                plugins.append((name, str(df / name)))
-            rules = m.parse_rules(str(ROOT / "mwmanager_rules.txt"))[0]          # the shipped rules file
-            self.assertTrue(any(kind == "nearstart" and PFP in entries for kind, entries, _src in rules))
-            order, _notes = m.compute_order(plugins, [rules], [n for n, _p in plugins])
-        self.assertEqual(order[:4], ["Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm", PFP])
-        self.assertLess(order.index("Tamriel_Data.esm"), order.index("OAAB_Data.esm"))
+        rules = m.parse_rules(str(ROOT / "mwmanager_rules.txt"))[0]
+        self.assertEqual(rules, [])
+        self.assertNotIn(PFP, (ROOT / "mwmanager_rules.txt").read_text(encoding="cp1252"))
 
 
 class LongRunningCaches(unittest.TestCase):

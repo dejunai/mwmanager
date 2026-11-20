@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-20 (America/Los_Angeles); luafix A5 (an NPC's head/hair guarded); mwsaveguard's routine notices in their own log",
+  "SyncedAt": "2026-11-20 (America/Los_Angeles); mwpluginpatches door-lock exits, mwquicktoggle restores displaced equipment, mwguard.json exemptions",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -74,10 +74,10 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\config\\mwguard.json",
-      "Bytes": 636,
-      "SHA256": "185f9108dfe4846ae4b9c6cc74f633b8387865581eb4fd2ec4ff7f77ab204766",
+      "Bytes": 701,
+      "SHA256": "71d1e584a2b753043f5d5c68f5c5dbbeb02254984cd35a648dae54e54ebb580b",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\config\\mwguard.json",
-      "SourceModified": "2026-11-15T02:59:16"
+      "SourceModified": "2026-11-20T05:51:59"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwcollide\\main.lua",
@@ -226,10 +226,10 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\config.lua",
-      "Bytes": 8712,
-      "SHA256": "e4ab19e6ac8e772118322364dfb93cc395a72b85d4b30451323a43132d7e2d6c",
+      "Bytes": 8716,
+      "SHA256": "1467501d625a45dceb08b23bf346d6f1ac4c71a3d64cdb05ff43784d7109b79a",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\config.lua",
-      "SourceModified": "2026-11-20T06:18:17"
+      "SourceModified": "2026-11-20T08:30:48"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\main.lua",
@@ -240,10 +240,10 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\mcm.lua",
-      "Bytes": 18472,
-      "SHA256": "e3452cfce7ac11c2d9e49411f87dc8bc496698a5dd9eeb4de1d08c7fc0e63297",
+      "Bytes": 18474,
+      "SHA256": "3ae283affc1371662875daf92921dd7d20e585555053cacb6d790c52847370af",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\mcm.lua",
-      "SourceModified": "2026-11-20T06:18:17"
+      "SourceModified": "2026-11-20T08:25:58"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\autoStartup.lua",
@@ -332,9 +332,9 @@
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\doorLockCompatibility.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\doorLockCompatibility.lua",
-      "Bytes": 2283,
-      "SHA256": "1c34bcab0de9f9110a00b1a481e7d4ac2fbe165f2bc9e8d2669c4661b0d2b001",
-      "SourceModified": "2026-11-20T03:00:10"
+      "Bytes": 3294,
+      "SHA256": "496fb979bc3445c1a933cf7e8cabd8a9cb8bf04613ed4c345c06542cc29e9baa",
+      "SourceModified": "2026-11-20T07:36:31"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\expandedSounds.lua",
@@ -945,10 +945,10 @@
     },
     {
       "RelativePath": "tests\\test_logshim.py",
-      "Bytes": 18636,
-      "SHA256": "d6ba118f47693d63f273cb6fe0e2a566cd29dd58d8615b503a2fff7e8b2b178c",
+      "Bytes": 19091,
+      "SHA256": "ff1bc58827331d87009966981b990050e91a7e5f5a78f80c46ad8ab898abf525",
       "Source": "<Steam Morrowind>\\tests\\test_logshim.py",
-      "SourceModified": "2026-11-15T06:55:58"
+      "SourceModified": "2026-11-20T06:35:15"
     },
     {
       "RelativePath": "tests\\test_longpaths.py",
@@ -1138,8 +1138,9 @@
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwquicktoggle\\main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwquicktoggle\\main.lua",
-      "Bytes": 4013,
-      "SHA256": "06a5a1f0233acc8a4c4c70eac38b7e572d03de336f7202149692093ef1f81196"
+      "Bytes": 5959,
+      "SHA256": "2c9d9540982b0ed11127af8384133413963c066f5bb22444d0c753017df26024",
+      "SourceModified": "2026-11-20T07:53:35"
     },
     {
       "RelativePath": "tests\\test_conflict_confirm.py",
@@ -1165,9 +1166,9 @@
     {
       "RelativePath": "tests\\test_door_lock_compatibility.py",
       "Source": "<Steam Morrowind>\\tests\\test_door_lock_compatibility.py",
-      "Bytes": 3262,
-      "SHA256": "58b623d57c952e2209c359dc4b985b589516c9c492f5d435e713b4c422073709",
-      "SourceModified": "2026-11-20T03:08:28"
+      "Bytes": 3989,
+      "SHA256": "19588997653dcc23abff583cd6b2a87b3ac79ef3d02665b38344a7b446cf1720",
+      "SourceModified": "2026-11-20T07:36:31"
     },
     {
       "RelativePath": "tests\\test_grass_plugins.py",
@@ -1210,6 +1211,13 @@
       "Bytes": 2648,
       "SHA256": "e90c75501934d86cf174d9dd21cc1526c57d28e0d52681528bff3ee58516d01b",
       "SourceModified": "2026-11-20T09:10:48"
+    },
+    {
+      "RelativePath": "tests\\test_mwquicktoggle.py",
+      "Source": "<Steam Morrowind>\\tests\\test_mwquicktoggle.py",
+      "Bytes": 3706,
+      "SHA256": "e0a9e713a7136af00eeeae09576dcb4a7e45d60f8023587fdd15ef593bd4fbcf",
+      "SourceModified": "2026-11-20T07:53:35"
     }
   ]
 }

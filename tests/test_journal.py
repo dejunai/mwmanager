@@ -274,17 +274,24 @@ class LedgerTests(Fixture):
         self.assertTrue(setup["steps"]["paths_confirmed"]["completed_at"])
         self.assertIsNone(setup["steps"]["preflight_complete"]["completed_at"])
 
-    def test_rollback_archives_plugins_turned_off_in_the_gui(self):
+    def test_rollback_archives_install_decisions_and_order_state(self):
         self.journal.capture_baseline(self.game)
         write(self.manager / "disabled_plugins/Old.esp", b"old")
         write(self.manager / "mwmanager_disabled.txt", "Old.esp\tdisabled\n")
+        write(self.manager / "mwmanager_conflict_answers.json", "{}\n")
+        write(self.manager / "mwmanager_cell_winners.txt", "A.esp\n")
+        write(self.manager / "mwmanager_rules.txt", "[Order]\nA.esp\nB.esp\n")
+        write(self.manager / "mwmanager_sort_order.txt", "A.esp\nB.esp\n")
         rc = mj.main(["--game-dir", str(self.game), "--journal-dir", str(self.journal.root), "--rollback", "--gog-only"])
         self.assertEqual(rc, 0)
-        self.assertFalse((self.manager / "disabled_plugins").exists())
-        self.assertFalse((self.manager / "mwmanager_disabled.txt").exists())
+        for name in ("disabled_plugins", "mwmanager_disabled.txt", "mwmanager_conflict_answers.json",
+                     "mwmanager_cell_winners.txt", "mwmanager_rules.txt", "mwmanager_sort_order.txt"):
+            self.assertFalse((self.manager / name).exists())
         history = self.journal.root / "history"
         self.assertTrue(list(history.glob("*-disabled_plugins/Old.esp")))
         self.assertTrue(list(history.glob("*-mwmanager_disabled.txt")))
+        self.assertTrue(list(history.glob("*-mwmanager_conflict_answers.json")))
+        self.assertTrue(list(history.glob("*-mwmanager_rules.txt")))
 
     def test_rollback_never_reaches_outside_the_game_folder(self):
         outside = write(self.game.parent / "outside.txt", b"keep")

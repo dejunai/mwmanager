@@ -1456,9 +1456,11 @@ def _finish_rollback(journal, game_dir, args, plan, summary) -> int:
     removed = journal.cleanup_used_backups(game_dir, plan, apply=True) if plan else []
     archived = journal.archive_ledger()
     manager_dir = journal.root.parent
-    # plugins turned off in the GUI belong to the install that was just rolled back: keep them with its ledger
+    # Decisions and derived order state belong to the install that was just rolled back: keep them with its ledger.
     stamp = archived.stem if archived else f"install-{_dt.datetime.now():%Y%m%d-%H%M%S}"
-    for name in ("disabled_plugins", "mwmanager_disabled.txt"):
+    for name in ("disabled_plugins", "mwmanager_disabled.txt", "mwmanager_conflict_answers.json",
+                 "mwmanager_cell_winners.txt", "mwmanager_rules.txt", "mwmanager_sort_order.txt",
+                 "mwmanager_added_masters.json", "mwmanager_merged.txt", "mwmanager_merge_rebuild.txt"):
         if (manager_dir / name).exists():
             (journal.root / "history").mkdir(parents=True, exist_ok=True)
             os.replace(manager_dir / name, journal.root / "history" / f"{stamp}-{name}")

@@ -174,11 +174,11 @@ def dates_undo_path(_game_dir):
 
 # MWManager's own generated plugins and markers
 PATCH_NAME = "mwmanager - ESM fixes.esp"
-PLACE_PATCH_NAME = "mwmanager PlaceholderCell ESP Patch.esp"
-CELL_WINNER_PATCH = "mwmanager Cell Fixes.esp"
+PLACE_PATCH_NAME = "mwdialog_check PlaceholderCell ESP Patch.esp"
+CELL_WINNER_PATCH = "mwdialog_check Cell Fixes.esp"
 PERFORMER_PATCH = "mwmanager Performers Patch.esp"
-AUTO_MERGE_NAME = "mwmanager AutoMerge.esp"
-MULTI_PATCH_NAME = "mwmanager Multipatch.esp"
+AUTO_MERGE_NAME = "mwdialog_check AutoMerge.esp"
+MULTI_PATCH_NAME = "mwdialog_check Multipatch.esp"
 OUR_PATCHES = (PATCH_NAME, PLACE_PATCH_NAME, MULTI_PATCH_NAME, CELL_WINNER_PATCH, PERFORMER_PATCH)
 _OURS_LOWER = None                              # rebuilt from OUR_PATCHES on first use
 XE_SKY_PLUGIN = "XE Sky Variations.esp"
@@ -201,6 +201,20 @@ DUMMY_MARKER_NIF = "mwmanager_dummy_marker.nif"
 DUMMY_ANIM_NIF = "mwmanager_dummy_anim.nif"
 DUMMY_ICON_DDS = "mwmanager_dummy_icon.dds"
 DUMMY_BIK = "mwmanager_dummy.bik"
+
+_upstream_compute_order = compute_order
+
+
+def compute_order(plugins, rule_sets, current_order):
+    """Keep the generated ESP tail deterministic; absent files are simply omitted."""
+    order, notes = _upstream_compute_order(plugins, rule_sets, current_order)
+    by_name = {name.casefold(): name for name in order}
+    tail = [by_name[name.casefold()] for name in (
+        XE_SKY_PLUGIN, AUTO_MERGE_NAME, CELL_WINNER_PATCH, PLACE_PATCH_NAME, MULTI_PATCH_NAME
+    ) if name.casefold() in by_name]
+    if tail:
+        order = [name for name in order if name not in tail] + tail
+    return order, notes
 
 
 
@@ -829,7 +843,7 @@ CONFLICT_BLACKLIST_DEFAULT = """; mwmanager_conflict_blacklist.txt - plugins tha
 ; mods it patches.
 OAAB_Saplings.esm
 """
-DEFAULT_RULES = f"""; {os.path.basename(RULES_FILE)}: load order rules for mwmanager.py --sort
+DEFAULT_RULES = f"""; {os.path.basename(RULES_FILE)}: your load order rules for mwmanager.py --sort
 ;
 ; The same format as mlox rules (mlox_user.txt / mlox_base.txt). Rules here win over mlox's own:
 ; files are read in this order, and a rule that contradicts an earlier one is skipped.
@@ -845,14 +859,9 @@ DEFAULT_RULES = f"""; {os.path.basename(RULES_FILE)}: load order rules for mwman
 ; One plugin per line; ";" starts a comment. Names are not case-sensitive and may use
 ; the wildcards * and ? and mlox's <VER> (a version number). A plugin always loads after its
 ; masters, and every .esm before every .esp, whatever the rules say.
-
-[NearStart]
-{PATCH_NAME}
-
-[NearEnd]
-{PERFORMER_PATCH}
-{PLACE_PATCH_NAME}
-{MULTI_PATCH_NAME}
+;
+; With no rules, the current install order is preserved wherever masters and mlox allow it.
+; MWManager's ESM fix and generated final patches are positioned by built-in safety rules.
 """
 CORE_GAME_ESMS = ("Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm")
 # Shipped standalone plugins from the Morrowind GOTY Data Files folder. Treat them as normal plugins for

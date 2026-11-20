@@ -61,5 +61,21 @@ class SeveralCoreFoldersTests(unittest.TestCase):
         self.assertFalse(any(mock_fomod._is_hidden_required_option(r) for r in records))
 
 
+class KnownOptionMastersTests(unittest.TestCase):
+    def test_wares_nod_patch_requires_nod_core_even_when_its_header_does_not(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        mod = Path(tmp.name) / "Wares Ultimate-52013-2-1-3"
+        plugin(mod / "Extras" / "10 NOD Patch" / "Wares_NOD.esp", "Wares compatibility patch.")
+
+        missing = mock_fomod._discover(mod, set())[0]
+        self.assertIn("nod - core.esm", missing["targets"])
+        self.assertEqual(missing["missing_masters"], ["nod - core.esm"])
+
+        installed = mock_fomod._discover(mod, {"nod - core.esm"})[0]
+        self.assertIn("nod - core.esm", installed["compatible"])
+        self.assertEqual(installed["missing_masters"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

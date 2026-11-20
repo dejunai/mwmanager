@@ -62,6 +62,13 @@ CHALLENGE_RE = re.compile(r"captcha|verify you are human|are you a robot|access 
 HTML_SCRIPT_STYLE_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.I | re.S)
 
 
+def _known_option_masters(mod_dir: Path, label: str) -> set[str]:
+    """Prerequisites omitted from both the option payload headers and its readme."""
+    package = re.sub(r"[^a-z0-9]+", " ", mod_dir.name.casefold()).strip()
+    option = re.sub(r"[^a-z0-9]+", " ", label.casefold()).strip()
+    return {"nod - core.esm"} if package.startswith("wares ultimate ") and option == "nod patch" else set()
+
+
 def _package_display_name(mod_dir: Path) -> str:
     """Use the processing identity, staged primary master, Vortex name, then the folder name."""
     established = os.environ.get("MWMANAGER_PLUGIN_NAME", "").strip()
@@ -932,8 +939,10 @@ def _discover(mod_dir: Path, installed: set[str]) -> list[dict]:
         targets = masters - base_masters - BASE_GAME_MASTERS
         mentioned = {m.group(0).strip().casefold() for m in PLUGIN_REF_RE.finditer(docs)}
         targets.update(mentioned - base_masters)
+        known_masters = _known_option_masters(mod_dir, label)
+        targets.update(known_masters)
         compatible = sorted(targets & installed)
-        missing_masters = sorted(masters - BASE_GAME_MASTERS - installed)
+        missing_masters = sorted((masters - BASE_GAME_MASTERS | known_masters) - installed)
         normalized_option = re.sub(r"[^a-z0-9]+", " ", f"{label} {path.name}".casefold())
         informational_utility = "tamriel data" in normalized_option and bool(re.search(r"\bhd\b", normalized_option))
         normalized_folder = re.sub(r"[^a-z0-9]+", " ", path.name.casefold()).strip()

@@ -46,12 +46,18 @@ class NearBlocksOrder(unittest.TestCase):
         self.assertLess(order.index("A.esp"), order.index("B.esp"))
         self.assertEqual(notes["cycles"], [("B.esp", "A.esp", "mwmanager_rules.txt:1")])
 
-    def test_shipped_near_end_block_orders_the_patches(self):
-        import mwmanager as m
-        rules = m.parse_rules(str(ROOT / "mwmanager_rules.txt"))[0]
-        self.assertTrue(m.rule_puts_before(rules, "mwmanager Multipatch.esp", "mwmanager Performers Patch.esp"))
-        self.assertTrue(m.rule_puts_before(rules, "mwmanager PlaceholderCell ESP Patch.esp",
-                                           "mwmanager Performers Patch.esp"))
+    def test_generated_tail_is_hardwired_and_conditional(self):
+        tail = ["XE Sky Variations.esp", "mwdialog_check AutoMerge.esp", "mwdialog_check Cell Fixes.esp",
+                "mwdialog_check PlaceholderCell ESP Patch.esp", "mwdialog_check Multipatch.esp"]
+        layout = [("Extra.esm", ["Morrowind.esm"])] + [(name, ["Morrowind.esm"]) for name in
+                  ["Other.esp", "mwmanager - ESM fixes.esp", "mwmanager Performers Patch.esp", *reversed(tail)]]
+        order, _notes = self._sort(layout, [])
+        self.assertEqual(order[2], "mwmanager - ESM fixes.esp")
+        self.assertEqual(order[-5:], tail)
+        self.assertLess(order.index("mwmanager Performers Patch.esp"), order.index("XE Sky Variations.esp"))
+
+        order, _notes = self._sort([item for item in layout if item[0] != tail[2]], [])
+        self.assertEqual(order[-4:], [name for name in tail if name != tail[2]])
 
 
 if __name__ == "__main__":
