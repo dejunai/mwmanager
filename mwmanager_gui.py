@@ -426,6 +426,12 @@ class _ShellProgram:
         self._code = None
 
     @property
+    def pid(self) -> int | None:
+        if self._process is not None:
+            return self._process.pid
+        return int(self._kernel32.GetProcessId(self._handle)) or None if self._handle else None
+
+    @property
     def waitable(self) -> bool:
         return self._process is not None or bool(self._handle) or self._code is not None
 
@@ -443,6 +449,33 @@ class _ShellProgram:
         self._kernel32.CloseHandle(self._handle)
         self._handle = None
         return self._code
+
+
+def _move_left_of(pid: int, beside) -> bool:
+    """Move a program's main window to the left of the Tk window beside; False until that window exists.
+    Both rectangles come from Windows in this process, so DPI scaling cannot skew them."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.WinDLL("user32")
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _param):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd) and not user32.GetWindow(hwnd, 4):  # GW_OWNER
+            found.append(hwnd)
+        return True
+
+    user32.EnumWindows(visit, 0)
+    if not found:
+        return False
+    program, reference = wintypes.RECT(), wintypes.RECT()
+    user32.GetWindowRect(found[0], ctypes.byref(program))
+    user32.GetWindowRect(user32.GetParent(beside.winfo_id()), ctypes.byref(reference))
+    x = max(0, reference.left - (program.right - program.left) - 8)
+    user32.SetWindowPos(found[0], None, x, max(0, reference.top), 0, 0, 0x0001 | 0x0004 | 0x0010)
+    return True
 
 
 def center_window(window, parent, width: int, height: int) -> None:
@@ -4666,7 +4699,6 @@ class ManagerGUI(tk.Tk):
                     reference = tk.Toplevel(dialog)
                     reference.title(reference_title)
                     reference.transient(self)
-                    reference.attributes("-topmost", True)
                     reference.resizable(True, True)
                     body = ttk.Frame(reference, padding=12)
                     body.pack(fill="both", expand=True)
@@ -4685,8 +4717,11 @@ class ManagerGUI(tk.Tk):
                     instruction = "MWManager continues automatically when the program closes."
                     ttk.Label(body, text=instruction, wraplength=560).pack(fill="x", pady=(8, 0))
                     reference.protocol("WM_DELETE_WINDOW", reference.iconify)
-                    center(reference, self, min(680, reference.winfo_screenwidth() - 48),
-                           min(720, reference.winfo_screenheight() - 80))
+                    # Docked at the right edge, the program is moved to its left: side by side, never stacked.
+                    ref_width = min(560, reference.winfo_screenwidth() // 2 - 24)
+                    ref_height = min(720, reference.winfo_screenheight() - 80)
+                    reference.geometry(f"{ref_width}x{ref_height}+"
+                                       f"{reference.winfo_screenwidth() - ref_width - 16}+40")
                     reference.lift()
                     try:
                         if os.name == "nt":
@@ -4698,6 +4733,19 @@ class ManagerGUI(tk.Tk):
                         else:
                             process = subprocess.Popen([path], cwd=str(Path(path).parent), close_fds=True)
                         append_status(f"Opened {Path(path).name}; waiting for it to close…")
+                        program_pid = getattr(process, "pid", None) if process is not None else None
+
+                        def place_program(pid=program_pid, reference=reference, tries=[25]):
+                            tries[0] -= 1
+                            try:
+                                placed = reference.winfo_exists() and _move_left_of(pid, reference)
+                            except (OSError, AttributeError, tk.TclError):
+                                return                      # best effort: an elevated program can refuse the move
+                            if not placed and tries[0] > 0 and reference.winfo_exists():
+                                dialog.after(400, place_program)
+
+                        if program_pid and os.name == "nt":
+                            dialog.after(400, place_program)
                     except OSError as exc:
                         response["error"] = str(exc)
                         reference.destroy()

@@ -524,7 +524,7 @@ MCP_PATCH_GUIDANCE = """MWManager recommends these Morrowind Code Patch selectio
 
 When finished, click “Apply chosen patches” in the MCP interface."""
 
-MGE_GUIDANCE = """MWManager will open MGEXEgui once so the Greatness7 settings TOML can be generated.
+MGE_GUIDANCE = """Set these in MGEXEgui, then save and close it. MWManager continues when it closes.
 
 Recommended starting settings:
 
@@ -543,14 +543,19 @@ In Game tab:
 
 Review the remaining settings for your system, save, and close MGEXEgui when finished."""
 
-MGE_APPLY_QUESTION = """MWManager can apply its recommended MGE XE starting settings for you:
+MGE_APPLY_QUESTION = """Use MWManager's recommended MGE XE settings?
 
+Yes: MWManager writes the settings below. If MGE XE has no settings file (mgeXE.toml) yet, MWManager first opens MGEXEgui for a moment to create it and closes it for you.
 - mgeXE.toml: VSync off, shaders on, crosshair autohide on.
 - Morrowind.ini: frame limiter 300, Allow yes to all, screenshots on, light attenuation Constant 0.382 and Quadratic 2.619 (Linear 0 when per-pixel lighting is on).
+The shader preset (“Very High” with Depth of Field) and “Pause rendering in menus” stay your choice in MGEXEgui later.
 
-The shader preset (“Very High” with Depth of Field) and “Pause rendering in menus” stay your choice in MGEXEgui.
+No: MWManager then offers to open MGEXEgui beside the recommended settings so you can set them yourself."""
 
-Apply them now? No shows the recommendations and opens MGEXEgui."""
+MGE_OPEN_QUESTION = """Open MGEXEgui with MWManager's recommended settings in a window beside it?
+
+Set what you want, then save and close MGEXEgui; MWManager continues when it closes.
+No skips this; you can run MGEXEgui.exe from the game folder at any time."""
 
 MGE_RECOMMENDED_TOML = {"graphics": {"vsync": '"immediate"'}, "render": {"enable_shaders": "true"},
                         "runtime": {"crosshair_autohide": "true"}}
@@ -616,6 +621,33 @@ def apply_recommended_mge_settings(game_dir: Path) -> list[str]:
     except (OSError, tomllib.TOMLDecodeError):
         pass
     return changed + _set_values(Path(game_dir) / "Morrowind.ini", ini, "=", "cp1252")
+
+
+def create_mge_toml(exe: Path, progress, popen=subprocess.Popen, settle: float = 8.0,
+                    close_wait: float = 15.0) -> bool:
+    """Open MGEXEgui just long enough to create mgeXE.toml, then ask it to close as the user would."""
+    toml_path = exe.parent / "mgeXE.toml"
+    progress("Preflight: opening MGEXEgui for a moment so it creates mgeXE.toml; MWManager closes it again.")
+    try:
+        process = popen([str(exe)], cwd=str(exe.parent), close_fds=True)
+    except OSError as exc:
+        progress(f"Preflight: MGEXEgui could not be started: {exc}")
+        return False
+    deadline = time.monotonic() + settle
+    while time.monotonic() < deadline and process.poll() is None and not toml_path.is_file():
+        time.sleep(0.25)
+    if process.poll() is None:
+        # taskkill without /F sends WM_CLOSE, the same as the window's close button, so MGE can save on exit
+        subprocess.run(["taskkill", "/PID", str(process.pid)], capture_output=True, check=False,
+                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        try:
+            process.wait(close_wait)
+        except subprocess.TimeoutExpired:
+            progress("Preflight: MGEXEgui is still open (it may be asking something); close it to continue.")
+            process.wait()
+    if not toml_path.is_file():
+        progress("Preflight: MGEXEgui did not create mgeXE.toml, so only the Morrowind.ini settings are applied.")
+    return toml_path.is_file()
 
 
 def _prereq_ready(key: str, game_dir: Path) -> bool:
@@ -725,12 +757,14 @@ def _post_prerequisite(key: str, game_dir: Path, progress, latest: str | None,
                     if (Path(game_dir) / name).is_file()), None)
         if not exe:
             return True
-        if not progress.ask_yes_no("Apply recommended MGE XE settings", MGE_APPLY_QUESTION):
-            return _run_prereq_program(exe, progress, runner, MGE_GUIDANCE)
+        if not progress.ask_yes_no("MGE XE settings", MGE_APPLY_QUESTION):
+            if progress.ask_yes_no("Open MGE XE", MGE_OPEN_QUESTION):
+                return _run_prereq_program(exe, progress, runner, MGE_GUIDANCE)
+            progress("Preflight: MGE XE settings left as they are.")
+            return True
         toml_path = Path(game_dir) / "mgeXE.toml"
         if not toml_path.is_file():
-            progress("Preflight: MGEXEgui writes mgeXE.toml on its first run; save and close it to continue.")
-            _run_prereq_program(exe, progress, runner)
+            create_mge_toml(exe, progress)
         changed = apply_recommended_mge_settings(game_dir)
         progress("Preflight: recommended MGE XE settings applied"
                  + (f" ({', '.join(changed)})." if changed else "; they were already set."))

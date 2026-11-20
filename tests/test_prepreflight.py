@@ -702,12 +702,12 @@ class PreflightTests(Base):
         game = self.tmp / "game"
         write(game / "Morrowind Code Patch.exe", b"MZ")
         write(game / "MGEXEgui.exe", b"MZ")
-        progress = Progress(yes_no=[True, False])  # declining the MGE apply offer shows guidance and opens the GUI
+        progress = Progress(yes_no=[True, False, True])  # decline the apply offer, then choose to open the GUI
         runner = mock.Mock(return_value=types.SimpleNamespace(returncode=0))
         self.assertTrue(preinstall._post_prerequisite("mcp_beta", game, progress, LATEST, runner=runner))
         self.assertTrue(preinstall._post_prerequisite("mge_xe", game, progress, LATEST, runner=runner))
         mcp_text, mge_text = progress.asked[0][2], "\n".join(progress.lines)
-        self.assertEqual(progress.asked[1][1], "Apply recommended MGE XE settings")
+        self.assertEqual(progress.asked[1][1], "MGE XE settings")
         for text in ("Beta", "Game mechanics", "Over the shoulder 3rd person camera",
                      "NPC AI casts zero cost powers", "Don't loot on dispose", "Level-up skills tooltip",
                      "International", "Bugs", "Apply chosen patches"):
@@ -723,7 +723,7 @@ class PreflightTests(Base):
         game = self.tmp / "game"
         write(game / "Morrowind Code Patch.exe", b"MZ")
         write(game / "MGEXEgui.exe", b"MZ")
-        progress = Progress(yes_no=[True, False])
+        progress = Progress(yes_no=[True, False, True])
         launched = []
 
         def run_with_reference(path, title, guidance):
@@ -738,6 +738,43 @@ class PreflightTests(Base):
         self.assertIn("Apply chosen patches", launched[0][2])
         self.assertIn("frame limiter to 300", launched[1][2])
         self.assertIn("Quadratic 2.619", launched[1][2])
+
+    def test_accepting_without_a_toml_opens_mge_briefly_and_closes_it_for_the_user(self):
+        import functools
+        game = self.tmp / "game"
+        write(game / "MGEXEgui.exe", b"MZ")
+        write(game / "Morrowind.ini", b"[General]\r\n")
+
+        class Mge:                              # writes its TOML when asked to close, like a save on exit
+            pid, code = 4321, None
+
+            def poll(self):
+                return self.code
+
+            def wait(self, timeout=None):
+                write(game / "mgeXE.toml", "[graphics]\r\nvsync = \"one\"\r\n")
+                self.code = 0
+                return 0
+
+        popen = mock.Mock(return_value=Mge())
+        progress = Progress(yes_no=[True])
+        quick = functools.partial(preinstall.create_mge_toml, popen=popen, settle=0.2)
+        with mock.patch.object(preinstall, "create_mge_toml", quick), \
+                mock.patch.object(preinstall.subprocess, "run") as taskkill:
+            self.assertTrue(preinstall._post_prerequisite("mge_xe", game, progress, LATEST))
+        self.assertEqual(popen.call_args.kwargs["cwd"], str(game))
+        self.assertEqual(taskkill.call_args.args[0], ["taskkill", "/PID", "4321"])     # a polite close, no /F
+        self.assertIn(b'vsync = "immediate"', (game / "mgeXE.toml").read_bytes())
+        self.assertIn("closes it again", "\n".join(progress.lines))
+
+    def test_declining_both_mge_questions_moves_on_without_opening_anything(self):
+        game = self.tmp / "game"
+        write(game / "MGEXEgui.exe", b"MZ")
+        progress = Progress(yes_no=[False, False])
+        runner = mock.Mock(side_effect=AssertionError("MGEXEgui must not open"))
+        self.assertTrue(preinstall._post_prerequisite("mge_xe", game, progress, LATEST, runner=runner))
+        self.assertEqual([item[1] for item in progress.asked], ["MGE XE settings", "Open MGE XE"])
+        self.assertFalse((game / "mgeXE.toml").exists())
 
     def test_accepting_the_mge_offer_writes_recommended_settings_and_keeps_the_rest(self):
         game = self.tmp / "game"
