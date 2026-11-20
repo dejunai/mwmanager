@@ -343,9 +343,11 @@ class TotspOptionTests(unittest.TestCase):
         with mock.patch("sys.stdout", new_callable=io.StringIO) as said:
             kept = mock_fomod._drop_superseded_choices(self.mod, records)
         self.assertEqual([r["key"] for r in kept], ["boats"])
-        self.assertIn("TOTSP_Patch_for_Purists_5.0.6.esp in this package is a newer version", said.getvalue())
+        self.assertIn("TOTSP_Patch_for_Purists_5.0.6.esp in this install is a newer version", said.getvalue())
         self.mod.joinpath("TOTSP_Patch_for_Purists_5.0.6.esp").unlink()   # without the newer one: offered
         self.assertEqual(len(mock_fomod._drop_superseded_choices(self.mod, records)), 2)
+        self.assertEqual([r["key"] for r in mock_fomod._drop_superseded_choices(
+            self.mod, records, {"TOTSP_Patch_for_Purists_5.0.6.esp"})], ["boats"])
         self.assertEqual(mock_fomod._plugin_version("TOTSP_Patch_for_Purists_4.0.2.esp"),
                          ("totsp_patch_for_purists", (4, 0, 2)))
 

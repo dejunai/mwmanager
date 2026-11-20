@@ -27,16 +27,26 @@ Active Plugin Status:
   • The Lost Heir: %s
   • Mabrigash Distribution: %s
   • Personal Effects: %s
-  • No Accidental Theft: %s]],
+  • No Accidental Theft: %s
+  • Cave Drips: %s
+  • Yet Another Better Sounds Patch: %s
+  • Expanded Sounds: %s
+  • Clean Tales of Seyda Neen: %s
+  • Trainer Log: %s]],
     config.isMcaActive() and "Active" or "Not Active",
     config.isEbonheartUnderworksActive() and "Active" or "Not Active",
-    config.isPsGuardActive() and "Active" or "Not Active",
+    config.isPAndSActive() and "Active" or "Not Active",
     config.isYsmirActive() and "Active" or "Not Active",
     config.isFriendsAndFrensActive() and "Active" or "Not Active",
     config.isLostHeirActive() and "Active" or "Not Active",
     config.isMabrDistActive() and "Active" or "Not Active",
     config.isPersonalEffectsActive() and "Active" or "Not Active",
-    config.isNoAccidentalTheftActive() and "Active" or "Not Active"),
+    config.isNoAccidentalTheftActive() and "Active" or "Not Active",
+    config.isCaveDripsActive() and "Active" or "Not Active",
+    config.isSwampSoundsActive() and "Active" or "Not Active",
+    config.isExpandedSoundsActive() and "Active" or "Not Active",
+    config.isTalesOfSeydaNeenActive() and "Active" or "Not Active",
+    config.isTrainerLogActive() and "Active" or "Not Active"),
 })
 
 -- SECTION 1: FRIENDS & FRENS (JIUB COMPANION DELAY)
@@ -80,12 +90,12 @@ lostHeirCategory:createYesNoButton({
 })
 
 -- SECTION 3: PRIVILEGES & SERVICES
-local psCategory = page:createCategory(string.format("Privileges & Services: Guard Cell Fix%s", getStatusText(config.isPsGuardActive())))
+local psCategory = page:createCategory(string.format("Privileges & Services: Guard & Topic Fixes%s", getStatusText(config.isPAndSActive())))
 
 psCategory:createYesNoButton({
-    label = "Enable Guard Cell Black Screen Fix",
-    description = "Dynamically resolves non-vanilla interior cells to architectural guard factions to prevent permanent black screen fadeouts.",
-    variable = mwse.mcm.createTableVariable({ id = "psGuardFixEnabled", table = config }),
+    label = "Enable Privileges & Services Fixes",
+    description = "Fixes the guard cell black screen fadeout in non-vanilla interiors and suppresses the rogue °(target) topic on ordinary NPCs.",
+    variable = mwse.mcm.createTableVariable({ id = "pAndSFixesEnabled", table = config }),
 })
 
 -- SECTION 4: YARR - YSMIR COMBAT SHIELD
@@ -208,7 +218,7 @@ local natCategory = page:createCategory(string.format("No Accidental Theft: Book
 
 natCategory:createYesNoButton({
     label = "Enable Book Reading While Standing",
-    description = "Allows reading owned books and documents in the world without sneaking. When reading an owned book while standing, the Take button is disabled/greyed out to prevent accidental stealing.",
+    description = "Allows reading owned books and documents in the world without sneaking. When reading an owned book while standing, the Take button is hidden or tinted red.",
     variable = mwse.mcm.createTableVariable({ id = "noAccidentalTheftBookFixEnabled", table = config }),
 })
 
@@ -216,10 +226,88 @@ natCategory:createDropdown({
     label = "Take Button Appearance for Owned Books",
     description = "Choose how the Take button appears when reading an owned book while standing (not sneaking):\n• Disabled / Red Tint: Button is greyed out, red-tinted, unclickable, and shows an informational tooltip.\n• Hidden / Missing: Button is completely removed from the reading window.",
     options = {
-        { label = "Disabled & Red Tint (with Tooltip)", value = "disabled" },
-        { label = "Hidden / Missing", value = "hidden" },
+        { label = "Red tint", value = "disabled" },
+        { label = "Hidden", value = "hidden" },
     },
     variable = mwse.mcm.createTableVariable({ id = "ownedBookTakeMode", table = config }),
+})
+
+-- SECTION 10: LOOPING SOUND SCRIPTS
+local dripCategory = page:createCategory(string.format("Cave Drips: Drip Sound%s",
+    getStatusText(config.isCaveDripsActive())))
+
+dripCategory:createYesNoButton({
+    label = "Start Each Drip Loop Once",
+    description = "Runs Cave Drips' R0_Sound_Cave_Drip_scr in Lua. The engine can report the drip loop as not playing "
+        .. "while it plays, so the original script restarts it every frame (mwsoundguard RUNAWAY entries). With this "
+        .. "on, each drip starts its loop once while it is loaded; the drip visuals are placed as before. "
+        .. "Takes effect after a restart.",
+    variable = mwse.mcm.createTableVariable({ id = "caveDripSoundEnabled", table = config }),
+})
+
+local swampCategory = page:createCategory(string.format("Yet Another Better Sounds Patch: Swamp Sounds%s",
+    getStatusText(config.isSwampSoundsActive())))
+
+swampCategory:createYesNoButton({
+    label = "One Swamp Loop Per Sound Source",
+    description = "Runs SwampSoundScript in Lua with the same day, night and weather choices. The original starts "
+        .. "a new random swamp loop every frame because the engine reports the playing one as stopped. With this "
+        .. "on, each swamp sound source keeps one loop until day turns to night (or back) or the weather turns bad. "
+        .. "Takes effect after a restart.",
+    variable = mwse.mcm.createTableVariable({ id = "swampSoundEnabled", table = config }),
+})
+
+local expandedCategory = page:createCategory(string.format("Expanded Sounds: Water and Boat Loops%s",
+    getStatusText(config.isExpandedSoundsActive())))
+
+expandedCategory:createYesNoButton({
+    label = "Start Expanded Sounds Loops Once",
+    description = "Runs Float and Sound_Boat_Creak in Lua, preserving Float's boat rocking while starting its water "
+        .. "loop and each boat-creak loop only once per loaded source. Takes effect after a restart.",
+    variable = mwse.mcm.createTableVariable({ id = "expandedSoundsEnabled", table = config }),
+})
+
+-- SECTION 11: CLEAN TALES OF SEYDA NEEN
+local talesCategory = page:createCategory(string.format("Clean Tales of Seyda Neen: Dialogue Fix%s",
+    getStatusText(config.isTalesOfSeydaNeenActive())))
+
+talesCategory:createYesNoButton({
+    label = "Filter 'Illegible Handwriting' Topic",
+    description = "Hides the 'illegible handwriting' topic from NPCs once the quest 'den_bottle' is completed (journal >= 50) or if the player does not have the note.",
+    variable = mwse.mcm.createTableVariable({ id = "talesHandwritingFixEnabled", table = config }),
+})
+
+-- SECTION 12: TRAINER LOG
+local trainerCategory = page:createCategory(string.format("Trainer Log: Auto-Unlock Topics%s",
+    getStatusText(config.isTrainerLogActive())))
+
+trainerCategory:createYesNoButton({
+    label = "Enable Training Topic Auto-Unlock",
+    description = "Automatically unlocks all 27 'Training - <Skill>' topics when speaking to any training service provider or on save load, bypassing the Caius Cosades / Socucius Ergalla dialogue prerequisites.",
+    variable = mwse.mcm.createTableVariable({ id = "trainerLogUnlockEnabled", table = config }),
+})
+
+trainerCategory:createYesNoButton({
+    label = "Unlock Immediately on Load",
+    description = "Adds the training topics immediately when loading a saved game rather than waiting until talking to a trainer NPC.",
+    variable = mwse.mcm.createTableVariable({ id = "trainerLogAutoUnlockOnLoad", table = config }),
+})
+
+-- SECTION 13: DOOR LOCK COMPATIBILITY
+local doorCategory = page:createCategory(string.format("Door Locks: Compatibility%s",
+    getStatusText(config.isDoorLockSuiteInstalled())))
+
+doorCategory:createYesNoButton({
+    label = "Coordinate Door Locking and Lockpicking",
+    description = "Locks an NPC-owned interior door when its owner is absent. Standing at a locked door plays "
+        .. "the locked-door sound; sneak to pass it to Modern Lockpicking. Owned unlocked doors also require sneaking.",
+    variable = mwse.mcm.createTableVariable({ id = "doorLockCompatibilityEnabled", table = config }),
+})
+
+doorCategory:createYesNoButton({
+    label = "Show 'The Door is Locked' Notification",
+    description = "Also shows a visual notification when a locked door is tried while standing.",
+    variable = mwse.mcm.createTableVariable({ id = "doorLockedNotification", table = config }),
 })
 
 mwse.mcm.register(template)

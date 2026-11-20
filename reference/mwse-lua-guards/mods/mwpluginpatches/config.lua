@@ -18,6 +18,21 @@ function config.isPsGuardActive()
         or tes3.findGlobal("ABM_ll_GuardCallCell") ~= nil
         or tes3.getScript("ABM_ll_DetectPCCrimeScript") ~= nil
 end
+config.isPAndSActive = config.isPsGuardActive
+
+function config.isTalesOfSeydaNeenActive()
+    return tes3.isModActive("Clean Tales of Seyda Neen.esp")
+        or tes3.isModActive("Tales of Seyda Neen.esp")
+        or tes3.isModActive("Tales of Seyda Neen.ESP")
+        or tes3.getObject("den_message_bottle2") ~= nil
+end
+
+function config.isTrainerLogActive()
+    return tes3.isModActive("Trainer Log.esp")
+        or tes3.isModActive("Trainer Log - AEA.esp")
+        or tes3.isModActive("Trainer Log - AEA.ESP")
+        or tes3.findDialogue("Training - Block") ~= nil
+end
 
 function config.isYsmirActive()
     return tes3.isModActive("YARR - yet another race revamp v1.2.ESP")
@@ -58,17 +73,44 @@ function config.isNoAccidentalTheftActive()
         or tes3.isModActive("accidentalTheftProtection")
 end
 
+function config.isCaveDripsActive()
+    return tes3.isModActive("Cave Drips.ESP") or tes3.getScript("R0_Sound_Cave_Drip_scr") ~= nil
+end
+
+function config.isSwampSoundsActive()
+    return tes3.isModActive("Yet Another Better Sounds Patch.esp") or tes3.getScript("SwampSoundScript") ~= nil
+end
+
+function config.isExpandedSoundsActive()
+    return tes3.isModActive("Expanded Sounds.esp")
+end
+
+function config.isDoorLockSuiteInstalled()
+    local function installed(path)
+        return tes3.getFileExists("MWSE/mods/" .. path) or tes3.getFileExists("Data Files/MWSE/mods/" .. path)
+    end
+    return installed("abot/Door Locks/main.lua")
+        and installed("mer/accidentalTheftProtection/main.lua")
+        and installed("tauer/modern-lockpicking/main.lua")
+end
+
 -- Resolve dynamic defaults based on whether target plugin is active in load order
 local function getDynamicDefaults()
     local mca = config.isMcaActive()
     local eu = config.isEbonheartUnderworksActive()
-    local ps = config.isPsGuardActive()
+    local ps = config.isPAndSActive()
     local ysmir = config.isYsmirActive()
     local fnf = config.isFriendsAndFrensActive()
     local lostHeir = config.isLostHeirActive()
     local mabr = config.isMabrDistActive()
     local pe = config.isPersonalEffectsActive()
     local nat = config.isNoAccidentalTheftActive()
+    local drips = config.isCaveDripsActive()
+    local swamp = config.isSwampSoundsActive()
+    local expandedSounds = config.isExpandedSoundsActive()
+    local tales = config.isTalesOfSeydaNeenActive()
+    local trainerLog = config.isTrainerLogActive()
+    local doorLocks = config.isDoorLockSuiteInstalled()
 
     return {
         -- AutoStartup: Morrowind Comes Alive
@@ -87,8 +129,16 @@ local function getDynamicDefaults()
         euRebirth = false,
         euThiefBranch = false,
 
-        -- Privileges & Services Guard Cell Fix
+        -- Privileges & Services Fixes
+        pAndSFixesEnabled = ps,
         psGuardFixEnabled = ps,
+
+        -- Clean Tales of Seyda Neen: Illegible Handwriting filter
+        talesHandwritingFixEnabled = tales,
+
+        -- Trainer Log: Auto-Unlock Training Topics
+        trainerLogUnlockEnabled = trainerLog,
+        trainerLogAutoUnlockOnLoad = true,
 
         -- Ysmir Combat Shield (YARR)
         ysmirShieldEnabled = ysmir,
@@ -110,7 +160,16 @@ local function getDynamicDefaults()
 
         -- No Accidental Theft: Allow Reading Owned Books while Standing
         noAccidentalTheftBookFixEnabled = nat,
-        ownedBookTakeMode = "disabled", -- "disabled" (red/greyed out with tooltip) or "hidden"
+        ownedBookTakeMode = "hidden", -- "hidden" (no Take button) or "disabled" (Take button tinted red)
+
+        -- Looping sound scripts the engine restarts every frame (mwsoundguard RUNAWAY entries)
+        caveDripSoundEnabled = drips,
+        swampSoundEnabled = swamp,
+        expandedSoundsEnabled = expandedSounds,
+
+        -- Coordinate owned doors, sneak-to-steal, and Modern Lockpicking activation.
+        doorLockCompatibilityEnabled = doorLocks,
+        doorLockedNotification = false,
     }
 end
 

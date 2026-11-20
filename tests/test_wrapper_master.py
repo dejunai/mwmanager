@@ -18,7 +18,7 @@ class WrapperMasterTests(unittest.TestCase):
             (mod / "Optional" / "Extra.esm").write_bytes(b"")
             labels = [r["label"] for r in mock_fomod._discover_plugin_choices(mod, set())]
             self.assertNotIn(str(Path("Data Files") / "Sound_Data.esm"), labels)
-            self.assertIn(str(Path("Optional") / "Extra.esm"), labels)
+            self.assertIn("Optional", labels)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 local config = require("mwpluginpatches.config")
 
-local psguardfix = {}
+local pandsfixes = {}
 
 local SCRIPTS = {
     "ABM_ll_DetectPCCrimeScript",
@@ -117,7 +117,12 @@ local function guardNearby()
 end
 
 local function fadeBackIn()
-    tes3.fadeIn({ fader = tes3.worldController.transitionFader, duration = 0.3 })
+    local f = tes3.worldController.transitionFader
+    if f and f.value and f.value > 0.05 then
+        tes3.fadeIn({ fader = f, duration = 0.3 })
+        return true
+    end
+    return false
 end
 
 local function check()
@@ -148,14 +153,13 @@ local function check()
                 end
             })
         elseif wasRunning[name] and not running then
-            -- script finished: a guard should be here and fading us back in
+            -- script finished: a guard should be here; if left faded out, recover
             timer.start({
                 type = timer.real,
                 duration = 1.0,
                 callback = function()
-                    if not guardNearby() then
+                    if not guardNearby() and fadeBackIn() then
                         mwse.log("[mwpluginpatches] %s ended with no guard; fading in", name)
-                        fadeBackIn()
                     end
                 end
             })
@@ -174,32 +178,48 @@ local function onInfoFilter(e)
                 e.passes = false
                 return false
             end
+            -- Must be speaking to a P&S companion/guard if target selection is not active
+            local ref = e.reference
+            if ref and targetVal <= 0 then
+                local obj = ref.object.baseObject or ref.object
+                local sId = (obj.script and obj.script.id or ""):lower()
+                local oId = (obj.id or ""):lower()
+                if not (sId:find("abm_") or sId:find("companion") or oId:find("abm_")) then
+                    e.passes = false
+                    return false
+                end
+            end
         end
     end
 end
 
-function psguardfix.init()
-    if not config.psGuardFixEnabled or not config.isPsGuardActive() then
+function pandsfixes.init()
+    if not config.pAndSFixesEnabled or not config.isPAndSActive() then
         return
     end
 
+    -- MWSE cancels every timer just before `loaded`, so it is started again there
+    local function startCheck()
+        timer.start({
+            type = timer.real,
+            duration = 0.35,
+            iterations = -1,
+            persist = false,
+            callback = function()
+                if tes3.player then check() end
+            end
+        })
+    end
+    startCheck()
+
     event.register(tes3.event.loaded, function()
         wasRunning = {}
+        startCheck()
     end)
 
     event.register(tes3.event.infoFilter, onInfoFilter)
 
-    timer.start({
-        type = timer.real,
-        duration = 0.35,
-        iterations = -1,
-        persist = false,
-        callback = function()
-            if tes3.player then check() end
-        end
-    })
-
     mwse.log("[mwpluginpatches] Privileges & Services guard call, fade, and target-topic filter active.")
 end
 
-return psguardfix
+return pandsfixes

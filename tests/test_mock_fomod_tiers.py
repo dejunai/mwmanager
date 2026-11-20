@@ -48,6 +48,20 @@ class TierTests(unittest.TestCase):
     def test_numbered_install_step_reaches_the_option_it_names(self):
         self.assertIn("if you use Big Island", self.text["01 Patch Big Island"])
 
+    def test_numbered_option_without_dash_excludes_fuzzy_package_text(self):
+        text = """Warsified mods and the plugins of this archive add items everywhere.
+
+00 Core - required
+13 PC plugins - requires CYR_MAIN - gives wares lists to PC npcs, traders, containers
+"""
+        folder = r"Extras\wares_data\13 PC plugins"
+        excerpts = mock_fomod._option_excerpts(text, options(
+            (r"Extras\wares_data\00 Core", 0, "Core", []),
+            (folder, 13, "PC plugins", []),
+        ))
+        self.assertEqual(excerpts[folder],
+                         "13 PC plugins - requires CYR_MAIN - gives wares lists to PC npcs, traders, containers")
+
     def test_quoted_names_and_number_ranges(self):
         self.assertIn("adds music to taverns", self.text["03 Tavern Sounds"])
         self.assertIn("A few texture varieties", self.text["04 Example Textures 512"])

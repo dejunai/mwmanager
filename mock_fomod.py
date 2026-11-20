@@ -620,7 +620,7 @@ def _line_tier(line: str, keys: dict) -> tuple[int, str] | None:
         return _TIER_SCORE["plugin"], "plugin"
     words = set(re.findall(r"[a-z0-9]{3,}", line))
     if number is not None:
-        lead = re.match(r"[\[(]?(\d{1,3})[\])]?\s*[-:.)]", line)
+        lead = re.match(r"[\[(]?(\d{1,3})[\])]?(?:\s*[-:.)]\s*|\s+)", line)
         span = re.match(r"(\d{1,3})\s*-\s*(\d{1,3})\s*[-:]", line)
         if lead and int(lead.group(1)) == number and (
                 (keys["padded"] and lead.group(1).startswith("0")) or keys["tokens"] & words):
@@ -692,6 +692,8 @@ def _option_excerpts(text: str, options: list[dict]) -> dict[str, str]:
     for n, option in enumerate(options):
         hits = sorted(((score, index, tier) for index, owned in owners.items()
                        for score, owner, tier in owned if owner == n), key=lambda h: (-h[0], h[1]))
+        if hits and hits[0][0] >= _TIER_SCORE["number"]:
+            hits = [hit for hit in hits if hit[0] >= _TIER_SCORE["number"]]
         chunks, used = [], set()
         for _score, index, tier in hits[:4]:
             if index in used:
@@ -1020,15 +1022,14 @@ def _plugin_version(name: str) -> tuple[str, tuple[int, ...]] | None:
     return (match.group(1).casefold(), tuple(int(n) for n in match.group(2).split("."))) if match else None
 
 
-def _drop_superseded_choices(mod_dir: Path, records: list[dict]) -> list[dict]:
-    """Leave out an optional choice whose every plugin is an older version of a plugin this package has already
-    (TOTSP's "Patch for Purists 4.0.2" once its own TOTSP_Patch_for_Purists_5.0.6.esp is in place)."""
+def _drop_superseded_choices(mod_dir: Path, records: list[dict], available_plugins=()) -> list[dict]:
+    """Leave out an optional choice whose every plugin is older than an available plugin."""
     newest: dict[str, tuple[tuple[int, ...], str]] = {}
     try:
         present = [p.name for p in mod_dir.iterdir() if p.is_file() and p.suffix.casefold() in PLUGIN_EXTS]
     except OSError:
         present = []
-    for name in present:
+    for name in list(present) + list(available_plugins):
         found = _plugin_version(name)
         if found and found[1] > newest.get(found[0], ((), ""))[0]:
             newest[found[0]] = (found[1], name)
@@ -1042,7 +1043,7 @@ def _drop_superseded_choices(mod_dir: Path, records: list[dict]) -> list[dict]:
             kept.append(record)
             continue
         print(f"  {mod_dir.name}: not offering '{record.get('label') or record['key']}': "
-              f"{', '.join(sorted(set(newer)))} in this package is a newer version of it.", flush=True)
+              f"{', '.join(sorted(set(newer)))} in this install is a newer version of it.", flush=True)
     return kept
 
 
@@ -1091,7 +1092,7 @@ def _discover_plugin_choices(mod_dir: Path, installed: set[str],
                                "group_key": "nested-plugin-files",
                                "group_label": "Optional nested ESP/ESM files",
                                "selection_type": "SelectAny", "path": path, "number": 700,
-                               "label": rel, "required": False, "always_optional": True,
+                               "label": relative.parent.name, "required": False, "always_optional": True,
                                "targets": sorted(targets), "compatible": sorted(targets & installed),
                                "missing_masters": sorted(targets - installed),
                                "docs": _relevant_doc_excerpt(
@@ -2722,7 +2723,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
                    else _discover(mod_dir, installed))
         records.extend(_discover_plugin_choices(mod_dir, installed, _represented_option_sources(records)))
         records.extend(_companion_records(mod_dir))
-        records = _drop_superseded_choices(mod_dir, records)
+        records = _drop_superseded_choices(mod_dir, records, installed)
         _mark_grass_options(records, mod_dir, data_files)    # always shown; ticked only for a known groundcover
         held = set(entry.get("held", []))
         pending = [r for r in records if set(r["targets"]) & newly_relevant and r["key"] not in selected]
@@ -2794,7 +2795,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             # automatically and _show_selector can return without opening a window.
             records[0]["required"] = True
         records.extend(_companion_records(mod_dir))
-        records = _drop_superseded_choices(mod_dir, records)
+        records = _drop_superseded_choices(mod_dir, records, installed)
         _mark_grass_options(records, mod_dir, data_files)    # always shown; ticked only for a known groundcover
         if not records:
             continue
