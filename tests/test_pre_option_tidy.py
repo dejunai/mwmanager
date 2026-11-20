@@ -387,6 +387,25 @@ class OptionFileSpeedTests(unittest.TestCase):
             self.assertLess(len(mkdirs), 5)                   # was 1 per file
 
 
+class ExecutablesTests(unittest.TestCase):
+    def test_tidy_moves_programs_and_scripts_to_off_executables(self):
+        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        mod = Path(tmp.name).resolve() / "staging" / "Tamriel Data"
+        for rel in ("Tamriel_Data.esm", "Docs/tamriel_data/MWLathe.exe", "Docs/tamriel_data/readme.txt",
+                    "Textures/tool.bat", "MWSE/mods/td/main.lua"):
+            (mod / rel).parent.mkdir(parents=True, exist_ok=True)
+            (mod / rel).write_bytes(b"x")
+        plan = ext.plan_mod(str(mod))
+        moved = {os.path.relpath(s, mod): os.path.relpath(d, mod) for s, d, _why in plan if d}
+        owner = ext.package_name(str(mod))
+        self.assertEqual(moved[os.path.join("Docs", "tamriel_data", "MWLathe.exe")],
+                         os.path.join("Off", owner, "Executables", "Docs", "tamriel_data", "MWLathe.exe"))
+        self.assertEqual(moved[os.path.join("Textures", "tool.bat")],
+                         os.path.join("Off", owner, "Executables", "Textures", "tool.bat"))
+        self.assertNotIn(os.path.join("MWSE", "mods", "td", "main.lua"), moved)       # Lua is no program
+
+
 class SoundsFolderTests(unittest.TestCase):
     def test_a_misnamed_sounds_folder_is_renamed_and_reported(self):
         tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)

@@ -266,6 +266,23 @@ class Companions(unittest.TestCase):
         self.assertTrue((package / "Grass" / "Rem-TOTSP.esp").is_file())
         self.assertFalse((package / "Rem-TOTSP.esp").exists())
 
+    def test_a_companion_row_gets_no_executable_warning_from_its_package(self):
+        import tkinter as tk
+        package = self.root / "Tamriel Data"
+        (package / "Docs").mkdir(parents=True)
+        (package / "Docs" / "MWLathe.exe").write_bytes(b"MZ")
+        records = [{"key": "companion:part1.7z", "path": None, "number": 950, "label": "Part 1",
+                    "required": False, "core_bundle": False, "has_plugin_payload": False,
+                    "has_master_payload": False, "informational_utility": False, "targets": [], "compatible": [],
+                    "missing_masters": [], "docs": "", "mod_dir": package, "badges": [], "outputs": set(),
+                    "group_key": "companion:voice", "group_label": "Voice packs", "selection_type": "SelectAny"}]
+        with mock.patch.object(tk.Tk, "mainloop", lambda window: window.destroy()),                 mock.patch("mwmanager_dialogs._prompt", return_value=True):
+            try:
+                mock_fomod._show_selector("Tamriel Data", records, set(), set())
+            except tk.TclError as exc:
+                self.skipTest(f"Tk unavailable: {exc}")
+        self.assertNotIn("utility_folder", records[0])
+
     def test_exclusive_and_required_groups_get_no_select_all_box(self):
         import tkinter as tk
         from tkinter import ttk

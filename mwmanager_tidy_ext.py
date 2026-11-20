@@ -36,6 +36,8 @@ SUPPORT_DIRS = {"mwse", "mge3", "shaders", "grass", "mcpatch", "fomod"}
 MISNAMED_DIRS = {"sounds": "Sound", "splashes": "Splash", "texture": "Textures", "mesh": "Meshes",
                  "icon": "Icons", "videos": "Video", "bookarts": "BookArt", "musics": "Music"}
 PACKING_MARK = "packing error: "
+# programs, libraries and scripts: never deployed into Data Files (MWLathe.exe in Tamriel Data's Docs)
+EXECUTABLE_EXTS = {".exe", ".dll", ".asi", ".bat", ".cmd", ".ps1", ".vbs", ".py", ".jar", ".msi", ".com", ".scr"}
 
 
 def misnamed_reason(folder):
@@ -525,6 +527,16 @@ def plan_mod(mod_dir):
                 move(source, os.path.join(mod_dir, "Off", off_owner, "LuaRepairs", *relative),
                      "migrate Lua repair original under Off/<plugin name>/LuaRepairs")
         moves.append((legacy_lua_backup, None, "remove the emptied legacy LuaRepair folder"))
+
+    # Programs, libraries and scripts anywhere the package deploys from (Docs too) -> Off\<package>\Executables.
+    # A package with one at its root installs into the game folder and was left alone above.
+    for base, dirs, files in os.walk(mod_dir):
+        dirs[:] = [d for d in dirs if d.casefold() not in {"off", "extras", "fomod"}]
+        for filename in sorted(files, key=str.casefold):
+            if os.path.splitext(filename)[1].casefold() in EXECUTABLE_EXTS:
+                source = os.path.join(base, filename)
+                move(source, os.path.join(mod_dir, "Off", off_owner, "Executables", os.path.relpath(source, mod_dir)),
+                     "program, library or script -> Off\\<package>\\Executables (never deployed into Data Files)")
 
     # Search nested BAIN/FOMOD and Data Files layouts too. Groundcover ESPs belong
     # in this mod's Grass folder so MGE XE can find them; they are not game plugins.

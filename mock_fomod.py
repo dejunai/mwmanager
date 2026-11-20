@@ -1493,6 +1493,8 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         folder = source if isinstance(source, Path) and source.is_dir() else \
                  source.parent if isinstance(source, Path) else Path(item.get("mod_dir", "."))
         item["_inspect_folder"] = folder
+        if not isinstance(source, Path):
+            continue                     # a companion download: the package's own tools are not its files
         scan_key = str(folder).casefold()
         if scan_key not in utility_scan_cache:
             descendants = list(_safe_rglob(folder))
