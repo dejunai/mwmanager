@@ -572,7 +572,7 @@ def package_has_live_deployment(package: Path, data_dir: Path) -> bool:
         target = (data_dir.parent / relative
                   if relative.parts[0].casefold() in GAME_ROOT_FOLDERS
                   else data_dir / source.name
-                  if source.suffix.casefold() in {".esm", ".esp", ".bsa"}
+                  if source.suffix.casefold() in {".esm", ".esp", ".bsa"} and relative.parts[0].casefold() != "grass"
                   else data_dir / relative)
         if not target.is_file():
             continue
@@ -874,9 +874,11 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
                     rel = _data_relative(package, source)
                     if not rel.parts:
                         continue
-                    # Plugins and archives must live at the Data Files root even if tidy left them nested.
+                    # Plugins and archives must live at the Data Files root even if tidy left them nested - but
+                    # not MGE XE grass plugins: they go to Data Files\Grass, where the game never loads them
                     target = (data_dir.parent / rel if rel.parts[0].casefold() in GAME_ROOT_FOLDERS
                               else data_dir / filename if source.suffix.casefold() in {".esm", ".esp", ".bsa"}
+                              and rel.parts[0].casefold() != "grass"
                               else data_dir / rel)
                     target_key = os.path.normcase(str(target))
                     if target_key in batch_targets:

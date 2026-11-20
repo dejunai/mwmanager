@@ -2203,7 +2203,97 @@ def _data_root(folder: Path) -> Path:
         folder = children[0]
 
 
-def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str]) -> None:
+def _is_grass_plugin(path: Path) -> bool:
+    """An MGE XE groundcover plugin (vortex_tidy's test: only grass statics placed in cells)."""
+    if Path(path).suffix.casefold() != ".esp":
+        return False
+    try:
+        from vortex_tidy import is_grass_plugin
+    except ImportError:
+        return False
+    return is_grass_plugin(str(path))
+
+
+def _grass_installed(name: str, data_files: Path | None) -> bool:
+    r"""A plugin of that groundcover mod is already in Data Files\Grass."""
+    from needed_mods import names_mod
+    grass = Path(data_files) / "Grass" if data_files else None
+    try:
+        return bool(grass and grass.is_dir() and any(names_mod(f"{name} (mod)", p.stem) for p in grass.iterdir()))
+    except OSError:
+        return False
+
+
+def _option_plugins(record: dict) -> list[Path]:
+    payload = record.get("all_payload_files") or record.get("payload_files")
+    if payload is None and record.get("path"):
+        payload = _payload_files(record)
+    return [Path(src) for src in (payload or {}).values() if Path(src).suffix.casefold() in PLUGIN_EXTS]
+
+
+def _mark_grass_options(records: list[dict], mod_dir: Path, data_files: Path | None = None) -> None:
+    """An option whose plugins are all MGE XE grass plugins goes under its own heading, ticked only when the
+    groundcover it is made for is staged ("Remiros' Groundcover for TOTSP" needs Remiros' Groundcover)."""
+    for record in records:
+        plugins = _option_plugins(record)
+        if not plugins or not all(_is_grass_plugin(p) for p in plugins):
+            continue
+        name = re.split(r"\s+for\s+", str(record.get("label") or ""), maxsplit=1, flags=re.I)[0].strip()
+        present = bool(name) and (_mod_is_staged(f"{name} (mod)", mod_dir) or _grass_installed(name, data_files))
+        record.update(group_key="grass", group_label="Grass (MGE XE groundcover)", selection_type="SelectAny",
+                      recommended=present, required=False, compatible=[], always_optional=not present)
+        note = (f"MGE XE grass plugin: read by MGE XE's distant land generator from Data Files\\Grass, never "
+                f"loaded by the game. For {name}, which is "
+                + ("staged, so it is chosen." if present else "not staged: choose it only if you will install it. "
+                   "Not chosen, it stays in the package's Extras and is never deployed."))
+        record["docs"] = note + ("\n\n" + record["docs"] if record.get("docs") else "")
+
+
+def _numbered_folders(root: Path, record: dict, mod_dir: Path) -> list[dict]:
+    """A freshly extracted companion's top-level numbered folders ("010 HD Worldspace", "012 Remiros'
+    Groundcover for TOTSP"): one option each; "0" folders are its core and always go in."""
+    records = []
+    for folder in sorted((p for p in root.iterdir() if p.is_dir()), key=lambda p: p.name.casefold()):
+        match = OPTION_RE.match(folder.name)
+        if not match:
+            continue
+        number = int(match.group(1))
+        records.append({"key": "companion-option:" + folder.name.casefold(), "label": match.group(2).strip(),
+                        "number": number, "path": folder, "required": number == 0,
+                        "group_key": "companion-options", "group_label": record.get("label") or root.name,
+                        "selection_type": "SelectAny", "targets": [], "compatible": [], "missing_masters": [],
+                        "docs": "", "mod_dir": mod_dir, "outputs": set(), "badges": []})
+    return records
+
+
+def _companion_options(root: Path, record: dict, mod_dir: Path, output_dir, installed: set) -> dict | None:
+    """A companion with options of its own (a FOMOD, or numbered folders): its own options window. Returns what
+    to install (its 00 folders always, plus what was chosen), or None when it has no options."""
+    records = _discover_fomod(root, installed) if _has_fomod(root) else _numbered_folders(root, record, mod_dir)
+    if not any(not r.get("required") for r in records):
+        return None
+    _mark_grass_options(records, mod_dir)
+    identity = "companion:" + Path(record["companion"]["archive"]).name
+    answer = _load_answer_file(Path(output_dir), identity) if output_dir else None
+    previous = set(answer.get("selected", [])) if answer else set()
+    answered = set(answer.get("answered_groups", [])) if answer else set()
+    if answer is not None and _reuse_saved_answers() and _legacy_answer_groups(records) <= answered:
+        chosen = previous
+    else:
+        chosen = _show_selector(f"{mod_dir.name}: {record['label']}", records, previous, installed, answered)
+    if chosen is None:
+        raise OptionsCancelled(f"Option selection cancelled for {record['label']}; {mod_dir.name} is not ready.")
+    if output_dir:
+        _save_answer_file(Path(output_dir), identity, set(chosen), records, answer)
+    payload = {}
+    for item in records:                                 # ascending number: later groups win overlaps
+        if item.get("required") or item["key"] in chosen:
+            payload.update(item.get("all_payload_files") or _payload_files(item))
+    return payload
+
+
+def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str],
+                            output_dir=None, installed=None) -> None:
     """Extract each chosen companion to staging/companions (outside the master staging that Tidy treats as
     packages, and outside the package, so it is not deployed as is); its record gets the payload to activate."""
     from plugin_install import LARGE_ARCHIVE_BYTES, extract_archive
@@ -2225,7 +2315,9 @@ def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str]
             extract_archive({"archive": str(archive)}, target, Path(__file__).resolve().parent)
             print(f"  {mod_dir.name}: extracted {archive.name} in {int(time.monotonic() - started)} s.", flush=True)
         record["path"] = _data_root(target)
-        record["payload_files"] = _payload_files({"path": record["path"]})
+        # a companion with options of its own: its own window, and only what is chosen there goes in
+        own = _companion_options(record["path"], record, mod_dir, output_dir, set(installed or ()))
+        record["payload_files"] = own if own is not None else _payload_files({"path": record["path"]})
         if companion.get("warning"):
             print(f"  {mod_dir.name}: {companion['warning']}")
 
@@ -2321,7 +2413,11 @@ def _activate(mod_dir: Path, plugin: str, records: list[dict], chosen: set[str],
     desired = {}
     for option in records:
         if option["key"] in chosen and not option.get("plugin_choice"):
-            desired.update(_payload_files(option))      # ascending number: higher groups win overlaps
+            for rel, source in _payload_files(option).items():   # ascending number: higher groups win
+                # an MGE XE grass plugin goes to Grass\, never the package root: the game must not load it
+                if len(Path(rel).parts) == 1 and _is_grass_plugin(source):
+                    rel = str(Path("Grass") / Path(rel).name)
+                desired[rel] = source
     new_state = {}
     kept_in_extras = None
     made_dirs = set()                 # one mkdir per folder, not per file: a voice pack puts thousands in each
@@ -2625,6 +2721,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         records.extend(_discover_plugin_choices(mod_dir, installed, _represented_option_sources(records)))
         records.extend(_companion_records(mod_dir))
         records = _drop_superseded_choices(mod_dir, records)
+        _mark_grass_options(records, mod_dir, data_files)    # always shown; ticked only for a known groundcover
         held = set(entry.get("held", []))
         pending = [r for r in records if set(r["targets"]) & newly_relevant and r["key"] not in selected]
         ready = {r["key"] for r in pending if r["key"] in held} - held_options(records, held, installed)
@@ -2655,7 +2752,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             if chosen is not None:
                 still = held_options(records, chosen, installed)
                 backup_root = _option_backup_root(output_dir, identity)
-                _materialize_companions(mod_dir, records, chosen - still)
+                _materialize_companions(mod_dir, records, chosen - still, output_dir, installed)
                 applied = _activate(mod_dir, entry.get("plugin", mod_dir.name), records, chosen - still,
                                     entry.get("activation", {}), backup_root)
                 _apply_plugin_choices(mod_dir, records, chosen - still)
@@ -2696,6 +2793,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             records[0]["required"] = True
         records.extend(_companion_records(mod_dir))
         records = _drop_superseded_choices(mod_dir, records)
+        _mark_grass_options(records, mod_dir, data_files)    # always shown; ticked only for a known groundcover
         if not records:
             continue
         plugin = next((p.name for p in sorted(mod_dir.iterdir(), key=lambda x: x.name.casefold())
@@ -2741,7 +2839,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         held = held_options(records, set(chosen), installed)      # chosen, but what it needs isn't here yet
         # Keep the answers even if a long companion extraction below fails.
         _save_answer_file(output_dir, selection_identity, set(chosen), records, answer)
-        _materialize_companions(mod_dir, records, set(chosen) - held)
+        _materialize_companions(mod_dir, records, set(chosen) - held, output_dir, installed)
         applied = _activate(mod_dir, plugin, records, set(chosen) - held, prior_activation, backup_root)
         changed_plugins = _apply_plugin_choices(mod_dir, records, set(chosen) - held)
         targets = sorted({target for item in records for target in item["targets"]})

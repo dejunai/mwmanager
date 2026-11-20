@@ -131,6 +131,29 @@ class WorkflowLogicTests(unittest.TestCase):
             self.assertFalse((data / "Unselected.esm").exists())
             self.assertFalse((data / "Textures" / "Unselected.dds").exists())
 
+    def test_a_grass_plugin_deploys_to_data_files_grass_not_the_root(self):
+        from major_master_deploy import deploy
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = Path(tmp)
+            staging, data = manager / "staging" / "major_masters", manager / "game" / "Data Files"
+            data.mkdir(parents=True)
+            (data.parent / "Morrowind.ini").write_text("[Game Files]\n")
+            from mwmanager_journal import Journal
+            Journal(manager / "journal").capture_baseline(data.parent)
+            database = manager / "database"
+            database.mkdir()
+            original = Path(__file__).resolve().parents[1] / "database"
+            for name in ("catalog.py", "schema.sql"):
+                shutil.copy2(original / name, database / name)
+            package = staging / "TOTSP"
+            (package / "Grass").mkdir(parents=True)
+            (package / "TOTSP.esm").write_bytes(struct.pack("<4sIII", b"TES3", 0, 0, 0))
+            (package / "Grass" / "Rem-TOTSP.esp").write_bytes(struct.pack("<4sIII", b"TES3", 0, 0, 0))
+            with mock.patch.object(sys, "path", list(sys.path)), mock.patch.dict(sys.modules):
+                deploy(staging, data, manager, ["TOTSP.esm"], selected=["TOTSP.esm"])
+            self.assertTrue((data / "Grass" / "Rem-TOTSP.esp").is_file())   # where MGE XE reads it
+            self.assertFalse((data / "Rem-TOTSP.esp").exists())              # never loaded as a game plugin
+
 
 @unittest.skipUnless(smoke.TK_OK, "Tk display unavailable")
 class WorkflowGuiTests(unittest.TestCase):

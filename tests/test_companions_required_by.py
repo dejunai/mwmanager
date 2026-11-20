@@ -210,6 +210,62 @@ class Companions(unittest.TestCase):
         self.assertEqual(epoch, 1752788019.0)
         self.assertGreater(iso, epoch)
 
+    @staticmethod
+    def grass_plugin(path):
+        """A minimal MGE XE groundcover plugin: a TES3 header and one grass static."""
+        import struct
+
+        def sub(tag, data):
+            return tag + struct.pack("<I", len(data)) + data
+
+        def record(tag, body):
+            return tag + struct.pack("<III", len(body), 0, 0) + body
+
+        hedr = sub(b"HEDR", struct.pack("<fI", 1.3, 0) + b"\0" * 288 + struct.pack("<I", 1))
+        stat = sub(b"NAME", b"grass_tuft_01\0") + sub(b"MODL", b"grass\\tuft01.nif\0")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(record(b"TES3", hedr) + record(b"STAT", stat))
+
+    def test_a_chosen_companion_with_options_gets_its_own_window_and_grass_waits(self):
+        root = self.root / "companions" / "Solstheim Graphical Replacer"
+        (root / "000 Core" / "Textures").mkdir(parents=True)
+        (root / "000 Core" / "Textures" / "core.dds").write_bytes(b"core")
+        (root / "010 Solstheim - HD Worldspace Graphical Replacer" / "Textures").mkdir(parents=True)
+        (root / "010 Solstheim - HD Worldspace Graphical Replacer" / "Textures" / "hd.dds").write_bytes(b"hd")
+        self.grass_plugin(root / "012 Remiros' Groundcover for TOTSP" / "Rem-TOTSP.esp")
+        package = self.root / "staging" / "major_masters" / "TOTSP"
+        package.mkdir(parents=True)
+        record = {"label": "Solstheim Graphical Replacer",
+                  "companion": {"archive": str(self.root / "Solstheim Graphical Replacer-46810.7z")}}
+        shown = {}
+
+        def selector(name, records, previous, installed, answered):
+            shown["records"] = records
+            return {r["key"] for r in records if "HD Worldspace" in r["label"]}
+
+        with mock.patch.object(mock_fomod, "_show_selector", side_effect=selector):
+            payload = mock_fomod._companion_options(root, record, package, self.root / "out", set())
+        grass = next(r for r in shown["records"] if "Groundcover" in r["label"])
+        self.assertEqual((grass["group_label"], grass["recommended"]), ("Grass (MGE XE groundcover)", False))
+        self.assertIn("never deployed", grass["docs"])
+        self.assertEqual(sorted(Path(rel).name for rel in payload), ["core.dds", "hd.dds"])   # no grass plugin
+        answer = mock_fomod._load_answer_file(self.root / "out", "companion:Solstheim Graphical Replacer-46810.7z")
+        self.assertTrue(answer["selected"])                                                  # asked once
+        (self.root / "staging" / "plugins" / "Remiros' Groundcover-46766").mkdir(parents=True)   # now staged
+        records = mock_fomod._numbered_folders(root, record, package)
+        mock_fomod._mark_grass_options(records, package)
+        self.assertTrue(next(r for r in records if "Groundcover" in r["label"])["recommended"])
+
+    def test_a_chosen_grass_plugin_is_activated_into_grass_not_the_root(self):
+        package = self.root / "TOTSP"
+        package.mkdir()
+        grass = self.root / "src" / "Rem-TOTSP.esp"
+        self.grass_plugin(grass)
+        record = {"key": "grass", "number": 950, "path": None, "payload_files": {"Rem-TOTSP.esp": grass}}
+        mock_fomod._activate(package, "TOTSP.esm", [record], {"grass"}, {}, self.root / "bk")
+        self.assertTrue((package / "Grass" / "Rem-TOTSP.esp").is_file())
+        self.assertFalse((package / "Rem-TOTSP.esp").exists())
+
     def test_exclusive_and_required_groups_get_no_select_all_box(self):
         import tkinter as tk
         from tkinter import ttk
