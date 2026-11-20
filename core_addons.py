@@ -746,8 +746,8 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         root.title("Review major masters")
         if parent is not None:
             root.transient(parent)
-        center(root, parent, 850, 520)
-        root.minsize(700, 380)
+        center(root, parent, 850, 640)
+        root.minsize(700, 480)
         outer = ttk.Frame(root, padding=12)
         outer.pack(fill="both", expand=True)
         ttk.Label(outer, text="Every configured major master was checked before staging.",
@@ -758,6 +758,10 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                   "Nexus versions are shown as Current or Outdated; missing or unavailable dependencies are rust. "
                   "This review makes no file changes.",
                   wraplength=810).pack(anchor="w", pady=(4, 10))
+        buttons = ttk.Frame(outer)                  # footer and legend claim the bottom first: the list gets what is left
+        buttons.pack(side="bottom", fill="x", pady=(10, 0))
+        legend = ttk.Frame(outer)
+        legend.pack(side="bottom", fill="x", pady=(6, 0))
         list_frame = ttk.Frame(outer)
         list_frame.pack(fill="both", expand=True)
         tree = ttk.Treeview(list_frame, columns=("use", "status", "requires"), show="tree headings")
@@ -776,8 +780,6 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         tree.configure(yscrollcommand=scrollbar.set)
         list_frame.columnconfigure(0, weight=1)
         list_frame.rowconfigure(0, weight=1)
-        legend = ttk.Frame(outer)
-        legend.pack(fill="x", pady=(6, 0))
         master_status_legend(legend, ("deployed", "not_staged", "locked", "problem", "skipped"), wraplength=810)
         item_ids = [tree.insert("", "end", text=row["name"]) for row in rows]
 
@@ -852,8 +854,6 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         tree.bind("<space>", toggle)
         refresh()
         result = {"selected": None}
-        buttons = ttk.Frame(outer)
-        buttons.pack(side="bottom", fill="x", pady=(10, 0))
 
         def accept():
             readiness()

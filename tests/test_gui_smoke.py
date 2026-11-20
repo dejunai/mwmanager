@@ -344,6 +344,16 @@ class GuiSmokeTests(unittest.TestCase):
             self.assertTrue(self.getattr_ok(name), name)
         self.assertEqual(self.errors, [])
 
+    def test_major_masters_opens_over_the_setup_window(self):
+        setup = tk.Toplevel(self.app)
+        self.app._setup_view = mock.Mock(window=setup)
+        self.pump()
+        self.app.open_major_masters()
+        self.pump()
+        self.assertEqual(str(self.app._major_master_dialog.transient()), str(setup))
+        self.app._major_master_dialog.destroy()
+        setup.destroy()
+
     def test_reopened_major_master_options_advance_to_deploy(self):
         package = self.g.APP_DIR / "staging" / "major_masters" / "Tamriel Data"
         package.mkdir(parents=True)

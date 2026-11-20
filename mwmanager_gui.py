@@ -3556,8 +3556,10 @@ class ManagerGUI(tk.Tk):
         dialog = tk.Toplevel(self)
         self._major_master_dialog = dialog
         dialog.title("Major Masters")
-        dialog.transient(self)
-        center_window(dialog, self, 780, 680)
+        setup = getattr(getattr(self, "_setup_view", None), "window", None)
+        over = setup if setup is not None and setup.winfo_exists() and setup.winfo_viewable() else self
+        dialog.transient(over)                          # during setup: on top of the setup window, not hidden behind it
+        center_window(dialog, over, 780, 680)
         dialog.minsize(680, 600)
         masters = list(self.major_masters)
         reorder_warning_shown = False
