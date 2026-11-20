@@ -53,6 +53,47 @@ class PendingOptionsTests(unittest.TestCase):
             saved = json.loads((root / "outputs" / mock_fomod.PENDING_FILE).read_text(encoding="utf-8"))
             self.assertEqual(saved["OAAB_Data"]["option:1"]["needs"], ["Epic Plants.esp"])
 
+    def test_the_ask_only_pass_saves_answers_and_the_next_pass_stages_them_without_asking(self):
+        """A batch asks every package's options first (nothing staged), then stages them all without a window."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "stage" / "Voices"
+            put(package / "Extras/01 Voices/Sound/Vo/hello.mp3", b"voice")
+            data = root / "game" / "Data Files"
+            data.mkdir(parents=True)
+
+            def records(*_a):
+                return [{"key": "option:1", "path": package / "Extras/01 Voices", "label": "Voices",
+                         "targets": [], "number": 1, "group_key": "g", "group_label": "Voices"}]
+            common = [mock.patch("nexus_updates.check_and_offer_update", return_value=False),
+                      mock.patch.object(mock_fomod, "_has_fomod", return_value=False),
+                      mock.patch.object(mock_fomod, "_discover", side_effect=records),
+                      mock.patch.object(mock_fomod, "_discover_plugin_choices", return_value=[])]
+            for patch in common:
+                patch.start()
+            try:
+                with mock.patch.dict(os.environ, {"MWMANAGER_OPTIONS_ASK_ONLY": "1"}), \
+                        mock.patch.object(mock_fomod, "_show_selector", return_value={"option:1"}) as asked:
+                    mock_fomod.process_staging(package.parent, data, root / "outputs")
+                asked.assert_called_once()
+                self.assertFalse((package / "Sound/Vo/hello.mp3").exists())        # nothing staged yet
+                with mock.patch.dict(os.environ, {"MWMANAGER_REUSE_FOMOD": "1"}), \
+                        mock.patch.object(mock_fomod, "_show_selector", side_effect=AssertionError("asked again")):
+                    mock_fomod.process_staging(package.parent, data, root / "outputs")
+            finally:
+                for patch in common:
+                    patch.stop()
+            self.assertEqual((package / "Sound/Vo/hello.mp3").read_bytes(), b"voice")
+
+    def test_only_a_companion_with_options_of_its_own_is_unpacked_to_ask(self):
+        record = {"companion": {"archive": "Voices.7z"}}
+        with mock.patch("core_addons._members", return_value=(["Sound/Vo/a.mp3", "Sound/Vo/b.mp3"], None)):
+            self.assertFalse(mock_fomod._companion_has_options(record))
+        with mock.patch("core_addons._members", return_value=(["fomod/ModuleConfig.xml", "Data/x.esp"], None)):
+            self.assertTrue(mock_fomod._companion_has_options(record))
+        with mock.patch("core_addons._members", return_value=(["010 HD Worldspace/Textures/a.dds"], None)):
+            self.assertTrue(mock_fomod._companion_has_options(record))
+
     def test_answers_survive_a_failed_companion_extraction(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

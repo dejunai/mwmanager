@@ -2457,6 +2457,9 @@ def mwmanager_main(argv=None):
         option_result = run_mock_options(args)
         if option_result:
             return option_result
+        if os.environ.get("MWMANAGER_OPTIONS_ASK_ONLY") == "1":     # a batch's first pass: answers only
+            print("MWMANAGER-PLAN: empty", flush=True)
+            return 0
         run_post_option_tidy(args)
     if not args.apply:
         print("MWMANAGER-PROGRESS: Organizing plugin folders and checking tidy rules", flush=True)

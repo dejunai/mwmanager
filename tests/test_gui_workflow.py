@@ -422,6 +422,48 @@ class WorkflowGuiTests(unittest.TestCase):
         self.assertEqual(deploy.call_args.kwargs["selected"], ["Selected.esm"])
         self.assertEqual(deploy.call_args.args[3], ["Selected.esm", "Unselected.esm"])
 
+    def test_every_archive_is_asked_its_options_before_any_is_staged(self):
+        """Staging a voice add-on after its options kept the next archive's options waiting for minutes: the batch
+        now asks every archive first, then stages them all with the saved answers (no window)."""
+        self.app._preflight_signature = preflight_signature(self.app.settings["game_dir"])
+        jobs = []
+        self.app._run_progress_job = lambda title, initial, worker, complete: jobs.append(worker)
+        downloads = Path(self.tmp.name) / "downloads"
+        downloads.mkdir(exist_ok=True)
+        items = []
+        for name in ("A.7z", "B.7z"):
+            (downloads / name).write_bytes(b"7z")
+            items.append({"archive": str(downloads / name), "plugins": [name[0] + ".esp"]})
+        calls = []
+
+        class Stop(Exception):
+            pass
+
+        def tidy(*args, **kwargs):
+            env = kwargs.get("env") or {}
+            calls.append((Path(env["MWMANAGER_SOURCE_ARCHIVE"]).name, "ask" if kwargs.get("ask_only") else
+                          "stage" if env.get("MWMANAGER_REUSE_FOMOD") == "1" else "?"))
+            if not kwargs.get("ask_only"):
+                raise Stop
+            return 1
+
+        unpacked = {}
+
+        def extract(item, destination, _manager):
+            import threading
+            unpacked[Path(item["archive"]).name] = threading.current_thread().name
+            destination.mkdir(parents=True)
+            return destination
+        with mock.patch("plugin_install.extract_archive", side_effect=extract), \
+                mock.patch.object(self.g, "run_tidy_steps", side_effect=tidy), \
+                mock.patch.object(self.g, "plan_needed_archives", return_value=[]):
+            self.app._install_plugin_archives(items)
+            with self.assertRaises(Stop):
+                jobs[0](lambda _line: None)
+        self.assertEqual(calls, [("A.7z", "ask"), ("B.7z", "ask"), ("A.7z", "stage")])
+        # B unpacked in the background while A's options were asked, and was used without a question
+        self.assertEqual(unpacked["B.7z"], "MWManager unpack ahead")
+
     def test_plugin_deploy_reuses_this_sessions_preflight(self):
         """Deploying queued plugins right after the major masters ran the whole preflight (hashing every master
         and BSA) again, though nothing it checks had changed."""

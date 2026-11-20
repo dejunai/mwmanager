@@ -364,6 +364,22 @@ class WaitingOptionMods(unittest.TestCase):
 
 
 class OptionFileSpeedTests(unittest.TestCase):
+    def test_option_files_are_linked_not_copied_and_undo_keeps_the_source(self):
+        """A voice add-on's thousands of files were copied byte for byte once its options were chosen."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mod = Path(tmp) / "Pack"
+            source = mod / "Extras" / "Pack" / "01 Voices" / "Sound" / "Vo" / "hello.mp3"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"voice")
+            record = {"key": "voices", "number": 1, "path": source.parents[2]}
+            with mock.patch.object(mock_fomod, "_payload_files", return_value={"Sound/Vo/hello.mp3": source}), \
+                    mock.patch.object(mock_fomod.shutil, "copy2", side_effect=AssertionError("copied")):
+                state = mock_fomod._activate(mod, "Pack", [record], {"voices"}, {}, Path(tmp) / "backups")
+            self.assertTrue(os.path.samefile(mod / "Sound" / "Vo" / "hello.mp3", source))
+            mock_fomod._restore_activation(mod, state)
+            self.assertFalse((mod / "Sound" / "Vo" / "hello.mp3").exists())
+            self.assertEqual(source.read_bytes(), b"voice")
+
     def test_adding_option_files_does_no_resolve_or_mkdir_per_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             mod = Path(tmp) / "Pack"

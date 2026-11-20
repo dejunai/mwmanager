@@ -151,7 +151,8 @@ def plan_needed_archives(package_name: str, outputs: Path, downloads, manager_di
 
 
 def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *, only: str | None = None,
-                   reopen: bool = False, env=None, quiet=None, on_line=None, log=None) -> int | None:
+                   reopen: bool = False, env=None, quiet=None, on_line=None, log=None,
+                   ask_only: bool = False) -> int | None:
     """Run GUI Tidy options, build its plan, then apply it without prompting.
 
     A plan that changes while being validated is rebuilt automatically. The user is asked what to do only after
@@ -161,6 +162,8 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
     if only:
         base += ["--only", only]
     env = dict(os.environ if env is None else env, MWMANAGER_GUI="1")
+    if ask_only:                       # a batch's first pass: the options are asked and saved, nothing is staged
+        env["MWMANAGER_OPTIONS_ASK_ONLY"] = "1"
     if quiet is None and os.name == "nt":
         startup = subprocess.STARTUPINFO()
         startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -219,11 +222,14 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
             log(f"{'DONE' if code == 0 else 'FAIL'} {label}: {what}: exit code {code}")
         return code, recent, mods, plan
 
-    code, recent, mods, plan = step(["--options-only" if reopen else "--options"], "options and plan")
+    code, recent, mods, plan = step(["--options-only" if reopen else "--options"],
+                                    "option questions" if ask_only else "options and plan")
     if code == 3:
         raise TidyPlanPaused(f"{label}: option selection was cancelled. Staged files were preserved.")
     if code:
         raise RuntimeError(f"{label}: the option step failed (exit code {code}).\n\n" + "\n".join(recent)[-4000:])
+    if ask_only:
+        return mods
     refusals, refusal_series = 0, 1
     while True:
         checkpoint(progress)
@@ -2776,6 +2782,122 @@ class ManagerGUI(tk.Tk):
                 return True
 
             batch_names = []                 # packages Tidy staged so far in this install: they ship missing assets
+
+            unpacking = {}                   # archive -> (thread, result, folder): the next one, unpacked early
+
+            def destination_for(index, item):
+                archive = Path(item["archive"])
+                safe_stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .") or f"plugin-{index}"
+                destination = staging_root / f"{safe_stem} [{index}]"
+                if not destination.is_dir():
+                    matching_stages = [path for path in staging_root.iterdir()
+                                       if path.is_dir() and path.name.casefold().startswith(
+                                           (safe_stem + " [").casefold())]
+                    if len(matching_stages) == 1:
+                        destination = matching_stages[0]
+                completed_stage = next((entry for entry in _read_ready_plugin_stages()
+                                        if str(Path(entry.get("archive", "")).resolve()).casefold()
+                                        == str(archive.resolve()).casefold()), None)
+                return destination, completed_stage
+
+            def unpack_ahead(index, item):
+                """Unpack the next archive while this one's options are answered (only a fresh one: a folder
+                from before still gets its question)."""
+                key = str(Path(item["archive"]).resolve()).casefold()
+                destination, completed_stage = destination_for(index, item)
+                if key in unpacking or destination.exists() or (
+                        completed_stage and Path(completed_stage.get("staging_package", "")).is_dir()):
+                    return
+                result = {}
+
+                def run():
+                    try:
+                        result["package"] = extract_archive(item, destination, APP_DIR)
+                    except BaseException as exc:          # reported when its turn comes
+                        result["error"] = exc
+                thread = threading.Thread(target=run, name="MWManager unpack ahead", daemon=True)
+                thread.start()
+                unpacking[key] = (thread, result, destination)
+
+            def locate(index, item):
+                """Phase A for one archive: its staging folder (unpacked now, or one from before), then its
+                options asked and saved. Returns (package, prepared, install plugins), or a result to stop with."""
+                prepared, install_plugins = False, None
+                archive = Path(item["archive"])
+                destination, completed_stage = destination_for(index, item)
+                early = unpacking.pop(str(archive.resolve()).casefold(), None)
+                if early:
+                    thread, result, destination = early
+                    if thread.is_alive():
+                        progress(f"Waiting for {archive.name} to finish unpacking…")
+                    while thread.is_alive():
+                        checkpoint(progress)
+                        thread.join(0.2)
+                    if "error" in result:
+                        raise result["error"]
+                    completed_stage = None
+                if completed_stage and Path(completed_stage.get("staging_package", "")).is_dir():
+                    package = Path(completed_stage["staging_package"]).resolve()
+                    item["selected_plugins"] = completed_stage.get("selected_plugins", item.get("plugins", []))
+                    progress(f"Using completed staged files for {archive.name}; skipping Tidy and FOMOD.")
+                    return package, True, item["selected_plugins"]
+                if early:
+                    package = result["package"]
+                elif destination.exists():
+                    action = progress.ask_choice(
+                        "Staged folder already exists",
+                        f"A staging folder exists for {archive.name}:\n\n{destination}\n\n"
+                        "Choose how to continue.",
+                        [("Reprocess", "reprocess"), ("Accept staged files as ready", "ready"),
+                         ("Cancel", "cancel")], "cancel")
+                    if action == "cancel":
+                        return {"processed": 0, "stopped": True, "cancelled": True, "staging": str(destination)}
+                    package = destination
+                    if action == "ready":
+                        install_plugins = item.get("plugins", [])
+                        item["selected_plugins"] = install_plugins
+                        mark_ready(item, package, install_plugins)
+                        progress(f"Accepted staged files for {archive.name} without reprocessing.")
+                        return package, True, install_plugins
+                    progress(f"Reprocessing existing staged files for {archive.name}.")
+                else:
+                    progress(extraction_status(archive, index, len(items)))
+                    package = extract_archive(item, destination, APP_DIR)
+                progress(f"Options for {archive.name} ({index} of {len(items)}); staging waits until every "
+                         "archive in the batch has its options…")
+                if index < len(items):
+                    unpack_ahead(index + 1, items[index])
+                ask_env = os.environ.copy()
+                ask_env["MWMANAGER_SOURCE_ARCHIVE"] = str(archive.resolve())
+                run_tidy_steps(py, staging_root, data_dir, progress, f"Options for {archive.name}",
+                               only=package.name, env=ask_env, quiet=quiet, log=log_install_phase, ask_only=True)
+                return package, prepared, install_plugins
+
+            if not accept_staged:
+                # Phase A: every archive's options first (answers saved); the long staging work comes after, in
+                # one stretch that needs no answers
+                index = 0
+                while index < len(items):
+                    item = items[index]
+                    index += 1
+                    if "_stage" not in item:
+                        found = locate(index, item)
+                        if isinstance(found, dict):
+                            return found
+                        item["_stage"] = found
+                    if not item.get("needs_checked"):
+                        # options held for a mod that isn't installed: that mod's archive goes first
+                        item["needs_checked"] = True
+                        queued = {str(Path(i["archive"]).resolve()).casefold() for i in items}
+                        first = plan_needed_archives(item["_stage"][0].name, APP_DIR / "outputs",
+                                                     self.settings.get("archive_downloads_dir"), APP_DIR, queued,
+                                                     self.major_masters, progress)
+                        if first:
+                            items[index - 1:index - 1] = first
+                            index -= 1
+                progress(f"Options chosen for {len(items):,} archive(s); staging them now.")
+
+            # Phase B: stage each archive with the answers saved above (no option windows)
             for index, item in enumerate(items, 1):
                 prepared = False
                 if accept_staged:
@@ -2791,52 +2913,17 @@ class ManagerGUI(tk.Tk):
                     item["selected_plugins"] = install_plugins
                     prepared = True
                     progress(f"Accepting completed staged files for {archive.name} without reprocessing.")
-                else:
+                else:                       # located, and its options asked, in phase A
                     archive = Path(item["archive"])
-                    safe_stem = re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .") or f"plugin-{index}"
-                    destination = staging_root / f"{safe_stem} [{index}]"
-                    if not destination.is_dir():
-                        matching_stages = [path for path in staging_root.iterdir()
-                                           if path.is_dir() and path.name.casefold().startswith(
-                                               (safe_stem + " [").casefold())]
-                        if len(matching_stages) == 1:
-                            destination = matching_stages[0]
-                    completed_stage = next((entry for entry in _read_ready_plugin_stages()
-                                            if str(Path(entry.get("archive", "")).resolve()).casefold()
-                                            == str(archive.resolve()).casefold()), None)
-                    if completed_stage and Path(completed_stage.get("staging_package", "")).is_dir():
-                        package = Path(completed_stage["staging_package"]).resolve()
-                        item["selected_plugins"] = completed_stage.get("selected_plugins", item.get("plugins", []))
-                        install_plugins = item["selected_plugins"]
-                        prepared = True
-                        progress(f"Using completed staged files for {archive.name}; skipping Tidy and FOMOD.")
-                    elif destination.exists():
-                        action = progress.ask_choice(
-                            "Staged folder already exists",
-                            f"A staging folder exists for {archive.name}:\n\n{destination}\n\n"
-                            "Choose how to continue.",
-                            [("Reprocess", "reprocess"), ("Accept staged files as ready", "ready"),
-                             ("Cancel", "cancel")], "cancel")
-                        if action == "cancel":
-                            return {"processed": processed, "stopped": True, "cancelled": True,
-                                    "staging": str(destination)}
-                        package = destination
-                        if action == "ready":
-                            install_plugins = item.get("plugins", [])
-                            item["selected_plugins"] = install_plugins
-                            mark_ready(item, package, install_plugins)
-                            prepared = True
-                            progress(f"Accepted staged files for {archive.name} without reprocessing.")
-                        else:
-                            progress(f"Reprocessing existing staged files for {archive.name}.")
-                    else:
-                        progress(extraction_status(archive, index, len(items)))
-                        package = extract_archive(item, destination, APP_DIR)
+                    package, prepared, staged_plugins = item.pop("_stage")
+                    if prepared:
+                        install_plugins = staged_plugins
                     if not prepared:
-                        progress(f"Running Tidy and mock FOMOD/BAIN options for {archive.name}…")
+                        progress(f"Staging {archive.name} with the options chosen ({index} of {len(items)})…")
                         log_install_phase(f"BEGIN package {archive.name}")
                         tidy_env = os.environ.copy()
                         tidy_env["MWMANAGER_SOURCE_ARCHIVE"] = str(archive.resolve())
+                        tidy_env["MWMANAGER_REUSE_FOMOD"] = "1"        # the answers given in phase A
                         batch_names.append(package.name)
                         tidy_env["MWMANAGER_INSTALL_BATCH"] = os.pathsep.join(batch_names)
                         tidy_mod_count = run_tidy_steps(py, staging_root, data_dir, progress,

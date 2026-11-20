@@ -2453,7 +2453,11 @@ def _activate(mod_dir: Path, plugin: str, records: list[dict], chosen: set[str],
                 backup_rel = str(backup.resolve())
         if destination.exists():
             destination.unlink()          # never write through a hard link into the Extras or Data Files copy
-        shutil.copy2(source, destination)
+        try:
+            # a link, not a copy: a voice add-on is gigabytes, and copying it took minutes after its options
+            os.link(source, destination)
+        except OSError:                   # another drive, or a file system without hard links
+            shutil.copy2(source, destination)
         new_state[rel] = {"backup": backup_rel, "source": str(source)}
         if restore_from:
             new_state[rel]["restore_from"] = restore_from
@@ -2651,6 +2655,31 @@ def _legacy_answer_groups(records: list[dict]) -> set[str]:
     return {item.get("group_key", f"bain:{item.get('number', 0):02d}") for item in records}
 
 
+def _ask_only() -> bool:
+    """MWMANAGER_OPTIONS_ASK_ONLY=1: a batch's first pass. Each package's options are asked and the answers saved;
+    nothing is staged (the second pass applies them without asking, with MWMANAGER_REUSE_FOMOD=1)."""
+    return os.environ.get("MWMANAGER_OPTIONS_ASK_ONLY") == "1"
+
+
+def _companion_has_options(record: dict) -> bool:
+    """Whether a companion's archive has options of its own (a FOMOD, or numbered top folders), from its file list:
+    only those are unpacked in the ask-only pass, for their own options window. A voice pack stays packed."""
+    from core_addons import _members, _seven_zip
+    archive = Path(record["companion"]["archive"])
+    names, error = _members(archive, _seven_zip(Path(__file__).resolve().parent))
+    if error:
+        return True                                     # can't tell: unpack it and look
+    tops = set()
+    for name in names:
+        parts = [p for p in name.replace("\\", "/").split("/") if p]
+        if any(p.casefold() == "moduleconfig.xml" for p in parts[-1:]) and \
+                any(p.casefold() == "fomod" for p in parts[:-1]):
+            return True
+        if len(parts) > 1:
+            tops.add(parts[0])
+    return any(OPTION_RE.match(top) for top in tops)
+
+
 def _reuse_saved_answers() -> bool:
     """mwmanager.ini [Install] reuse_fomod_answers = true (or MWMANAGER_REUSE_FOMOD=1): a package whose every
     option group was answered before installs with those answers, without opening the option window."""
@@ -2711,7 +2740,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
 
     # A later-installed plugin can make a previously unselected compatibility option relevant.
     compatibility_reviewed = set()
-    for key, entry in list(mods.items()):
+    for key, entry in list(mods.items()) if not _ask_only() else ():
         targets = set(entry.get("targets", []))
         selected = set(entry.get("selected", []))
         reviewed = set(entry.get("reviewed_targets", []))
@@ -2842,6 +2871,15 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         held = held_options(records, set(chosen), installed)      # chosen, but what it needs isn't here yet
         # Keep the answers even if a long companion extraction below fails.
         _save_answer_file(output_dir, selection_identity, set(chosen), records, answer)
+        if _ask_only():
+            # first pass of a batch: a companion with options of its own is unpacked for its window; the rest
+            # (voice packs) and every option's files wait for the second pass
+            asking = {r["key"] for r in records if r.get("companion") and r["key"] in set(chosen) - held
+                      and _companion_has_options(r)}
+            _materialize_companions(mod_dir, records, asking, output_dir, installed)
+            record_pending_options(output_dir, mod_dir, records, set(chosen), installed)
+            print(f"  {mod_dir.name}: {len(chosen)} option(s) chosen; staged after the batch's other choices")
+            continue
         _materialize_companions(mod_dir, records, set(chosen) - held, output_dir, installed)
         applied = _activate(mod_dir, plugin, records, set(chosen) - held, prior_activation, backup_root)
         changed_plugins = _apply_plugin_choices(mod_dir, records, set(chosen) - held)
