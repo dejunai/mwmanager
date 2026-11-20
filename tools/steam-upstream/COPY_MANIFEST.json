@@ -491,10 +491,10 @@
     },
     {
       "RelativePath": "mwdialog_generated.py",
-      "Bytes": 16915,
-      "SHA256": "4df0f41d9456eac74221082780e3728eb76edfa7bfc8a12440a47dd41fc26189",
+      "Bytes": 17177,
+      "SHA256": "dc09ebe1b6977d8f854aa6861cbc3bb54d365b228e63c9c9e61081d31c92c38b",
       "Source": "<Steam Morrowind>\\mwdialog_generated.py",
-      "SourceModified": "2026-11-13T08:04:05"
+      "SourceModified": "2026-11-19T16:40:33"
     },
     {
       "RelativePath": "mwdialog_generated_files.txt",
@@ -1097,6 +1097,13 @@
       "Bytes": 1128,
       "SHA256": "673c1840adc4a0a3c89f927c845b8928fa44b79171b5576a99c26b0637514389",
       "SourceModified": "2026-11-18T07:41:02"
+    },
+    {
+      "RelativePath": "tests\\test_restore_safety.py",
+      "Source": "<Steam Morrowind>\\tests\\test_restore_safety.py",
+      "Bytes": 1947,
+      "SHA256": "a804e5f27e38468a45c20f8592d7d1c4d179254a460ebdb03b8c0234b0b62d31",
+      "SourceModified": "2026-11-19T16:40:52"
     }
   ]
 }
