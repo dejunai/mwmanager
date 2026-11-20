@@ -1951,15 +1951,29 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
                     label.pack(side="left", fill="x", expand=True)
                     label.bind("<Button-1>", lambda _event, item=item: show(item))
         else:
+            # several choices (voice packs, say): one "Select all" box instead of a click per row
+            choosable = [item for item in items if not item.get("informational_utility")]
+            every = tk.BooleanVar() if len(choosable) > 2 else None
+            if every is not None:
+                ttk.Checkbutton(box, text="Select all", variable=every,
+                                command=lambda every=every, choosable=choosable: [
+                                    states[item["key"]][1].set(every.get()) for item in choosable]
+                                ).pack(anchor="w", padx=4, pady=(2, 0))
+
+            def sync_every(every=every, choosable=choosable):
+                if every is not None:
+                    every.set(all(states[item["key"]][1].get() for item in choosable))
+
             for i, item in enumerate(items):
                 row = option_row(box, item)
                 variable = tk.BooleanVar(value=(i in defaults))
                 states[item["key"]] = ("check", variable, item)
                 ttk.Checkbutton(row, variable=variable,
-                                command=lambda item=item: show(item)).pack(side="left")
+                                command=lambda item=item, sync=sync_every: (show(item), sync())).pack(side="left")
                 label = ttk.Label(row, text=item["label"], anchor="w", cursor="hand2")
                 label.pack(side="left", fill="x", expand=True)
                 label.bind("<Button-1>", lambda _event, item=item: show(item))
+            sync_every()
     result = {"value": None}
     source_archive = Path(os.environ["MWMANAGER_SOURCE_ARCHIVE"]) \
         if os.environ.get("MWMANAGER_SOURCE_ARCHIVE") else None

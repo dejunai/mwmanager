@@ -124,6 +124,40 @@ class Companions(unittest.TestCase):
     def test_without_vortex_the_hd_pack_is_found_by_the_id_in_its_name(self):
         self.assertEqual(set(self.companions({})), {"hd"})
 
+    def test_several_voice_packs_get_one_select_all_box(self):
+        import tkinter as tk
+        from tkinter import ttk
+        package = self.root / "pkg"
+        package.mkdir()
+        records = [{"key": f"companion:v{i}.7z", "path": None, "number": 950 + i, "label": name,
+                    "required": False, "core_bundle": False, "has_plugin_payload": False,
+                    "has_master_payload": False, "informational_utility": False, "targets": [],
+                    "compatible": [], "missing_masters": [], "docs": "", "mod_dir": package, "badges": [],
+                    "outputs": set(), "group_key": "companion:voice", "group_label": "Voice packs",
+                    "selection_type": "SelectAny"}
+                   for i, name in enumerate(("Argonians", "Khajiit", "Imperials"))]
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from walk(child)
+
+        def click_select_all(window):
+            boxes = [w for w in walk(window) if isinstance(w, ttk.Checkbutton) and w.cget("text") == "Select all"]
+            self.assertEqual(len(boxes), 1)
+            boxes[0].invoke()
+            next(w for w in walk(window) if isinstance(w, ttk.Button)
+                 and w.cget("text") == "Apply selected options").invoke()
+
+        # a saved empty answer: nothing starts ticked, so without the box every pack is a separate click
+        with mock.patch.object(tk.Tk, "mainloop", click_select_all), \
+                mock.patch("mwmanager_dialogs._prompt", return_value=True):
+            try:
+                chosen = mock_fomod._show_selector("TR", records, set(), set(), {"companion:voice"})
+            except tk.TclError as exc:
+                self.skipTest(f"Tk unavailable: {exc}")
+        self.assertEqual(chosen, {r["key"] for r in records})
+
     def test_option_window_offers_companions_and_extracts_only_a_chosen_one(self):
         staging = self.root / "staging" / "major_masters"
         package = staging / "OAAB_Data"
