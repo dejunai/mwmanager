@@ -75,6 +75,30 @@ class OutdatedRowStartsSelected(unittest.TestCase):
 
 
 
+
+class MasterScanSkipsAssets(unittest.TestCase):
+    def test_staged_masters_never_walks_into_asset_folders(self):
+        import os
+        import tempfile
+        import major_master_deploy
+        with tempfile.TemporaryDirectory() as tmp:
+            package = Path(tmp, "TR")
+            (package / "Sound" / "Vo" / "AIV").mkdir(parents=True)
+            (package / "Data Files").mkdir()
+            (package / "Data Files" / "TR_Mainland.esm").write_bytes(b"TES3")
+            visited = []
+            real_walk = os.walk
+
+            def walk(top, *a, **k):
+                for base, dirs, files in real_walk(top, *a, **k):
+                    visited.append(Path(base).name.casefold())
+                    yield base, dirs, files
+
+            with mock.patch.object(major_master_deploy.os, "walk", walk):
+                found = major_master_deploy.staged_masters(Path(tmp), ["TR_Mainland.esm"])
+            self.assertEqual(list(found), ["tr_mainland.esm"])
+            self.assertNotIn("sound", visited)
+
 def _run_until_closed(window, limit=400):
     for _ in range(limit):
         try:

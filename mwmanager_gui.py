@@ -3951,10 +3951,11 @@ class ManagerGUI(tk.Tk):
                 stamps.append(folder.stat().st_mtime_ns)
             except OSError:
                 stamps.append(None)
-        from major_master_deploy import SKIP_FOLDERS
+        from major_master_deploy import ASSET_FOLDERS, SKIP_FOLDERS
         for root in (staging, Path(self.settings["game_dir"]) / "Data Files"):
             for base, dirs, files in os.walk(root):
-                dirs[:] = sorted(d for d in dirs if d.casefold() not in SKIP_FOLDERS and not d.startswith("."))
+                dirs[:] = sorted(d for d in dirs if d.casefold() not in SKIP_FOLDERS | ASSET_FOLDERS
+                                 and not d.startswith("."))
                 for name in sorted(files):
                     if Path(name).suffix.casefold() not in {".esm", ".esp"}:
                         continue
@@ -3980,10 +3981,11 @@ class ManagerGUI(tk.Tk):
         staging = APP_DIR / "staging" / "major_masters"
         if not staging.is_dir():
             return set()
+        from major_master_deploy import ASSET_FOLDERS
         wanted = {name.casefold() for name in self.major_masters}
         found = set()
         for root, dirs, files in os.walk(staging):
-            dirs[:] = [name for name in dirs if name.casefold() not in {"off", "bugreports", "extras"}
+            dirs[:] = [name for name in dirs if name.casefold() not in {"off", "bugreports", "extras"} | ASSET_FOLDERS
                        and not name.startswith(".")]
             found.update(filename.casefold() for filename in files if filename.casefold() in wanted)
         return found
@@ -4061,6 +4063,7 @@ class ManagerGUI(tk.Tk):
         return self._master_scan_cached("required", self._scan_required_major_master_names)
 
     def _scan_required_major_master_names(self):
+        from major_master_deploy import ASSET_FOLDERS
         configured = {name.casefold() for name in self.major_masters}
         roots = [Path(self.settings["game_dir"]) / "Data Files", APP_DIR / "staging" / "major_masters"]
         required = set()
@@ -4068,7 +4071,7 @@ class ManagerGUI(tk.Tk):
             if not root.is_dir():
                 continue
             for base, dirs, files in os.walk(root):
-                dirs[:] = [name for name in dirs if name.casefold() not in {"off", "bugreports", "extras"}
+                dirs[:] = [name for name in dirs if name.casefold() not in {"off", "bugreports", "extras"} | ASSET_FOLDERS
                            and not name.startswith(".")]
                 for filename in files:
                     if Path(filename).suffix.casefold() != ".esm" or filename.casefold() not in configured:

@@ -23,6 +23,10 @@ import managed_processes
 BSA_FOLDERS = {"bookart", "icons", "meshes", "splash", "textures"}
 BSA_EXTENSIONS = {".nif", ".kf", ".dds", ".tga", ".bmp"}
 SKIP_FOLDERS = {"off", "bugreports", "fomod", "extras", ".mwmanager-pack"}
+# game asset folders never hold a plugin; a walk looking for .esm/.esp files skips them (Tamriel Rebuilt's voice
+# pack alone puts 400,000 files under Sound, which made each walk take seconds on the GUI thread)
+ASSET_FOLDERS = {"sound", "music", "textures", "meshes", "icons", "bookart", "splash", "video", "fonts", "mwse",
+                 "distantland", "shaders"}
 GAME_ROOT_FOLDERS = {"mge3"}          # a package's top-level folders that belong beside Morrowind.exe, not in Data Files
 
 
@@ -42,7 +46,8 @@ def staged_masters(staging: Path, configured: list[str]) -> dict[str, Path]:
     for package in sorted((p for p in staging.iterdir() if p.is_dir() and not p.name.startswith(".")
                            and not p.is_symlink()), key=lambda p: p.name.casefold()):
         for base, dirs, files in os.walk(package):
-            dirs[:] = [name for name in dirs if name.casefold() not in SKIP_FOLDERS and not name.startswith(".")]
+            dirs[:] = [name for name in dirs if name.casefold() not in SKIP_FOLDERS | ASSET_FOLDERS
+                       and not name.startswith(".")]
             for filename in files:
                 key = filename.casefold()
                 if key in wanted and Path(filename).suffix.casefold() == ".esm":
