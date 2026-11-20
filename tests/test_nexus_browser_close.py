@@ -172,5 +172,33 @@ class DialogHook(unittest.TestCase):
         self.assertNotIn("rmtree", src)  # the profile is never deleted
 
 
+
+class DownloadTracking(unittest.TestCase):
+    """Closing the browser mid-download cancels it, so the review must see running downloads."""
+
+    def test_running_downloads_are_reported_until_they_finish(self):
+        class Event(list):
+            def __iadd__(self, handler):
+                self.append(handler)
+                return self
+
+        class Operation:
+            State = "CoreWebView2DownloadState.InProgress"
+            StateChanged = Event()
+
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.dict(os.environ, {"LOCALAPPDATA": tmp}), \
+                mock.patch.object(B, "_tracked_browser_pid", return_value=1234):
+            root, op, active = B._root(), Operation(), set()
+            B._track_download(root, active, r"K:\dl\Tamriel Rebuilt 26.11.19.7z", op)
+            self.assertEqual(B.active_downloads(), [r"K:\dl\Tamriel Rebuilt 26.11.19.7z"])
+            op.State = "CoreWebView2DownloadState.Completed"
+            op.StateChanged[0](op, None)
+            self.assertEqual(B.active_downloads(), [])
+            B._track_download(root, active, "x.7z", Operation())
+            with mock.patch.object(B, "_tracked_browser_pid", return_value=0):
+                self.assertEqual(B.active_downloads(), [])  # stale file from a closed browser
+
+
 if __name__ == "__main__":
     unittest.main()

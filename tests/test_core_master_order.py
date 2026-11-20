@@ -212,3 +212,40 @@ class LongRunningCaches(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TamrielDataVariantChoice(unittest.TestCase):
+    """Both Tamriel_Data variants downloaded: the plan says so, and the user's pick survives a rescan."""
+
+    def test_the_chosen_variant_wins_and_is_kept_across_rescans(self):
+        import io
+        import zipfile
+        from contextlib import redirect_stdout
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp = Path(tmp)
+            downloads, manager = tmp / "dl", tmp / "mgr"
+            downloads.mkdir(), manager.mkdir()
+            esm = tmp / "Tamriel_Data.esm"
+            plugin(esm, [])
+            # SD has the higher version, so it wins by default
+            for name in ("Tamriel Data (HD) 59927 26.08 2026-08-23T04-15Z a.zip",
+                         "Tamriel_Data 44537 26.09 2026-09-23T04-15Z b.zip"):
+                with zipfile.ZipFile(downloads / name, "w") as z:
+                    z.write(esm, "Data Files/Tamriel_Data.esm")
+            (manager / "mwmanager_core_addons.json").write_text(
+                json.dumps({"tamriel_data.esm": ["tamriel data", "tamriel_data"]}), encoding="utf-8")
+
+            def scan():
+                with redirect_stdout(io.StringIO()):
+                    plan = core_addons.scan_downloads(downloads, manager, tmp / "out", dry_run=True)
+                return plan, Path(plan["archives"][0]["archive"]).name
+
+            plan, used = scan()
+            self.assertTrue(used.startswith("Tamriel_Data 44537"))
+            self.assertEqual(plan["master_variants"], {"tamriel_data.esm": {"available": ["HD", "SD"],
+                                                                           "using": "SD"}})
+            core_addons.choose_master_variant(manager, "Tamriel_Data.esm", "HD")
+            plan, used = scan()
+            self.assertTrue(used.startswith("Tamriel Data (HD)"))
+            self.assertEqual(plan["master_variants"]["tamriel_data.esm"]["using"], "HD")
+            self.assertEqual(len(plan["superseded_archives"]), 1)

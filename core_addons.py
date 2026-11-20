@@ -42,6 +42,29 @@ NEXUS_MOD_IDS = {
 }
 # Exclusive variants: the same ESM published as separate Nexus mods; exactly one is installed.
 MASTER_VARIANTS = {"tamriel_data.esm": {"HD": 59927, "SD": 44537}}
+MASTER_VARIANT_CHOICES = "mwmanager_master_variants.json"     # {"tamriel_data.esm": "SD"}: the user's pick
+
+
+def master_variant_choices(manager_dir: str | os.PathLike) -> dict[str, str]:
+    """The variant the user chose for each variant master, when both are downloaded."""
+    try:
+        saved = json.loads((Path(manager_dir) / MASTER_VARIANT_CHOICES).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return {key: label for key, label in (saved.items() if isinstance(saved, dict) else ())
+            if label in MASTER_VARIANTS.get(key, {})}
+
+
+def choose_master_variant(manager_dir: str | os.PathLike, master: str, label: str) -> None:
+    if label not in MASTER_VARIANTS.get(master.casefold(), {}):
+        raise ValueError(f"{master} has no {label} variant")
+    choices = master_variant_choices(manager_dir) | {master.casefold(): label}
+    (Path(manager_dir) / MASTER_VARIANT_CHOICES).write_text(json.dumps(choices, indent=2) + "\n", encoding="utf-8")
+
+
+def _variant_label(master: str, archive_name: str) -> str | None:
+    mod_id = master_mod_id(master, archive_name)
+    return next((label for label, i in MASTER_VARIANTS.get(master.casefold(), {}).items() if i == mod_id), None)
 
 # What makes a master major or common (decided 2026-11-18): it ships an ESM in its main file, its Nexus
 # category is one of these, and the "mods requiring this file" table on its Nexus page lists enough mods.
@@ -602,7 +625,7 @@ def prepare_core_master_review(manager_dir: str | Path, game_dir: str | Path,
                 rows.append({"name": master, "deps": deps, "error": None, "installed": already_installed,
                              "selected": not already_installed, "path": str(existing),
                              "nexus": (item or {}).get("nexus", {}).get(master.casefold(), {}),
-                             "page": nexus_page(master)})
+                             "page": nexus_page(master, Path((item or {}).get("archive", "")).name)})
             except (OSError, ValueError, struct.error) as exc:
                 rows.append({"name": master, "deps": [], "error": f"staged plugin cannot be checked: {exc}",
                              "installed": False, "selected": False, "path": str(existing)})
@@ -611,18 +634,18 @@ def prepare_core_master_review(manager_dir: str | Path, game_dir: str | Path,
         if not item:
             rows.append({"name": master, "deps": [], "error": "no downloaded archive contains this ESM",
                          "installed": False, "selected": False, "path": None,
-                         "nexus": {}, "page": nexus_page(master)})
+                         "nexus": {}, "page": nexus_page(master, Path((item or {}).get("archive", "")).name)})
             continue
         if item.get("install_blocked") or item.get("inspection_error"):
             rows.append({"name": master, "deps": [], "error": "archive is blocked or could not be inspected",
                          "installed": False, "selected": False, "path": item.get("archive"),
-                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
+                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master, Path((item or {}).get("archive", "")).name)})
             continue
         archive = Path(item.get("archive", ""))
         if not archive.is_file():
             rows.append({"name": master, "deps": [], "error": "download archive is missing",
                          "installed": False, "selected": False, "path": str(archive),
-                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
+                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master, Path((item or {}).get("archive", "")).name)})
             continue
         archive_key = str(archive.resolve())
         if item.get("sha256") and archive_key not in archive_hashes:
@@ -631,7 +654,7 @@ def prepare_core_master_review(manager_dir: str | Path, game_dir: str | Path,
         if item.get("sha256") and archive_hashes[archive_key] != item["sha256"]:
             rows.append({"name": master, "deps": [], "error": "download changed since the archive scan; rescan required",
                          "installed": False, "selected": False, "path": str(archive),
-                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
+                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master, Path((item or {}).get("archive", "")).name)})
             continue
         if archive_key not in archive_members:
             archive_members[archive_key] = _members(archive, seven_zip)
@@ -639,12 +662,12 @@ def prepare_core_master_review(manager_dir: str | Path, game_dir: str | Path,
         if error:
             rows.append({"name": master, "deps": [], "error": f"archive listing failed: {error}",
                          "installed": False, "selected": False, "path": str(archive),
-                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
+                         "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master, Path((item or {}).get("archive", "")).name)})
             continue
         deps, error = _archive_esm_masters(archive, master, manager_dir, member_names)
         rows.append({"name": master, "deps": deps, "error": error, "installed": False,
                      "selected": error is None, "path": str(archive),
-                     "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master)})
+                     "nexus": item.get("nexus", {}).get(master.casefold(), {}), "page": nexus_page(master, Path((item or {}).get("archive", "")).name)})
 
     index_by_name = {row["name"].casefold(): i for i, row in enumerate(rows)}
     installed_names = {name for name, path in installed.items() if data_dir in path.parents}
@@ -755,7 +778,8 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         ttk.Label(outer, text="Masters are staged in the order shown. Selecting a master automatically selects "
                   "its configured prerequisite masters above it; those red rows stay enabled until every dependent "
                   "master below them is disabled. Double-click a ready row or press Space to include or skip it. "
-                  "Nexus versions are shown as Current or Outdated; missing or unavailable dependencies are rust. "
+                  "Nexus versions are shown as Current or Outdated; select an Outdated row and click [Update] to "
+                  "download the newer file. Missing or unavailable dependencies are rust. "
                   "This review makes no file changes.",
                   wraplength=810).pack(anchor="w", pady=(4, 10))
         buttons = ttk.Frame(outer)                  # footer and legend claim the bottom first: the list gets what is left
@@ -782,6 +806,7 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         list_frame.rowconfigure(0, weight=1)
         master_status_legend(legend, ("deployed", "not_staged", "locked", "problem", "skipped"), wraplength=810)
         item_ids = [tree.insert("", "end", text=row["name"]) for row in rows]
+        variants = plan.get("master_variants") or {}
 
         def refresh():
             readiness()
@@ -805,6 +830,11 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                 nexus_detail = row.get("nexus", {}).get("detail")
                 if nexus_detail:
                     reasons = "; ".join(filter(None, (reasons, nexus_detail)))
+                variant = variants.get(row["name"].casefold())
+                if variant:
+                    others = ", ".join(v for v in variant["available"] if v != variant["using"])
+                    reasons = "; ".join(filter(None, (f"{variant['using']} in use, {others} also downloaded",
+                                                      reasons)))
                 tree.item(item_ids[i], text=row["name"], values=(use, status, reasons), tags=(tag,))
 
         def toggle(event=None):
@@ -876,9 +906,17 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                 mwnexus_browser.open_page(row["page"], download_dir=plan.get("downloads_dir"))
                 messagebox.showinfo(
                     "Download in the MWManager browser",
-                    f"Download {row['name']} into:\n\n{plan.get('downloads_dir')}\n\n"
-                    "Complete any Nexus security check, finish the download, close the browser, then click OK. "
-                    "MWManager will rescan the archive folder.", parent=root)
+                    f"Download {row['name']} from the page that opened. It saves into:\n\n"
+                    f"{plan.get('downloads_dir')}\n\n"
+                    "Click OK when the download has finished. MWManager then closes the browser "
+                    "and rescans the archive folder.", parent=root)
+                # Closing WebView2 cancels a running download, so wait unless the user says otherwise.
+                while (pending := mwnexus_browser.active_downloads()) and messagebox.askyesno(
+                        "Download still running",
+                        "Still downloading:\n\n" + "\n".join(Path(p).name for p in pending) +
+                        "\n\nChoose Yes after it finishes. No closes the browser now and loses "
+                        "the unfinished download.", parent=root):
+                    pass
                 mwnexus_browser.close_browser()
             except (OSError, RuntimeError, ValueError) as exc:
                 messagebox.showerror("Could not open Nexus", str(exc), parent=root)
@@ -888,9 +926,27 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
 
         action_button = ttk.Button(buttons, command=nexus_action)
 
+        def other_variant(row):
+            variant = variants.get(row["name"].casefold()) if row and not row["installed"] else None
+            return next((v for v in variant["available"] if v != variant["using"]), None) if variant else None
+
+        def swap_variant():
+            item_id = tree.focus()
+            row = rows[item_ids.index(item_id)] if item_id in item_ids else None
+            label = other_variant(row)
+            if label:
+                choose_master_variant(manager_dir, row["name"], label)   # kept across rescans
+                result["selected"] = "rescan"
+                root.destroy()
+
+        swap_button = ttk.Button(buttons, text="Use other variant", command=swap_variant)
+
         def update_action(_event=None):
             item_id = tree.focus()
             row = rows[item_ids.index(item_id)] if item_id in item_ids else None
+            label = other_variant(row)
+            swap_button.configure(text=f"Use {label}" if label else "Use other variant")
+            swap_button.state(["!disabled"] if label else ["disabled"])
             status = row.get("nexus", {}).get("status") if row else None
             if not row or row["installed"] or not row.get("page") or status == "current":
                 action_button.configure(text="Download")
@@ -903,6 +959,14 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
 
         tree.bind("<<TreeviewSelect>>", update_action, add="+")
         action_button.pack(side="left")
+        if variants:
+            swap_button.pack(side="left", padx=(6, 0))
+        # Start on the first outdated row so its Update button is live without a hidden selection step.
+        outdated = [item_ids[i] for i, row in enumerate(rows)
+                    if not row["installed"] and row.get("nexus", {}).get("status") == "outdated"]
+        if outdated:
+            tree.focus(outdated[0])
+            tree.selection_set(outdated[0])
         update_action()
         ttk.Button(buttons, text="Confirm selected", command=accept).pack(side="right", padx=(6, 0))
         ttk.Button(buttons, text="Abort", command=root.destroy).pack(side="right")
@@ -1454,14 +1518,28 @@ def scan_downloads(downloads_dir: str | os.PathLike, manager_dir: str | os.PathL
 
     # Keep only the latest archive for each exact plugin filename. A multi-plugin archive stays
     # selected if it is the newest package for at least one plugin it contains.
+    # A variant master (Tamriel_Data HD/SD) uses the variant the user chose, whatever its version.
+    choices = master_variant_choices(manager)
+
+    def rank(key: str, archive: Path) -> tuple:
+        return (bool(choices.get(key)) and _variant_label(key, archive.name) == choices.get(key),
+                _archive_rank(archive))
+
     winners: dict[str, dict] = {}
     for item in found:
         for plugin in item["plugins"]:
             key = plugin.casefold()
             current = winners.get(key)
             archive = Path(item["archive"])
-            if current is None or _archive_rank(archive) > _archive_rank(Path(current["archive"])):
+            if current is None or rank(key, archive) > rank(key, Path(current["archive"])):
                 winners[key] = item
+    master_variants = {}
+    for key in MASTER_VARIANTS:
+        have = sorted({_variant_label(key, Path(item["archive"]).name) for item in found
+                       if key in {p.casefold() for p in item["plugins"]}} - {None})
+        if key in winners and len(have) > 1:
+            master_variants[key] = {"available": have,
+                                    "using": _variant_label(key, Path(winners[key]["archive"]).name)}
     selected_paths = {item["archive"] for item in winners.values()}
     selected = [item for item in found if not item["plugins"] or item["archive"] in selected_paths]
     superseded = [item for item in found if item["plugins"] and item["archive"] not in selected_paths]
@@ -1540,6 +1618,7 @@ def scan_downloads(downloads_dir: str | os.PathLike, manager_dir: str | os.PathL
         Path(item["archive"]).name.casefold()))
     result = {"downloads_dir": str(downloads), "archives": selected,
               "superseded_archives": superseded,
+              "master_variants": master_variants,
               "core_masters_found": identified, "core_masters_missing": missing,
               "ordered_install_masters": identified,
               "core_masters_blocked_for_review": blocked_masters,

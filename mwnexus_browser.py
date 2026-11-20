@@ -181,6 +181,26 @@ def _terminate_pid(pid: int) -> bool:
         return False
 
 
+def _track_download(root: Path, active: set, target: str, operation) -> None:
+    """Record a WebView2 download in downloads.json until it leaves the InProgress state."""
+    active.add(target)
+    _write_json(root / "downloads.json", {"active": sorted(active)})
+
+    def changed(sender, _event):
+        if "InProgress" not in str(sender.State):
+            active.discard(target)
+            _write_json(root / "downloads.json", {"active": sorted(active)})
+
+    operation.StateChanged += changed
+
+
+def active_downloads() -> list[str]:
+    """Files the running MWManager browser is still downloading (closing it would cancel them)."""
+    if not _tracked_browser_pid():
+        return []
+    return list(_read_json(_root() / "downloads.json").get("active", []))
+
+
 def close_browser(timeout: float = 5.0, force: bool = True) -> str:
     """Close the MWManager Nexus browser gracefully; terminate it only if it is wedged.
 
@@ -420,6 +440,8 @@ def _run_embedded_browser() -> None:
     command_file = root / "command.json"
     last_command = ""
     closed = {"value": False}
+    active_files: set[str] = set()
+    _write_json(root / "downloads.json", {"active": []})
 
     class BrowserApi:
         # pywebview exposes every *public* attribute of js_api to the page and
@@ -465,6 +487,7 @@ def _run_embedded_browser() -> None:
                     target = folder / f"{stem} ({number}){suffix}"
                     number += 1
             args.ResultFilePath = str(target)
+            _track_download(root, active_files, str(target), args.DownloadOperation)
 
         edgechromium.EdgeChrome.on_download_starting = download_to_component
     window = webview.create_window(
