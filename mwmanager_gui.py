@@ -56,6 +56,9 @@ GUI_STATE_FILE = APP_DIR / "mwmanager_gui_state.json"
 DEPLOYMENT_JOURNAL = APP_DIR / "major_master_deployments.json"
 PLUGIN_STAGE_MANIFEST = APP_DIR / "staging" / "plugins" / ".mwmanager-plugin-stages.json"
 DISABLED_RECORD = APP_DIR / "mwmanager_disabled.txt"
+# Siege at Firemoth set aside for Tamriel Rebuilt. The winning plugin ends the reason: every run turns a plugin back on
+# when the one after "conflicts with" is gone, and "Tamriel Rebuilt (deployed ...)" named no plugin, so it always was.
+FIREMOTH_DISABLED_REASON = "Tamriel Rebuilt deployed without Remove Firemoth: conflicts with TR_Mainland.esm"
 
 
 def _display_line(raw: str, limit: int = 600) -> str:
@@ -4191,7 +4194,7 @@ class ManagerGUI(tk.Tk):
             firemoth = data_dir / "Off" / "Official Add-Ons" / "Siege at Firemoth.esp"
             if firemoth.is_file() and not (data_dir / firemoth.name).exists():      # set aside by the deployment
                 disabled = read_disabled_plugins()
-                disabled.setdefault(firemoth.name, "conflicts with Tamriel Rebuilt (deployed without Remove Firemoth)")
+                disabled[firemoth.name] = FIREMOTH_DISABLED_REASON
                 write_disabled_plugins(disabled)
                 self.active_names.discard(firemoth.name.casefold())
             major_keys = {name.casefold() for name in self.major_masters}

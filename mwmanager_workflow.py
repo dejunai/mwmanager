@@ -236,7 +236,10 @@ class JobView:
             if not stopping:
                 self.stage.set(text.split(":", 1)[1].strip())
         else:
-            if not stopping and text.startswith(("Preflight:", "Staging master ", "Cataloguing", "Tidying", "Sorting",
+            if not stopping and text.startswith("# --full step"):
+                # a new --full step names itself; the title still said the last step that set one
+                self.stage.set(text.lstrip("# ").strip()[:180])
+            elif not stopping and text.startswith(("Preflight:", "Staging master ", "Cataloguing", "Tidying", "Sorting",
                                                  "Opening", "Checking BSA", "Running tidy")):
                 self.stage.set(text.strip()[:180])
             elif not stopping and is_action_line(text):

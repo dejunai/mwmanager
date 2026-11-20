@@ -212,6 +212,20 @@ class WorkflowGuiTests(unittest.TestCase):
         self.assertEqual(str(view.progress["mode"]), "indeterminate")
         view.finish()
 
+    def test_a_full_step_header_replaces_the_stale_title(self):
+        from mwmanager_workflow import JobView
+        view = JobView(self.app)
+        view.append("MWMANAGER-STAGE: Sorting — indexing plugin 46/46: Wares_TR_npcs.esp")
+        view.append("# --full step 6/11: clean and fix with the asset check (no Multipatch yet)")
+        self.assertEqual(view.stage.get(), "--full step 6/11: clean and fix with the asset check (no Multipatch yet)")
+        self.assertIn("--full step 6/11", view.log.get("1.0", "end"))
+
+    def test_siege_set_aside_for_tr_names_tr_mainland_as_its_winner(self):
+        import mwmanager_upstream
+        scanner = mwmanager_upstream.compose()
+        winner = scanner.WINNER_RE.search(self.g.FIREMOTH_DISABLED_REASON).group("w").strip()
+        self.assertEqual(winner, "TR_Mainland.esm")      # a real plugin: Siege stays off while TR is active
+
     def test_cancel_waits_for_safe_boundary_and_all_actions_restore(self):
         started, release = threading.Event(), threading.Event()
         done = []
