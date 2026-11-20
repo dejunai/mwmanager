@@ -853,6 +853,7 @@ def _deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[s
                 new_operations = tx.link_many(batch)
                 for operation in new_operations:
                     operation["mod"] = mod_of_package[package_label]
+                    operation["label"] = package_label
                 operations.extend(new_operations)
                 linked.extend(batch_rel)
                 batch.clear()

@@ -224,7 +224,7 @@ def detected_mod_files(game_dir: Path, manager_dir: Path | None = None,
             extras = []
             for path in mwmanager_journal.walk_files(game_dir):
                 rel = mwmanager_journal.rel_of(game_dir, path)
-                if mwmanager_journal.key(rel) in GENERATED_NON_MOD_FILES:
+                if mwmanager_journal.key(rel) in GENERATED_NON_MOD_FILES or mwmanager_journal.is_altered_asset(rel):
                     continue
                 if is_managed(path, rel):
                     continue

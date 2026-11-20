@@ -2581,7 +2581,8 @@ class ManagerGUI(tk.Tk):
 
     def _install_plugin_archives(self, items, *, accept_staged=False, then=None):
         from plugin_install import (apply_plugin_compatibility, check_deploy_path_lengths, count_bsa_assets,
-                                    deploy_package, extract_archive,
+                                    deploy_package, extract_archive, deployment_label, has_altered_assets,
+                                    altered_assets, settle_altered_assets,
                                     pack_package_assets, pull_updated_steam_luas,
                                     index_deployment, record_deployment, remove_superseded_plugins)
         from major_master_deploy import register_archives
@@ -2654,6 +2655,8 @@ class ManagerGUI(tk.Tk):
                     raise RuntimeError("The interactive cell-conflict review did not complete.")
                 run_logged([str(py), "-u", str(manager_script), str(data_dir), "--sort", "--all", "--yes"],
                            progress, "Applying conflict choices and regenerating patches")
+
+        altered_choices = []
 
         def worker(progress):
             staging_root.mkdir(parents=True, exist_ok=True)
@@ -2732,6 +2735,15 @@ class ManagerGUI(tk.Tk):
                     for package, label in pending:
                         progress(f"Deploying {label}…")
                         item = pending_items[str(package)]
+                        deployed_label = deployment_label(item, package)
+                        if has_altered_assets(data_dir, deployed_label):
+                            altered_choices.append((deployed_label, progress.ask_choice(
+                                "Altered assets found",
+                                f"{label} was rolled back earlier with files that had changed after it was "
+                                f"deployed. They are kept in:\n\n"
+                                f"{altered_assets(data_dir, deployed_label)}\n\nWhat should happen to them?",
+                                [("Restore them over the fresh files", "restore"), ("Delete them", "delete"),
+                                 ("Skip (leave them in Off)", "skip")], "skip")))
                         # REMOVE BEFORE SHIPPING: [Dev] compare_steam_lua, developer machine only
                         if self.settings.get("compare_steam_lua"):
                             imported = pull_updated_steam_luas(package, progress.ask_yes_no)
@@ -2751,6 +2763,12 @@ class ManagerGUI(tk.Tk):
                 except BaseException:
                     transaction.rollback()
                     raise
+                for deployed_label, choice in altered_choices:
+                    count = settle_altered_assets(data_dir, deployed_label, choice)
+                    if count:
+                        progress(f"{'Restored' if choice == 'restore' else 'Deleted'} {count:,} altered "
+                                 f"asset(s) of {deployed_label}.")
+                altered_choices.clear()
                 progress("Running --all checks and resolving newly surfaced cell conflicts…")
                 run_batch_check(progress)
                 pending = []
@@ -3027,6 +3045,7 @@ class ManagerGUI(tk.Tk):
                 self._update_action_buttons()
                 self.status.set(f"Removed {result['removed']:,} files; restored {result['restored']:,}. "
                                 f"{result['pending']:,} changed file(s) remain tracked; "
+                                f"{len(result.get('altered', [])):,} altered asset(s) kept in Off; "
                                 f"{len(result.get('unpack_failures', [])):,} staged folder(s) not unpacked again.")
                 tidy_note = ""
                 if result.get("unpack_failures"):
@@ -3034,6 +3053,8 @@ class ManagerGUI(tk.Tk):
                         result["unpack_failures"][:5])
                 messagebox.showinfo("Plugin deployments removed",
                                     f"Removed files: {result['removed']:,}\nRestored files: {result['restored']:,}\n"
+                                    f"Altered assets kept in Data Files\\Off\\<plugin>\\Altered Assets: "
+                                    f"{len(result.get('altered', [])):,}\n"
                                     f"Still tracked for review: {result['pending']:,}{tidy_note}", parent=self)
 
             self._run_progress_job("Remove Deployed Plugins", "Removing selected tracked deployments…",

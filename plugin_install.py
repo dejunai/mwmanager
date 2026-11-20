@@ -976,10 +976,10 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
                     shutil.copy2(source, target)
                     copied = True
             linked += 1
+            deployed = target.stat()        # as deployed: a later change shows as another size or time
             operations.append({"source": str(source.resolve()), "target": str(target.resolve()),
                                "backup": str(backup.resolve()) if backup is not None else None,
-                               "size": source.stat().st_size,
-                               "sha256": _sha256_file(source)})
+                               "size": deployed.st_size, "mtime_ns": deployed.st_mtime_ns, "sha256": None})
     if protect_this_package:
         protected.update(texture_paths)
     if protected_texture_file:
@@ -1150,12 +1150,45 @@ def _write_deployment_state(manager: Path, state: dict) -> None:
     os.replace(temp, path)
 
 
+def deployment_label(item: dict, package: Path) -> str:
+    """The name a deployment is listed under; its Data Files\\Off\\<name> folder comes from it."""
+    archive = item.get("archive")
+    return item.get("archive_label") or (Path(archive).name if archive else Path(package).name)
+
+
+def altered_assets(data_dir: Path, label: str) -> Path:
+    import mwmanager_journal
+    return Path(data_dir).parent / mwmanager_journal.altered_folder(label)
+
+
+def has_altered_assets(data_dir: Path, label: str) -> bool:
+    folder = altered_assets(data_dir, label)
+    return folder.is_dir() and any(path.is_file() for path in folder.rglob("*"))
+
+
+def settle_altered_assets(data_dir: Path, label: str, choice: str) -> int:
+    """At deployment: put a plugin's Altered Assets back over its fresh files ("restore"), delete them
+    ("delete"), or leave them in Off ("skip"). Returns how many files were restored or deleted."""
+    folder = altered_assets(data_dir, label)
+    if choice not in ("restore", "delete") or not folder.is_dir():
+        return 0
+    files = [path for path in folder.rglob("*") if path.is_file()]
+    if choice == "restore":
+        for path in files:
+            target = _safe_child(Path(data_dir), path.relative_to(folder), label="Altered asset")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(path, target)            # replaces the deployed link; not journaled, so it stays "altered"
+    from mwmanager_journal import wipe_folder
+    wipe_folder(folder)
+    return len(files)
+
+
 def record_deployment(manager: Path, item: dict, package: Path, operations: list[dict],
                       archives: list[Path], registrations: list[str], data_dir: Path | None = None) -> dict:
     state = _read_deployment_state(manager)
     source_archive = item.get("archive")
     _apply_nexus_id_fallback(item, Path(source_archive)) if source_archive else None
-    label = item.get("archive_label") or (Path(source_archive).name if source_archive else package.name)
+    label = deployment_label(item, package)
     entry = {"id": uuid.uuid4().hex, "label": label,
              "deployed_at": datetime.now().astimezone().isoformat(timespec="seconds"),
              "archive": str(Path(source_archive).resolve()) if source_archive and not item.get("staged_only") else None,
@@ -1173,7 +1206,8 @@ def record_deployment(manager: Path, item: dict, package: Path, operations: list
         _write_deployment_state(manager, state)
         journal.record_deployment(
             Path(data_dir).parent, operations, tool="plugin_install.py", tag="plugin-deployment",
-            inputs={"archive": source_archive or label, "plugins": entry["plugins"]}, mod=entry["mod"])
+            inputs={"archive": source_archive or label, "plugins": entry["plugins"]}, mod=entry["mod"],
+            label=label)
     return entry
 
 
@@ -1213,8 +1247,11 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
     from major_master_deploy import unregister_archives
     manager, data_dir = manager.resolve(), data_dir.resolve()
     state = _read_deployment_state(manager)
+    import mwmanager_journal
     kept, removed, restored, pending, unpack = [], 0, 0, [], []
-    journal_records = []
+    journal_records, altered_moves = [], []
+    journal = mwmanager_journal.Journal(manager / "journal")
+    expected = journal.expected_state() if journal.has_baseline() else {}
     ini_path = data_dir.parent / "Morrowind.ini"
     catalog_path = manager / "game_catalog.sqlite3"
     state_path = _deployment_state_path(manager)
@@ -1264,35 +1301,35 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
                     except ValueError as exc:
                         raise ValueError(f"Deployment state contains an unsafe backup path: {backup_raw}") from exc
                     backup = _safe_child(package, backup_rel, label="Deployment backup")
-                source_matches = False
-                if source.is_file() and target.is_file():
-                    try:
-                        source_matches = os.path.samefile(source, target)
-                    except OSError:
-                        pass
-                if not source_matches and target.is_file() and operation.get("sha256"):
-                    try:
-                        source_matches = (target.stat().st_size == int(operation.get("size", -1))
-                                          and _sha256_file(target) == operation["sha256"])
-                    except (OSError, ValueError):
-                        pass
-                if not source_matches and target.exists():
-                    operations_pending.append(operation)
+                if target.is_file():
+                    if not _as_deployed(target, source, operation, expected, data_dir.parent):
+                        altered = mwmanager_journal.free_path(
+                            altered_assets(data_dir, deployment.get("label") or package.name) / target_rel)
+                        planned.append((target, backup, True, altered))
+                    else:
+                        planned.append((target, backup, True, None))
+                elif target.exists():
+                    operations_pending.append(operation)          # a folder now stands where the file was
                 else:
-                    planned.append((target, backup, source_matches))
-            for target, backup, source_matches in planned:
+                    planned.append((target, backup, False, None))
+            for target, backup, present, altered in planned:
                 recovery = None
-                if source_matches:
+                if present and altered is not None:     # changed since deployment: kept in Off\<plugin>
+                    altered.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(target, altered)
+                    altered_moves.append((altered, target))
+                    journal_records.append((deployment.get("mod"), deployment.get("label"), target, "remove"))
+                elif present:
                     recovery = target.with_name(f".{target.name}.{uuid.uuid4().hex}.mwmanager-remove")
                     os.replace(target, recovery)
                     recoveries.append((recovery, target, backup))
                     removed += 1
-                    journal_records.append((deployment.get("mod"), target, "remove"))
+                    journal_records.append((deployment.get("mod"), deployment.get("label"), target, "remove"))
                 if backup and backup.is_file() and not target.exists():
                     target.parent.mkdir(parents=True, exist_ok=True)
                     os.replace(backup, target)
                     restored += 1
-                    journal_records.append((deployment.get("mod"), target, "replace"))
+                    journal_records.append((deployment.get("mod"), deployment.get("label"), target, "replace"))
                     if recovery is None:
                         recoveries.append((None, target, backup))
             if operations_pending:
@@ -1302,7 +1339,7 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
             touched_archives.update(deployment.get("archives", []))
             if deployment.get("staging_package"):
                 unpack.append({"package": deployment["staging_package"], "archive": deployment.get("archive"),
-                               "label": deployment.get("label")})
+                               "label": deployment.get("label"), "mod": deployment.get("mod")})
             unregister_archives(ini_path, deployment.get("registered_archives", []))
             if catalog_path.is_file():
                 with sqlite3.connect(catalog_path) as db:
@@ -1336,6 +1373,8 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
         ]
         _write_deployment_state(manager, state)
         _journal_removal(manager, data_dir, journal_records)
+        for item in unpack:
+            journal.retire_mod(item.get("mod"))
     except BaseException:
         rollback_errors = []
         for recovery, target, backup in reversed(recoveries):
@@ -1345,6 +1384,12 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
                     os.replace(target, backup)
                 if recovery and recovery.exists():
                     os.replace(recovery, target)
+            except OSError as exc:
+                rollback_errors.append(str(exc))
+        for altered, target in reversed(altered_moves):
+            try:
+                if altered.exists() and not target.exists():
+                    os.replace(altered, target)
             except OSError as exc:
                 rollback_errors.append(str(exc))
         try:
@@ -1378,21 +1423,54 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
             recovery.unlink(missing_ok=True)
     return {"removed": removed, "restored": restored,
             "pending": sum(len(item["operations"]) for item in pending),
-            "unpack": unpack}
+            "unpack": unpack,
+            "altered": [str(altered) for altered, _target in altered_moves]}
+
+
+def _as_deployed(target: Path, source: Path, operation: dict, expected: dict, game: Path) -> bool:
+    """Whether a deployed file is still what was deployed (or what MWManager changed it to since)."""
+    import mwmanager_journal
+    want = expected.get(mwmanager_journal.key(mwmanager_journal.rel_of(game, target)))
+    if want:
+        return mwmanager_journal.matches_after(target, want)
+    stat = target.stat()
+    if operation.get("mtime_ns") is not None:
+        return stat.st_size == operation.get("size") and stat.st_mtime_ns == operation["mtime_ns"]
+    try:                                        # older records: the staged copy itself, or its recorded hash
+        if source.is_file() and os.path.samefile(source, target):
+            return True
+    except OSError:
+        pass
+    return bool(operation.get("sha256")) and stat.st_size == int(operation.get("size", -1)) \
+        and _sha256_file(target) == operation["sha256"]
 
 
 def _journal_removal(manager: Path, data_dir: Path, records: list) -> None:
-    """Removed files and the files put back in their place, in each mod's own rollback ledger."""
+    """In the install ledger: the removed files, and the files put back in their place under the plugin that
+    deployed them before."""
     import mwmanager_journal
     journal = mwmanager_journal.Journal(manager / "journal")
     if not records or not journal.has_baseline():
         return
     game = data_dir.parent
+    history = {}
+    for entry in journal.entries()[0]:
+        if entry.get("owner") and entry["action"] != "remove":
+            history.setdefault(mwmanager_journal.key(entry["path"]), []).append((entry["owner"], entry.get("label")))
     run = journal.start_run("plugin_install.py", {"operation": "remove deployment"})
-    journal.record_many([{"run": run["run"], "path": mwmanager_journal.rel_of(game, target), "action": action,
-                          "after_sha256": mwmanager_journal.stat_marker(target.stat()) if action == "replace" else None,
-                          "original": None, "tag": "plugin-removal", "mod": mod}
-                         for mod, target, action in records])
+    out = []
+    for mod, label, target, action in records:
+        rel = mwmanager_journal.rel_of(game, target)
+        if action == "remove":
+            out.append({"run": run["run"], "path": rel, "action": "remove", "after_sha256": None,
+                        "original": None, "tag": "plugin-removal", "owner": mod, "label": label})
+            continue
+        before = next(((o, l) for o, l in reversed(history.get(mwmanager_journal.key(rel), [])) if o != mod),
+                      (None, None))
+        out.append({"run": run["run"], "path": rel, "action": "replace",
+                    "after_sha256": mwmanager_journal.stat_marker(target.stat()), "original": None,
+                    "tag": "plugin-removal", "owner": before[0], "label": before[1]})
+    journal.record_many(out, batch_min=1)
     journal.finish_run(run)
 
 

@@ -206,7 +206,8 @@ class BackendProbes(unittest.TestCase):
                 deploy.deploy(package.parent, data, root, ["A.esm"])
             state = json.loads((root / "major_master_deployments.json").read_text())
             operations = state["deployments"][0]["operations"]
-            self.assertTrue(all(operation.get("sha256") for operation in operations))
+            # removal checks a hardlink by its size and time, not a hash
+            self.assertTrue(all("mtime_ns" in operation and "size" in operation for operation in operations))
             self.assertLess(sync.call_count, len(operations) // 2)
             self.assertEqual(deploy.remove_deployed(package.parent, data, root)["pending"], 0)
 
@@ -245,8 +246,8 @@ class BackendProbes(unittest.TestCase):
             put(data, "Textures/a.dds", b"old")
             record_many = Journal.record_many
 
-            def fail_after_first(ledger, records):
-                record_many(ledger, records[:1])
+            def fail_after_first(ledger, records, **kwargs):
+                record_many(ledger, records[:1], **kwargs)
                 raise OSError("partial journal failure")
 
             with mock.patch.object(sys, "path", list(sys.path)), mock.patch.dict(sys.modules), \

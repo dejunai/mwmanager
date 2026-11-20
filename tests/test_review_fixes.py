@@ -404,7 +404,7 @@ class PluginPathSafetyTests(unittest.TestCase):
             self.assertEqual(target.read_bytes(), b"plugin")
             self.assertEqual(json.loads(state_path.read_text("utf-8")), state)
 
-    def test_removal_keeps_modified_file_but_removes_safe_files(self):
+    def test_removal_moves_altered_files_to_off_and_removes_the_rest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             manager, data, package = root / "manager", root / "game" / "Data Files", root / "staging"
@@ -432,12 +432,16 @@ class PluginPathSafetyTests(unittest.TestCase):
             state_path.write_text(json.dumps(state), encoding="utf-8")
             result = plugin_install.remove_deployments(manager, data, {"partial"})
             self.assertFalse((data / "Safe.esp").exists())
-            self.assertTrue((data / "Changed.esp").is_file())
-            self.assertEqual(result["pending"], 1)
-            remaining = json.loads(state_path.read_text("utf-8"))["deployments"]
-            self.assertEqual(len(remaining), 1)
-            self.assertEqual(len(remaining[0]["operations"]), 1)
-            self.assertTrue(remaining[0]["operations"][0]["target"].endswith("Changed.esp"))
+            self.assertFalse((data / "Changed.esp").exists())
+            altered = data / "Off" / "staging" / "Altered Assets" / "Changed.esp"
+            self.assertEqual(altered.read_bytes(), b"modified")
+            self.assertEqual(result["altered"], [str(altered)])
+            self.assertEqual(result["pending"], 0)
+            self.assertEqual(json.loads(state_path.read_text("utf-8"))["deployments"], [])
+            self.assertTrue(plugin_install.has_altered_assets(data, "staging"))
+            self.assertEqual(plugin_install.settle_altered_assets(data, "staging", "restore"), 1)
+            self.assertEqual((data / "Changed.esp").read_bytes(), b"modified")
+            self.assertFalse(plugin_install.has_altered_assets(data, "staging"))
 
 
     def test_a_removed_mod_is_unpacked_again_from_its_archive(self):
@@ -464,7 +468,8 @@ class PluginPathSafetyTests(unittest.TestCase):
             (manager / "plugin_deployments.json").write_text(json.dumps(state), encoding="utf-8")
             result = plugin_install.remove_deployments(manager, data, {"mod"})
             self.assertFalse((data / "Mod.esp").exists())
-            self.assertEqual(result["unpack"], [{"package": str(package), "archive": str(archive), "label": "Mod"}])
+            self.assertEqual(result["unpack"], [{"package": str(package), "archive": str(archive), "label": "Mod",
+                                                 "mod": "archive-Mod-123-1-0"}])
             with mock.patch.object(plugin_install, "analyze_archive", return_value={"blocked": False}):
                 plugin_install.unpack_again(manager, package, archive)
             self.assertEqual((package / "Data Files/Mod.esp").read_bytes(), b"plugin as shipped")

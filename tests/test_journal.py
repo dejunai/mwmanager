@@ -495,38 +495,53 @@ class RoundTripTests(Fixture):
         self.assertTrue(self.journal.entries()[1])
         self.assertTrue(self.journal.plan_rollback(self.game)["refuse"])
 
-    def test_each_mod_has_its_own_ledger_and_only_game_originals_are_copied(self):
-        """Rollbacks per mod, not all in one file; a file another mod deployed comes back from that mod's archive,
-        so only a game original is copied into the journal."""
+    def test_a_deployment_is_one_pointer_and_altered_files_are_kept_on_rollback(self):
+        """The install ledger holds one pointer per plugin deployment; the plugin's own journal holds only what
+        MWManager changed in its files; a file that changed after deployment goes to Off\\<plugin>\\Altered
+        Assets on rollback instead of being deleted; only a game original is copied into the journal."""
         self.journal.capture_baseline(self.game)
         first = write(self.game / "Data Files/Textures/shared.dds", b"mod A texture")
         self.journal.record_deployment(self.game, [{"target": str(first), "backup": None}],
-                                       tool="plugin_install.py", tag="plugin-deployment", mod="sha256-aaaa")
+                                       tool="plugin_install.py", tag="plugin-deployment", mod="sha256-aaaa",
+                                       label="Mod A-1-0.zip")
         backup_a = write(self.manager / "staging/b/Off/b/replaced/Textures/shared.dds", b"mod A texture")
         first.write_bytes(b"mod B texture")
         backup_esp = write(self.manager / "staging/b/Off/b/replaced/Existing Mod.esp", b"older mod")
         esp = write(self.game / "Data Files/Existing Mod.esp", b"mod B plugin")
+        mesh = write(self.game / "Data Files/Meshes/b.nif", b"mod B mesh")
         self.journal.record_deployment(self.game, [{"target": str(first), "backup": str(backup_a)},
-                                                   {"target": str(esp), "backup": str(backup_esp)}],
-                                       tool="plugin_install.py", tag="plugin-deployment", mod="sha256-bbbb")
-        self.assertTrue(self.journal.mod_ledger("sha256-aaaa").is_file())
-        self.assertTrue(self.journal.mod_ledger("sha256-bbbb").is_file())
-        install = self.journal.ledger.read_text(encoding="utf-8") if self.journal.ledger.is_file() else ""
-        self.assertNotIn("shared.dds", install)
+                                                   {"target": str(esp), "backup": str(backup_esp)},
+                                                   {"target": str(mesh), "backup": None}],
+                                       tool="plugin_install.py", tag="plugin-deployment", mod="sha256-bbbb",
+                                       label="Mod B-2-0.zip")
+        raw = [json.loads(line) for line in self.journal.ledger.read_text(encoding="utf-8").splitlines()]
+        pointers = [e for e in raw if e.get("manifest")]
+        self.assertEqual({e["owner"] for e in pointers}, {"sha256-aaaa", "sha256-bbbb"})
+        self.assertFalse(any("shared.dds" in e["path"] or "b.nif" in e["path"] for e in raw))
+        self.assertFalse(any(self.journal.mod_ledgers.glob("*.jsonl")))   # deployments are not per-file lines
         originals = self.manager / "journal/originals"
         self.assertFalse((originals / hashlib.sha256(b"mod A texture").hexdigest()).exists())
         self.assertTrue((originals / hashlib.sha256(b"older mod").hexdigest()).is_file())   # a game original
+        # an asset repair MWManager makes to B's texture goes to B's own journal
+        run = self.journal.start_run("mwmanager_assets_ext.py")
+        first.write_bytes(b"repaired texture")
+        self.journal.record(run["run"], "Data Files/Textures/shared.dds", "modify", sha(first))
+        self.assertTrue(self.journal.mod_ledger("sha256-bbbb").is_file())
+        mesh.unlink()
+        write(mesh, b"mod B mesh, edited afterwards")        # altered after deployment, not by MWManager
         mj._LEDGER_CACHE.clear()
         mj._MERGED.clear()
-        entries, problems = self.journal.entries()
-        self.assertEqual(problems, [])
-        self.assertEqual([e.get("mod") for e in entries if e["path"].endswith("shared.dds")],
-                         ["sha256-aaaa", "sha256-bbbb"])
+        mj._MANIFESTS.clear()
         plan = self.journal.plan_rollback(self.game)
         self.assertEqual(plan["refuse"], [])
         self.journal.execute_rollback(self.game, plan)
-        self.assertFalse(first.exists())
+        self.assertFalse(first.exists())                       # our own repair is not "altered"
         self.assertEqual(esp.read_bytes(), b"older mod")
+        self.assertFalse(mesh.exists())
+        kept = self.game / "Data Files/Off/Mod B-2-0/Altered Assets/Meshes/b.nif"
+        self.assertEqual(kept.read_bytes(), b"mod B mesh, edited afterwards")
+        self.assertNotIn("Data Files/Off/Mod B-2-0/Altered Assets/Meshes/b.nif",
+                         self.journal.verify(self.game)["extra"])
         self.journal.archive_ledger()
         self.assertFalse(self.journal.mod_ledgers.exists())
 

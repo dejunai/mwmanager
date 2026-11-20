@@ -12,13 +12,18 @@ under Data Files\\MWSE\\mods.
                            their own snapshot entry, never with a store list; the one exception is the three
                            masters and three BSAs, which are checked against known store-independent hashes
                            and reported (not refused) when modified. A copy of Morrowind.ini is kept too.
-  install.jsonl            one line per install path MWManager creates/replaces/changes/removes outside a mod's
-                           deployment (setup moves, asset repairs, generated patches); the first line for a path
-                           records where its original is (absent = new file). Hash-chained.
-  mods\\<mod>.jsonl         the same, one ledger per mod: what its deployments and removals changed. Only a game
-                           original it replaced is copied into originals\\; another mod's file comes back from
-                           that mod's archive.
-  manifests\\<sha256>.json  the file list of a large batch (a deployment of thousands of files is one ledger line).
+  install.jsonl            one line per install path MWManager creates/replaces/changes/removes (setup moves,
+                           generated patches), and one pointer line per plugin deployment or removal: its file
+                           list (manifests\\) with each file's size and time as deployed. The first line for a path
+                           records where its original is (absent = new file). Hash-chained. Only a game original
+                           a plugin replaced is copied into originals\\; anything else comes back from an archive.
+  mods\\<mod>.jsonl         a plugin's own journal: only what MWManager changed in its files afterwards (asset
+                           repairs, Lua edits), with originals. Retired when the plugin is rolled back, since
+                           unpacking its archive again undoes the rest (Tidy's moves included).
+  manifests\\<sha256>.json  the file list behind a pointer or a large batch.
+  Rollback moves a deployed file that changed after deployment (not by MWManager) to
+  Data Files\\Off\\<plugin>\\Altered Assets instead of deleting it; deploying the plugin again offers to
+  restore, delete or skip those.
   runs.jsonl               one line per run: tool, version, the ledger range it wrote (with its hash), inputs.
   inputs\\<sha256>.json     content-addressed copies of the choices a run used (FOMOD answers, options, order).
   mods.json                per mod: archive name + sha256, Nexus ids, staged folder, answers - mod rollback
@@ -104,6 +109,27 @@ def stat_marker(stat) -> str:
     """after_sha256 of a hardlink MWManager made: its size and modification time (a link shares them with its
     staged source), so recording 600,000 linked files doesn't read every byte of them again."""
     return f"stat:{stat.st_size}:{stat.st_mtime_ns}"
+
+
+def altered_folder(label: str) -> str:
+    """Data Files\\Off\\<plugin>\\Altered Assets: files a plugin deployed that changed afterwards, not by
+    MWManager. They are kept when the plugin is rolled back and offered back when it is deployed again."""
+    name = re.sub(r"[^A-Za-z0-9._ -]+", "_", Path(str(label)).stem).strip(" .") or "plugin-archive"
+    return f"Data Files/Off/{name}/Altered Assets"
+
+
+def is_altered_asset(k: str) -> bool:
+    parts = key(k).split("/")
+    return len(parts) > 4 and parts[:2] == ["data files", "off"] and parts[3] == "altered assets"
+
+
+def free_path(path: Path) -> Path:
+    """path, or "name (2).ext" and so on when it is taken."""
+    candidate, number = Path(path), 2
+    while candidate.exists():
+        candidate = path.with_name(f"{path.stem} ({number}){path.suffix}")
+        number += 1
+    return candidate
 
 
 def matches_after(path: Path, want: str) -> bool:
@@ -399,10 +425,12 @@ class Journal:
 
     def record_deployment(self, game_dir, operations: list[dict], *, tool: str, tag: str,
                           inputs: dict | None = None, moves: list[dict] | None = None,
-                          progress=None, mod: str | None = None) -> dict:
-        """Bridge a completed GUI deployment's operation list into the rollback ledger of its mod (`mod`, or each
-        operation's own "mod"). A file it replaced is copied into the journal only when it is a game original
-        (baseline or prerequisites): a file another mod deployed comes back from that mod's archive instead."""
+                          progress=None, mod: str | None = None, label: str | None = None) -> dict:
+        """Record a completed deployment in the install ledger as one pointer per plugin (`mod`/`label`, or each
+        operation's own): its file list, each file as deployed (size and time). A file it replaced is copied into
+        the journal only when it is a game original (baseline or prerequisites): a file another mod deployed
+        comes back from that mod's archive instead. Later changes MWManager makes to these files (asset repairs,
+        Lua edits) go to the plugin's own journal (journal\\mods)."""
         game_dir = Path(game_dir).resolve()
         if not self.has_baseline():
             raise RuntimeError("deployment requires a game baseline so rollback can remove it")
@@ -428,15 +456,12 @@ class Journal:
             if progress and (index == 1 or index == total or time.monotonic() - last_report >= 20):
                 progress(f"MWMANAGER-STAGE: Recording deployment: {index:,} of {total:,} files")
                 last_report = time.monotonic()
-            linked = (operation.get("verification") == "hardlink" and operation.get("size") == stat.st_size
-                      and operation.get("mtime_ns") == stat.st_mtime_ns)
-            deployed_hash = operation.get("sha256") or (stat_marker(stat) if linked else sha256_file(
-                target, progress, f"Recording deployment: {index:,} of {total:,} files — {target.name}"))
-            operation["sha256"] = deployed_hash
+            # the file as deployed: a later change (by the user) shows as a different size or time
+            deployed = stat_marker(stat)
             records.append({"run": run["run"], "path": rel,
                             "action": "replace" if backup else "create",
-                            "after_sha256": deployed_hash, "original": original, "tag": tag,
-                            "mod": operation.get("mod") or mod})
+                            "after_sha256": deployed, "original": original, "tag": tag,
+                            "owner": operation.get("mod") or mod, "label": operation.get("label") or label})
         for move in moves or []:
             source, target = Path(move["source"]).resolve(), Path(move["target"]).resolve()
             original = self.preserve_file(target)
@@ -445,7 +470,7 @@ class Journal:
             records.append({"run": run["run"], "path": rel_of(game_dir, target), "action": "create",
                             "after_sha256": original.get("sha256"), "original": {"kind": "absent"},
                             "tag": tag})
-        self.record_many(records)
+        self.record_many(records, batch_min=1)
         return self.finish_run(run)
 
     def baseline(self) -> dict:
@@ -551,7 +576,7 @@ class Journal:
             problems += file_problems if path == self.ledger else [f"mods/{path.name}: {p}" for p in file_problems]
         entries = list(parts[0]) if len(parts) == 1 else sorted((e for part in parts for e in part), key=lambda e: e["ts"])
         _MERGED[_ledger_key(self.root)] = {"signature": signature, "entries": entries, "problems": problems,
-                                           "originals": None}
+                                           "originals": None, "owners": None}
         return list(entries), list(problems)
 
     def _expanded(self, path: Path) -> tuple[list[dict], list[str]]:
@@ -613,7 +638,7 @@ class Journal:
                                   "after_sha256": after_sha256, "original": original,
                                   "tag": tag, "mod": mod}])[0]
 
-    def record_many(self, records: list[dict]) -> list[dict]:
+    def record_many(self, records: list[dict], batch_min: int | None = None) -> list[dict]:
         """One install change. original = {"kind": absent|gog|off|mwse-backups|mwmanager|disabled|baseline,
         "location": "game:<rel>" | "manager:<rel>" | "journal:<rel>", "sha256": ...}. Morrowind.ini edits use
         kind "baseline" with location "journal:baseline/Morrowind.ini".; only the first original for a path counts."""
@@ -635,16 +660,23 @@ class Journal:
                      "after_sha256": record.get("after_sha256"), "original": original}
             if record.get("tag"):
                 entry["tag"] = record["tag"]
-            if record.get("mod"):
-                entry["mod"] = record["mod"]
+            for field in ("mod", "owner", "label"):
+                if record.get(field):
+                    entry[field] = record[field]
             entries.append(entry)
         merged = _MERGED.get(_ledger_key(self.root))      # fresh: _original_paths just read it
+        if merged is not None and any(not e.get("mod") and not e.get("owner") for e in entries):
+            owners = self._owners(merged)
+            for entry in entries:               # MWManager changed a plugin's file: the plugin's own journal
+                if not entry.get("mod") and not entry.get("owner") and not str(entry.get("tag") or "").endswith("removal") \
+                        and key(entry["path"]) in owners:
+                    entry["mod"] = owners[key(entry["path"])]
         by_ledger: dict[Path, list[dict]] = {}
         for entry in entries:
             by_ledger.setdefault(self.mod_ledger(entry["mod"]) if entry.get("mod") else self.ledger, []).append(entry)
         prepared = []
         for path, group in by_ledger.items():
-            prepared += self._append_many(path, self._batch(group))
+            prepared += self._append_many(path, self._batch(group, BATCH_MIN if batch_min is None else batch_min))
         if merged is not None:
             if any(e.get("manifest") for e in prepared):
                 _MERGED.pop(_ledger_key(self.root), None)
@@ -653,19 +685,44 @@ class Journal:
                 merged["signature"] = self._signature(self._ledger_files())
                 if merged["originals"] is not None:
                     merged["originals"].update(key(e["path"]) for e in prepared if e.get("original"))
+                merged["owners"] = None
         return prepared
 
-    def _batch(self, entries: list[dict]) -> list[dict]:
+    def _owners(self, merged: dict) -> dict[str, str]:
+        """{path: the plugin whose deployment put it there}, from the merged ledger."""
+        if merged.get("owners") is None:
+            owners = {}
+            for entry in merged["entries"]:
+                if entry.get("owner"):
+                    if entry["action"] == "remove":
+                        owners.pop(key(entry["path"]), None)
+                    else:
+                        owners[key(entry["path"])] = entry["owner"]
+            merged["owners"] = owners
+        return merged["owners"]
+
+    def retire_mod(self, mod: str | None) -> None:
+        """A plugin rolled back to its archive: its journal (repairs, Lua edits) no longer applies; kept in history."""
+        if not mod:
+            return
+        path = self.mod_ledger(mod)
+        if path.is_file():
+            target = self.root / "history" / f"mod-{_dt.datetime.now():%Y%m%d-%H%M%S}-{path.name}"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(path, free_path(target))
+        _MERGED.pop(_ledger_key(self.root), None)
+
+    def _batch(self, entries: list[dict], batch_min: int) -> list[dict]:
         """Many files from one run (a 600,000-file deployment) become one entry pointing at a manifest of
         [path, after_sha256], so the ledger doesn't grow by a line per file every deployment."""
         groups: dict[str, list[dict]] = {}
         for entry in entries:
             if entry["action"] in ("create", "replace", "remove") and entry["original"] in (None, {"kind": "absent"}):
-                groups.setdefault(canon([entry["run"], entry.get("tag"), entry.get("mod"), entry["action"],
-                                         entry["original"]]), []).append(entry)
+                groups.setdefault(canon([entry["run"], entry.get("tag"), entry.get("mod"), entry.get("owner"),
+                                         entry.get("label"), entry["action"], entry["original"]]), []).append(entry)
         out = entries
         for new in groups.values():
-            if len(new) >= BATCH_MIN:
+            if len(new) >= batch_min:
                 out = self._batch_group(out, new)
         return out
 
@@ -684,7 +741,7 @@ class Journal:
         batch = {"ts": new[0]["ts"], "run": new[0]["run"], "path": f"manifests/{digest}.json",
                  "action": new[0]["action"], "manifest": digest, "count": len(new), "original": None,
                  "each_original": new[0]["original"]}
-        for field in ("tag", "mod"):
+        for field in ("tag", "mod", "owner", "label"):
             if new[0].get(field):
                 batch[field] = new[0][field]
         chosen = {id(e) for e in new}
@@ -1036,6 +1093,9 @@ class Journal:
             if keep_mge and mge_regenerated(k):
                 report["ignored"] += 1
                 continue
+            if is_altered_asset(k):
+                report["ignored"] += 1
+                continue
             if against == "deployed" and k.startswith("data files/off/"):
                 report["ignored"] += 1
                 continue
@@ -1142,9 +1202,24 @@ class Journal:
         originals = self._originals(entries)
         steps, prerequisite_steps, refuse, used_backups = [], [], list(problems), []
         rollback_checkpoint = self.checkpoint_state(True)
-        last_seq = {}                               # one pass: a per-path scan of the ledger was O(n^2)
+        last_seq, last_after, label_of = {}, {}, {}  # one pass: a per-path scan of the ledger was O(n^2)
         for index, e in enumerate(entries):         # oldest first: the last change to a path wins
-            last_seq[key(e["path"])] = index
+            k = key(e["path"])
+            last_seq[k], last_after[k] = index, e.get("after_sha256")
+            if e.get("label"):
+                label_of[k] = e["label"]
+
+        def delete_step(rel, k):
+            step = {"op": "delete", "path": rel}
+            want, label = last_after.get(k), label_of.get(k)
+            # shortcut: only files recorded by size and time are checked (older ledgers hold sha256 for every
+            # file, and hashing a whole install to roll it back is what made it slow); redeploy to upgrade
+            if label and want and want.startswith("stat:") and (game_dir / rel).is_file() \
+                    and not matches_after(game_dir / rel, want):
+                inner = rel[len("Data Files/"):] if key(rel).startswith("data files/") else rel
+                step["altered_to"] = f"{altered_folder(label)}/{inner}"
+            return step
+
         for k, original in sorted(originals.items(), key=lambda kv: -last_seq[kv[0]]):
             if k == "morrowind.ini":
                 continue                         # the whole baseline INI is authoritative, including old ledgers
@@ -1156,10 +1231,10 @@ class Journal:
                 # the checkpoint. Checkpoint ownership is authoritative: if the file
                 # did not exist at the prerequisite point, it must be deleted, not
                 # reconstructed from its later first journaled state.
-                steps.append({"op": "delete", "path": rel})
+                steps.append(delete_step(rel, k))
                 continue
             if original["kind"] == "absent":
-                steps.append({"op": "delete", "path": rel})
+                steps.append(delete_step(rel, k))
                 continue
             current = game_dir / rel
             checkpoint_hash = rollback_checkpoint.get(k)
@@ -1237,7 +1312,11 @@ class Journal:
         for step in steps:
             target = game_dir / step["path"]
             if step["op"] == "delete":
-                if target.is_file():
+                if target.is_file() and step.get("altered_to"):
+                    altered = free_path(game_dir / step["altered_to"])
+                    altered.parent.mkdir(parents=True, exist_ok=True)
+                    os.replace(target, altered)
+                elif target.is_file():
                     target.unlink()
             elif step["op"] == "restore":
                 target.parent.mkdir(parents=True, exist_ok=True)
