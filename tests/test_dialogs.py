@@ -93,6 +93,28 @@ class ThemedPrompts(unittest.TestCase):
         self._press("Cancel", seen)
         self.assertIsNone(dialogs.askstring("Add major master", "Master filename:", parent=self.root))
 
+    def test_a_long_message_shows_whole_without_scrolling(self):
+        import mwmanager_dialogs as dialogs
+        from preinstall import MCP_PATCH_GUIDANCE
+        seen = {}
+
+        def look():
+            top = next(w for w in self.root.winfo_children() if isinstance(w, tk.Toplevel))
+            top.update()
+            stack = [top]
+            while stack:
+                widget = stack.pop()
+                stack.extend(widget.winfo_children())
+                if widget.winfo_class() == "Text":
+                    seen["view"] = widget.yview()
+                if widget.winfo_class() == "TButton" and str(widget.cget("text")) == "No":
+                    button = widget
+            button.invoke()
+        self.root.after(300, look)
+        dialogs.askyesno("Configure and apply Morrowind Code Patch",
+                         MCP_PATCH_GUIDANCE + "\n\nOpen the MCP interface now?", parent=self.root)
+        self.assertEqual(seen["view"], (0.0, 1.0))
+
 
 if __name__ == "__main__":
     unittest.main()

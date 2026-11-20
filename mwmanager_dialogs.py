@@ -14,7 +14,7 @@ askstring the text or None. Folder and file pickers stay the system's (tkinter.f
 from __future__ import annotations
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import font as tkfont, ttk
 
 from mwmanager_theme import COLORS, SPACE, apply_theme, center
 
@@ -62,9 +62,13 @@ def _prompt(title, message, tone, buttons, default, cancel, parent=None, entry=N
         if len(message or "") > 650 or len((message or "").splitlines()) > 10:
             details_box = ttk.Frame(frame)
             details_box.pack(fill="both", expand=True, pady=(SPACE["sm"], SPACE["lg"]))
-            details = tk.Text(details_box, wrap="word", width=68,
-                              height=min(16, max(7, window.winfo_screenheight() // 55)),
-                              relief="flat", padx=8, pady=8)
+            details = tk.Text(details_box, wrap="word", width=68, relief="flat", padx=8, pady=8)
+            font = tkfont.Font(font=details.cget("font"))
+            room = font.measure("0" * 68)
+            # tall enough for the whole message (a word-wrap estimate plus one line), scrolling only past the screen
+            needed = sum(max(1, -(-font.measure(line) // room)) for line in (message or "").splitlines()) + 1
+            fits = max(7, (window.winfo_screenheight() - 260) // font.metrics("linespace"))
+            details.configure(height=min(needed, fits))
             details.insert("1.0", message or "")
             details.configure(state="disabled")
             scroll = ttk.Scrollbar(details_box, command=details.yview)
