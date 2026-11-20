@@ -140,6 +140,23 @@ def _archive_mod_id(archive: Path) -> int | None:
     return int(mod_id) if mod_id else None
 
 
+def archive_upload_time(path: Path) -> float:
+    """When Nexus published an archive, from its name (Vortex's "-1752788019" epoch or "2026-10-27T23-24Z"),
+    else the file's date: comparable across different mods' archives."""
+    stem = Path(path).stem
+    epoch = re.search(r"(?:^|[-_ ])(\d{10})(?:\s*\(\d+\))?$", stem)
+    if epoch:
+        return float(epoch.group(1))
+    iso = re.search(r"(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})Z", stem)
+    if iso:
+        import datetime
+        return datetime.datetime(*map(int, iso.groups()), tzinfo=datetime.timezone.utc).timestamp()
+    try:
+        return Path(path).stat().st_mtime
+    except OSError:
+        return 0.0
+
+
 def _starts_with_name(title: str, name: str) -> bool:
     """A voice pack is named after its master first ("OAAB Data - Voices"); a title that names another mod first
     ("Django's Dialogue Patch for Purists") is that mod's patch, not the master's voice pack."""
@@ -203,20 +220,20 @@ def find_companions(plan: dict, downloads_dir: str | os.PathLike, manager_dir: s
                     kind = "hd" if re.search(r"(?<![a-z])hd(?![a-z])", title.casefold()) else "extra"
                 elif str(info.get("category", "")).casefold() == "audio" and (voice_of := next(
                         (n for n in names if names_mod(n, title) and _starts_with_name(title, n)), None)):
-                    kind = "voice"
+                    kind = "music" if re.search(r"music|soundtrack", title.casefold()) else "voice"
                 else:
                     continue
                 if has_esm(path):
                     continue
                 version = _archive_version(path) or tuple(int(v) for v in re.findall(r"\d+", info.get("version", "")))
                 label = {"hd": "HD pack available", "extra": "Extra file from the same Nexus mod",
-                         "voice": "Voice pack available"}[kind]
+                         "voice": "Voice pack available", "music": "Music pack available"}[kind]
                 companion = {"archive": str(path), "kind": kind, "label": label, "name": title, "master": master,
                              "version": ".".join(map(str, version)) or None, "size_bytes": path.stat().st_size}
                 if voice_of:
                     companion["short"] = _after_name(title, voice_of)
                 # a voice pack is versioned on its own; only a file of the master's own Nexus mod is comparable
-                if kind != "voice" and version and master_version and version < master_version:
+                if kind not in ("voice", "music") and version and master_version and version < master_version:
                     companion["warning"] = (
                         f"{title} {companion['version']} is older than {master} "
                         f"{'.'.join(map(str, master_version))}: it may overwrite newer files.")

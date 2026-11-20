@@ -2096,8 +2096,26 @@ def _companion_records(mod_dir: Path) -> list[dict]:
         marker = json.loads((mod_dir / ".mwmanager-stage.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
+    from core_addons import _archive_mod_id, archive_upload_time
+    companions = list(marker.get("companions") or [])
+    for companion in companions:          # staged before music had its own kind ("Project Cyrodiil Music")
+        if companion.get("kind") == "voice" and re.search(r"music|soundtrack", str(companion.get("name", "")), re.I):
+            companion.update(kind="music", label="Music pack available")
+    voice = [c for c in companions if c.get("kind") == "voice"]
+
+    def pack_of(companion):                     # Part 1 and Part 2 of one Nexus mod are one pack
+        return _archive_mod_id(Path(companion["archive"])) or companion.get("name")
+
+    uploaded = {}
+    for companion in voice:
+        pack = pack_of(companion)
+        uploaded[pack] = max(uploaded.get(pack, 0.0), archive_upload_time(Path(companion["archive"])))
+    packs = sorted(uploaded, key=uploaded.get)          # oldest first: applied last, the newest wins a shared file
+    newest = packs[-1] if len(packs) > 1 else None
+    companions = [c for c in companions if c.get("kind") != "voice"] + sorted(
+        voice, key=lambda c: (packs.index(pack_of(c)), (c.get("short") or c.get("name") or "").casefold()))
     records = []
-    for order, companion in enumerate(marker.get("companions") or []):
+    for order, companion in enumerate(companions):
         archive = Path(companion["archive"])
         docs = (f"Separate download: {archive.name} ({int(companion.get('size_bytes') or 0) / 1048576:,.0f} MB). "
                 f"Extracted and deployed over {companion.get('master') or mod_dir.name} only if you choose it.")
@@ -2115,9 +2133,20 @@ def _companion_records(mod_dir: Path) -> list[dict]:
         if companion.get("kind") == "voice":
             # all voice packs in one box, all chosen; each row names only the NPCs it voices
             docs += f"\n\nFull name: {companion.get('name') or archive.stem}"
-            record.update(label=companion.get("short") or companion.get("name") or archive.stem, docs=docs,
-                          group_key="companion:voice", group_label="Voice packs", selection_type="SelectAny",
-                          recommended=True)
+            label = companion.get("short") or companion.get("name") or archive.stem
+            group_label = "Voice packs"
+            if newest is not None:
+                # several voice projects for one master: they voice many of the same lines (same file names)
+                is_newest = pack_of(companion) == newest
+                label = ("Newer · " if is_newest else "Older · ") + label
+                group_label = "Voice packs — newer wins shared lines, older fills the rest"
+                docs += ("\n\nSeveral voice projects are downloaded for this master, and they record many of the "
+                         "same lines (the same file names). With more than one chosen, the most recently uploaded "
+                         "pack's recording wins every line both voice"
+                         + ("; this is that pack." if is_newest else
+                            "; this older pack only adds the lines the newer pack does not have."))
+            record.update(label=label, docs=docs, group_key="companion:voice", group_label=group_label,
+                          selection_type="SelectAny", recommended=True)
         records.append(record)
     return records
 

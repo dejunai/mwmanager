@@ -158,6 +158,58 @@ class Companions(unittest.TestCase):
                 self.skipTest(f"Tk unavailable: {exc}")
         self.assertEqual(chosen, {r["key"] for r in records})
 
+    def test_newer_voice_pack_wins_shared_lines_and_older_fills_the_rest(self):
+        package = self.root / "staging" / "major_masters" / "Cyr_Main"
+        package.mkdir(parents=True)
+        downloads = self.root / "dl"
+        downloads.mkdir()
+        names = {"old": "Project Cyrodiil Fully Voiced Dialogue (MWSE)-57146-1-0-1752788019.zip",
+                 "p1": "Project Cyrodiil Part 1 60274 2 2026-10-27T23-24Z x2p02ARr.7z",
+                 "p2": "Project Cyrodiil Part 2 60274 2 2026-10-27T23-19Z 9AnoATdY.7z",
+                 "music": "Project Cyrodiil Music-55779-1-1-1737192092.7z"}
+        companions = [{"archive": str(downloads / names[k]), "kind": "voice", "label": "Voice pack available",
+                       "name": f"Project Cyrodiil {short}", "short": short, "master": "Cyr_Main.ESM",
+                       "size_bytes": 1}
+                      for k, short in (("old", "Fully Voiced Dialogue (MWSE)"), ("music", "Music"),
+                                       ("p1", "Part 1"), ("p2", "Part 2"))]
+        (package / ".mwmanager-stage.json").write_text(json.dumps({"companions": companions}), encoding="utf-8")
+        records = mock_fomod._companion_records(package)
+        voice = [r for r in records if r.get("group_key") == "companion:voice"]
+        self.assertEqual([r["label"] for r in voice],
+                         ["Older · Fully Voiced Dialogue (MWSE)", "Newer · Part 1", "Newer · Part 2"])
+        self.assertIn("newer wins", voice[0]["group_label"])
+        self.assertIn("only adds the lines", voice[0]["docs"])
+        music = next(r for r in records if "Music" in r["label"])
+        self.assertNotIn("group_key", music)                       # music is not a voice pack
+        self.assertEqual([r["number"] for r in records], sorted(r["number"] for r in records))
+
+        def pack(name, lines):
+            files = {}
+            for rel, text in lines.items():
+                path = self.root / "src" / name / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+                files[rel] = path
+            return files
+
+        payloads = {"Older · Fully Voiced Dialogue (MWSE)": pack("old", {"Sound/Vo/AIV/a.mp3": "old a",
+                                                                           "Sound/Vo/AIV/b.mp3": "old b"}),
+                    "Newer · Part 1": pack("p1", {"Sound/Vo/AIV/a.mp3": "new a"}),
+                    "Newer · Part 2": pack("p2", {"Sound/Vo/AIV/c.mp3": "new c"})}
+        for record in voice:
+            record["payload_files"] = payloads[record["label"]]
+        mock_fomod._activate(package, "Cyr_Main.ESM", records, {r["key"] for r in voice}, {}, self.root / "bk")
+        read = lambda rel: (package / rel).read_text(encoding="utf-8")
+        self.assertEqual(read("Sound/Vo/AIV/a.mp3"), "new a")                  # both voice it: the newer wins
+        self.assertEqual(read("Sound/Vo/AIV/b.mp3"), "old b")                  # only the older has it: kept
+        self.assertEqual(read("Sound/Vo/AIV/c.mp3"), "new c")
+
+    def test_upload_times_compare_across_name_formats(self):
+        epoch = core_addons.archive_upload_time(Path("X-57146-1-0-1752788019.zip"))
+        iso = core_addons.archive_upload_time(Path("X 60274 2 2026-10-27T23-24Z x2p02ARr.7z"))
+        self.assertEqual(epoch, 1752788019.0)
+        self.assertGreater(iso, epoch)
+
     def test_exclusive_and_required_groups_get_no_select_all_box(self):
         import tkinter as tk
         from tkinter import ttk
