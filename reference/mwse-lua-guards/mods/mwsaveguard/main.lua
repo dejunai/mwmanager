@@ -9,14 +9,33 @@ local defaults = {
 	enabled = true,
 	settleWindow = 5.0,
 	validateOnLoad = true,
-	logToMWSE = true,
+	copyNoticesToMWSELog = false,   -- every save's notices go to MWSE\logs\mwsaveguard.log; this copies them too
 	cleanClones = true,
 }
 local config = mwse.loadConfig(CONFIG_NAME, defaults)
 
+-- Routine notices (each save requested, deferred, completed) go to their own log, one per session: in MWSE.log
+-- they buried everything else. Problems (a corrupt save blocked, a save that failed, a player clone) still go to
+-- MWSE.log too.
+local LOG_DIR = "Data Files\\MWSE\\logs"
+local logFile, logTried = nil, false
+
 local function logMsg(fmt, ...)
-	if config.logToMWSE then
-		mwse.log(fmt, ...)
+	local line = string.format(fmt, ...)
+	if not logFile and not logTried then
+		logTried = true
+		pcall(lfs.mkdir, LOG_DIR)
+		logFile = io.open(LOG_DIR .. "\\mwsaveguard.log", "w")
+		if logFile then
+			logFile:write(os.date("mwsaveguard log, session started %Y-%m-%d %H:%M:%S\n"))
+		end
+	end
+	if logFile then
+		logFile:write(os.date("%H:%M:%S  "), line, "\n")
+		logFile:flush()
+	end
+	if config.copyNoticesToMWSELog or not logFile then
+		mwse.log("%s", line)
 	end
 end
 
@@ -333,11 +352,6 @@ local function onSave(e)
 	-- Always purge duplicate player clones before save proceeds or gets queued
 	purgePlayerClones()
 
-	-- If our own deferred execution triggered this, allow it straight through
-	if isExecutingDeferredSave then
-		return
-	end
-
 	local dh = tes3.dataHandler
 	local ndd = dh and dh.nonDynamicData
 	local isVolatileTransition = ndd and ndd.isSavingOrLoading
@@ -346,6 +360,24 @@ local function onSave(e)
 	local now = os.clock()
 	local cellElapsed = now - lastCellChangeTime
 	local charGenElapsed = now - lastCharGenFinishTime
+	local cell = tes3.player and tes3.player.cell
+
+	logMsg(
+		"[mwsaveguard] Save requested: file='%s', name='%s', cell='%s', menu=%s, background=%s, volatile=%s, cellElapsed=%.1fs, deferred=%s",
+		tostring(e.filename),
+		tostring(e.name),
+		tostring(cell and (cell.displayName or cell.id) or "<none>"),
+		tostring(tes3ui.menuMode()),
+		tostring(dh and dh.backgroundThreadRunning or false),
+		tostring(isVolatileTransition or false),
+		cellElapsed,
+		tostring(isExecutingDeferredSave)
+	)
+
+	-- If our own deferred execution triggered this, allow it straight through
+	if isExecutingDeferredSave then
+		return
+	end
 
 	-- Calculate the minimum elapsed time across all settling triggers
 	local minElapsed = math.min(cellElapsed, charGenElapsed)
@@ -380,6 +412,15 @@ end
 
 -- Priority 10000 ensures this intercepts before any other save handlers (like SSS or native)
 event.register("save", onSave, { priority = 10000 })
+
+local function onSaved(e)
+	logMsg(
+		"[mwsaveguard] Save completed: file='%s', name='%s'",
+		tostring(e.filename),
+		tostring(e.name)
+	)
+end
+event.register("saved", onSaved)
 
 -- While a save is waiting, the options menu (Esc) stays shut: quitting or loading from it would lose that save.
 local function onOptionsMenu()
@@ -441,9 +482,11 @@ event.register(tes3.event.modConfigReady, function()
 	})
 
 	page:createOnOffButton({
-		label = "Log Notices to MWSE.log",
-		description = "Outputs notices to MWSE.log when a save is deferred or an issue is caught.",
-		variable = mwse.mcm.createTableVariable({ id = "logToMWSE", table = config }),
+		label = "Also copy save notices to MWSE.log",
+		description = "Every save's notices (requested, deferred, completed) are written to "
+			.. "Data Files\\MWSE\\logs\\mwsaveguard.log. This copies them to MWSE.log as well. Problems (a corrupt "
+			.. "save blocked, a failed save, a player clone) always reach MWSE.log.",
+		variable = mwse.mcm.createTableVariable({ id = "copyNoticesToMWSELog", table = config }),
 	})
 
 	template:register()

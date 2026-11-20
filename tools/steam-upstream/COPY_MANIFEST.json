@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-20 (America/Los_Angeles); mwpluginpatches: Seyda Neen Coast Guard contraband bulk turn-in (coastGuardContraband)",
+  "SyncedAt": "2026-11-20 (America/Los_Angeles); luafix A5 (an NPC's head/hair guarded); mwsaveguard's routine notices in their own log",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -352,10 +352,10 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwsaveguard\\main.lua",
-      "Bytes": 16053,
-      "SHA256": "74826124c7436ff97a5c91ff0cb3ba2dbd4ab3156b91e0dc6f1bc45c05c3c1a2",
+      "Bytes": 17077,
+      "SHA256": "7b1c6362b55b2bb205b3d0a597411ec3bc395d84b69b78ca4ed96e5bd5cb8b24",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsaveguard\\main.lua",
-      "SourceModified": "2026-11-19T21:35:13"
+      "SourceModified": "2026-11-20T09:10:56"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwsaveguard\\validator.lua",
@@ -590,10 +590,10 @@
     },
     {
       "RelativePath": "mwdialog_luafix.py",
-      "Bytes": 139717,
-      "SHA256": "af14aa6e1254bfb5d19220a3b30b1fd55ca59b055ec21fb6a5658aa62f8e5f4c",
+      "Bytes": 141225,
+      "SHA256": "bbc993fa5f3857084a3dac7a2e81ae67f77b2a82d69d51828abb095000c6fd57",
       "Source": "<Steam Morrowind>\\mwdialog_luafix.py",
-      "SourceModified": "2026-11-19T19:26:15"
+      "SourceModified": "2026-11-20T09:09:22"
     },
     {
       "RelativePath": "mwdialog_master_sizes.json",
@@ -959,10 +959,10 @@
     },
     {
       "RelativePath": "tests\\test_luafix.py",
-      "Bytes": 49360,
-      "SHA256": "959df5b6dbf45707f2ed66af85ded36e66f978f96decab5fea6a89dc52e2d377",
+      "Bytes": 50832,
+      "SHA256": "72865bcb15f2c68c52c38d7e8a687f9e91bf436c8ecfa1a693b11ea743a8bf04",
       "Source": "<Steam Morrowind>\\tests\\test_luafix.py",
-      "SourceModified": "2026-11-19T19:26:15"
+      "SourceModified": "2026-11-20T09:09:13"
     },
     {
       "RelativePath": "tests\\test_mastercheck.py",
@@ -1203,6 +1203,13 @@
       "Bytes": 3354,
       "SHA256": "0091deb786da67ed27715b45bd5cd2b15c11514ed32f75d42d1b99b52f274ae3",
       "SourceModified": "2026-11-20T06:25:24"
+    },
+    {
+      "RelativePath": "tests\\test_saveguard_log.py",
+      "Source": "<Steam Morrowind>\\tests\\test_saveguard_log.py",
+      "Bytes": 2648,
+      "SHA256": "e90c75501934d86cf174d9dd21cc1526c57d28e0d52681528bff3ee58516d01b",
+      "SourceModified": "2026-11-20T09:10:48"
     }
   ]
 }
