@@ -69,6 +69,30 @@ class NonAsciiRename(unittest.TestCase):
             self.assertEqual(old.read_bytes(), b"first original")
             self.assertFalse((mod / "Off" / "Voices" / "non-ascii" / "Sound" / "Vo" / "thé.mp3").exists())
 
+
+class AssetRepairHeartbeat(unittest.TestCase):
+    def test_asset_repairs_say_how_far_they_are(self):
+        import contextlib
+        import io
+        import itertools
+        import tempfile
+        mwmanager_upstream.compose()
+        import mwdialog_assets
+        with tempfile.TemporaryDirectory() as tmp:
+            fixes = []
+            for i in range(3):
+                path = Path(tmp, f"m{i}.nif")
+                path.write_bytes(b"NIF without absolute paths")
+                fixes.append(("abs", str(path), f"Meshes\\m{i}.nif", {}))
+            clock = itertools.count(0, 25)                 # 25 s between calls: every file is a slow one
+            err = io.StringIO()
+            with mock.patch.object(mwdialog_assets.time, "monotonic", lambda: next(clock)), \
+                    contextlib.redirect_stderr(err):
+                mwdialog_assets.apply(fixes, tmp, tmp, mock.Mock(), [])
+            lines = err.getvalue().splitlines()
+            self.assertEqual(lines[0], "Asset repairs: 3 file(s)...")
+            self.assertIn("Asset repairs: 1 of 3 files...", lines)
+
 class TidyApplyProgress(unittest.TestCase):
     """A 54,000-move package sat silent for about a minute before its first progress line."""
 

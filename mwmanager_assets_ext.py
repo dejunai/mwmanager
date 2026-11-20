@@ -50,10 +50,16 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
         install_ledger.move_original(game_dir, full, dest, ledger_run["run"], tag="original-install-asset")
 
     tmp = os.path.join(tempfile.gettempdir(), f"mwmanager_tmp_assets_{os.getpid()}")
-    for kind, full, rel, job in fixes:
+    if fixes and not dry:                          # each file is converted or moved one by one: say so
+        print(f"Asset repairs: {len(fixes):,} file(s)...", file=sys.stderr, flush=True)
+    last_report = time.monotonic()
+    for index, (kind, full, rel, job) in enumerate(fixes, 1):
         if dry:
             done[kind] += 1
             continue
+        if time.monotonic() - last_report >= 20:
+            print(f"Asset repairs: {index - 1:,} of {len(fixes):,} files...", file=sys.stderr, flush=True)
+            last_report = time.monotonic()
         try:
             if kind == "tex":
                 if not texconv:
