@@ -19,8 +19,8 @@ under Data Files\\MWSE\\mods.
   mods.json                per mod: archive name + sha256, Nexus ids, staged folder, answers - mod rollback
                            re-extracts from the archive; nothing else is kept for mod files.
 
-Phase 1: --capture-baseline, --verify, --rollback --dry-run and mod-rollback --dry-run. The real rollback,
-mod re-extraction and backup cleanup are implemented for tests but not offered on the command line yet.
+Command line: --capture-baseline, --verify, --rollback (with --dry-run, --gog-only, --no-staging) and
+mod-rollback --dry-run. Mod re-extraction is implemented for tests but not offered on the command line yet.
 """
 from __future__ import annotations
 
@@ -857,7 +857,7 @@ class Journal:
                 "cleanup_after_verify": sorted(set(used_backups))}
 
     def execute_rollback(self, game_dir, plan: dict) -> None:
-        """Carry out a plan (tests only in phase 1). Restores are copies; backups stay until cleanup."""
+        """Carry out a plan. Restores are copies; backups stay until cleanup. Folders a delete empties go too."""
         if plan["refuse"]:
             raise RuntimeError("rollback refused: " + "; ".join(plan["refuse"]))
         game_dir = Path(game_dir).resolve()
@@ -875,6 +875,16 @@ class Journal:
                 shutil.copy2(self._resolve(game_dir, step["from"]), target)
             elif step["op"] == "restore-ini":
                 shutil.copy2(self.baseline_ini, target)
+        keep = {game_dir, game_dir / "Data Files"}
+        for step in steps:
+            if step["op"] == "delete":
+                folder = (game_dir / step["path"]).parent
+                while folder not in keep and folder.is_relative_to(game_dir):
+                    try:
+                        folder.rmdir()                  # only succeeds while empty: logs and saves keep theirs
+                    except OSError:
+                        break
+                    folder = folder.parent
 
     def cleanup_used_backups(self, game_dir, plan: dict, *, apply: bool = False) -> list[str]:
         """After a verified rollback: remove the Data Files\\Off / MWSE\\backups copies that were used."""

@@ -207,11 +207,15 @@ class LedgerTests(Fixture):
         deployments.write_text(json.dumps({"version": 1, "deployments": [{"masters": ["A.esm"]}]}),
                                encoding="utf-8")
         generated = write(self.game / "Data Files/generated.esp", b"generated")
+        nested = write(self.game / "Data Files/MWSE/mods/x/main.lua", b"return 1")
         staged = write(self.manager / "staging/major_masters/Keep/.mwmanager-stage.json", b"{}")
         self.journal.record("run", "Data Files/generated.esp", "create", sha(generated), {"kind": "absent"})
+        self.journal.record("run", "Data Files/MWSE/mods/x/main.lua", "create", sha(nested), {"kind": "absent"})
         rc = mj.main(["--game-dir", str(self.game), "--journal-dir", str(self.journal.root), "--rollback", "--gog-only"])
         self.assertEqual(rc, 0)
         self.assertFalse(generated.exists())
+        self.assertFalse((self.game / "Data Files/MWSE/mods/x").exists())   # folders the rollback emptied go too
+        self.assertTrue((self.game / "Data Files/MWSE/mods/old/main.lua").is_file())
         self.assertTrue(staged.exists())
         self.assertFalse(self.journal.ledger.exists())
         self.assertTrue(list((self.journal.root / "history").glob("install-*.jsonl")))
