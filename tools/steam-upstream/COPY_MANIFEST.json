@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-20 (America/Los_Angeles); CELL reference repairs moved from tidy to --fix (an .esm's misplaced copy deleted in the ESM patch); --fix findings in bug reports",
+  "SyncedAt": "2026-11-20 (America/Los_Angeles); bug reports list dirty records (--clean) and a master's own header faults; an .omwaddon rename is not a bug report",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -492,10 +492,10 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 525791,
-      "SHA256": "8d97391df1226e3b740aae579c429449a83f87acdf906c8622a050b9a58fabfd",
+      "Bytes": 526112,
+      "SHA256": "d482ca3d8ccf10b2a2280a173631c2974294dff6fd992aaae21af99754d7e79a",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
-      "SourceModified": "2026-11-20T05:43:23"
+      "SourceModified": "2026-11-20T06:09:09"
     },
     {
       "RelativePath": "mwdialog_check.rules.txt",
@@ -1182,6 +1182,13 @@
       "Bytes": 5742,
       "SHA256": "b82cc1466014d705398f604c9fe522296aa98ba639c895da92f1252e85fd4a05",
       "SourceModified": "2026-11-20T05:43:51"
+    },
+    {
+      "RelativePath": "tests\\test_bug_report_sources.py",
+      "Source": "<Steam Morrowind>\\tests\\test_bug_report_sources.py",
+      "Bytes": 1270,
+      "SHA256": "21a49bc59e8f9da210f13d5e8122872aaf186a51f37074bac40e0827fca8bb20",
+      "SourceModified": "2026-11-20T06:09:21"
     }
   ]
 }
