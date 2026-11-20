@@ -158,6 +158,43 @@ class Companions(unittest.TestCase):
                 self.skipTest(f"Tk unavailable: {exc}")
         self.assertEqual(chosen, {r["key"] for r in records})
 
+    def test_exclusive_and_required_groups_get_no_select_all_box(self):
+        import tkinter as tk
+        from tkinter import ttk
+        package = self.root / "pkg"
+        package.mkdir()
+
+        def group(kind, required=False):
+            return [{"key": f"{kind}:{i}", "path": None, "number": 900, "label": f"{kind} {i}",
+                     "required": required, "core_bundle": False, "has_plugin_payload": False,
+                     "has_master_payload": False, "informational_utility": False, "targets": [],
+                     "compatible": [], "missing_masters": [], "docs": "", "mod_dir": package, "badges": [],
+                     "outputs": set(), "group_key": kind, "group_label": kind, "selection_type": kind}
+                    for i in range(4)]
+
+        records = group("SelectExactlyOne") + group("SelectAtMostOne") + group("SelectAll") + \
+            [dict(r, group_key="req", selection_type="SelectAny") for r in group("SelectAny", required=True)]
+        found = {}
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from walk(child)
+
+        def look(window):
+            found["radios"] = sum(isinstance(w, ttk.Radiobutton) for w in walk(window))
+            found["boxes"] = [w for w in walk(window)
+                              if isinstance(w, ttk.Checkbutton) and w.cget("text") == "Select all"]
+            window.destroy()
+
+        with mock.patch.object(tk.Tk, "mainloop", look), mock.patch("mwmanager_dialogs._prompt", return_value=True):
+            try:
+                mock_fomod._show_selector("X", records, set(), set())
+            except tk.TclError as exc:
+                self.skipTest(f"Tk unavailable: {exc}")
+        self.assertEqual(found["radios"], 8)                  # both one-choice groups rendered as radios
+        self.assertEqual(found["boxes"], [])
+
     def test_option_window_offers_companions_and_extracts_only_a_chosen_one(self):
         staging = self.root / "staging" / "major_masters"
         package = staging / "OAAB_Data"
