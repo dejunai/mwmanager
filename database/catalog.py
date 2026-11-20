@@ -149,6 +149,39 @@ def first_name_subrecord(body: bytes) -> bytes | None:
     return None
 
 
+def record_identity(tag: str, body: bytes) -> tuple[str, str] | None:
+    """(key, label) from upstream's record_id rules: INFO by INAM, CELL by grid or name, LAND by INTV,
+    SCPT by SCHD, SKIL/MGEF by INDX, the rest by NAME. None for records without an identity."""
+    if str(Path(__file__).resolve().parents[1]) not in sys.path:
+        sys.path.append(str(Path(__file__).resolve().parents[1]))     # mwdialog_tes3 sits in MWManager's folder
+    import mwdialog_tes3 as tes3
+    identity = tes3.record_id(tag, body)
+    if identity is None:
+        return None
+    parts = []
+    for part in identity[1:]:
+        for value in (part if isinstance(part, tuple) else (part,)):
+            parts.append(value.hex() if isinstance(value, bytes) else str(value))
+    key = "|".join(parts)
+    if tag == "CELL":
+        label = tes3.cell_key(body)[1]
+    elif tag == "LAND" and len(identity[1]) >= 8:
+        label = "({}, {})".format(*struct.unpack_from("<ii", identity[1]))
+    elif tag in ("SKIL", "MGEF") and len(identity[1]) >= 4:
+        label = str(struct.unpack_from("<i", identity[1])[0])
+    else:                       # original case: saved winner choices are keyed by this text
+        if tag == "INFO":
+            raw = tes3.first_sub(body, b"INAM")
+        elif tag == "SCPT":
+            raw = tes3.first_sub(body, b"SCHD")[:32]
+        else:
+            raw = tes3.first_sub(body, b"NAME")
+        label = tes3.cstr(raw or b"")
+        if tag == "PGRD":
+            label = f"{label} {identity[2]}"
+    return key, label
+
+
 def bsa_entries(path: Path):
     """Yield member path, absolute data offset, and indexed size for TES3 BSA v1."""
     with path.open("rb") as stream:
@@ -182,8 +215,21 @@ def bsa_entries(path: Path):
             yield name, data_start + relative_offset, size
 
 
+IDENTITY_VERSION = 1      # PRAGMA user_version once editor_id_norm follows record_id (it was NAME for every type)
+
+
 def create_schema(connection: sqlite3.Connection, schema_path: Path) -> None:
     connection.executescript(schema_path.read_text(encoding="utf-8"))
+    if connection.execute("PRAGMA user_version").fetchone()[0] < IDENTITY_VERSION:
+        # Older catalogs keep every record body, so the keys are recomputed in place, not re-indexed.
+        rows = connection.execute("SELECT record_id, record_tag, body FROM esm_record").fetchall()
+        updates = []
+        for row_id, tag, body in rows:
+            identity = record_identity(tag, bytes(body))
+            updates.append((*(identity or (None, None)), row_id))
+        connection.executemany("UPDATE esm_record SET editor_id_norm = ?, editor_id = ? WHERE record_id = ?", updates)
+        connection.execute(f"PRAGMA user_version = {IDENTITY_VERSION}")
+        connection.commit()
 
 
 def index_esm(connection: sqlite3.Connection, path: Path, load_order: int) -> int:
@@ -191,8 +237,9 @@ def index_esm(connection: sqlite3.Connection, path: Path, load_order: int) -> in
     connection.execute("DELETE FROM esm_record WHERE source_file = ?", (name,))
     count = 0
     for ordinal, offset, tag, flags, body in iter_esm_records(path):
-        editor_raw = first_name_subrecord(body)
-        editor_text = editor_raw.decode("cp1252", "replace") if editor_raw is not None else None
+        editor_raw = first_name_subrecord(body)                 # also validates the subrecord layout
+        identity = record_identity(tag, body)
+        editor_key, editor_text = identity if identity else (None, None)
         connection.execute(
             """INSERT INTO esm_record
                (source_file, source_sha256, load_order, record_ordinal, file_offset, record_tag,
@@ -200,7 +247,7 @@ def index_esm(connection: sqlite3.Connection, path: Path, load_order: int) -> in
                 body_size, body_sha256, body)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (name, digest, load_order, ordinal, offset, tag, flags, editor_raw, editor_text,
-             editor_text.casefold() if editor_text is not None else None,
+             editor_key,
              len(body), hashlib.sha256(body).digest(), body))
         count += 1
         if count % 5000 == 0:
