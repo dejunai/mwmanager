@@ -399,7 +399,7 @@ class RoundTripTests(Fixture):
         old = write(self.game / "Data Files/Off/Unknown Plugin/Reprocessed textures/Textures/old.dds", b"old")
         write(Path(str(old) + ".repaired.sha256"), b"digest\n")
         self.assertEqual(self.journal.migrate_unknown_asset_backups(self.game), 2)
-        new = self.game / "Data Files/Off/Original Install/Reprocessed textures/Textures/old.dds"
+        new = self.game / "Data Files/Off/Found at Setup/Reprocessed textures/Textures/old.dds"
         self.assertTrue(new.is_file())
         self.assertFalse(old.exists())
         plan = self.journal.plan_rollback(self.game)
@@ -411,7 +411,7 @@ class RoundTripTests(Fixture):
         self.journal.capture_baseline(self.game)
         old = write(self.game / "Data Files/Off/Official Assets/Textures/old.dds", b"old")
         self.assertEqual(self.journal.migrate_official_asset_backups(self.game), 1)
-        new = self.game / "Data Files/Off/Original Install/Official Assets/Textures/old.dds"
+        new = self.game / "Data Files/Off/Found at Setup/Official Assets/Textures/old.dds"
         self.assertTrue(new.is_file())
         self.assertFalse(old.exists())
         plan = self.journal.plan_rollback(self.game)

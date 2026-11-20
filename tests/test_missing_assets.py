@@ -103,7 +103,7 @@ class MissingAssetsAtStaging(unittest.TestCase):
         original.parent.mkdir(parents=True)
         original.write_bytes(b"RIFF vanilla")
         mwmanager_journal.Journal(self.manager / "journal").capture_baseline(self.game)
-        kept = self.data / "Off" / "Original Install" / "Unused assets" / "Sound" / "Cr" / "kgout" / "moan2.wav"
+        kept = self.data / "Off" / "Found at Setup" / "Unused assets" / "Sound" / "Cr" / "kgout" / "moan2.wav"
         kept.parent.mkdir(parents=True)
         os.replace(original, kept)
         plugin(self.staging / "TR" / "TR_Mainland.esm", record("SOUN", sub("NAME", "moan"), sub("FNAM", "Cr\\kgout\\moan2.wav")))

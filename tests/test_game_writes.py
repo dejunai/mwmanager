@@ -108,13 +108,13 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         official = self.m.asset_backup_file("texture-reduction", os.path.join("textures", "b.dds"),
                                             data_dir=str(self.data))
         self.assertEqual(os.path.normcase(official), os.path.normcase(
-            str(self.data / "Off" / "Original Install" / "texture-reduction" / "textures" / "b.dds")))
+            str(self.data / "Off" / "Found at Setup" / "texture-reduction" / "textures" / "b.dds")))
 
     def test_shipped_assets_use_original_install_and_patched_esps_use_manager_backups(self):
         for name in ("Siege at Firemoth.esp", "Morrowind.esm", "Tribunal.bsa"):
             path = self.m.plugin_off_backup_path(str(self.data), name, "plugin-repair", plugin=name)
             self.assertTrue(os.path.normcase(path).startswith(
-                os.path.normcase(str(self.data / "Off" / "Original Install" / "plugin-repair")) + os.sep))
+                os.path.normcase(str(self.data / "Off" / "Found at Setup" / "plugin-repair")) + os.sep))
         esp = self.data / "Siege at Firemoth.esp"
         esp.write_bytes(b"TES3")
         bak = self.m.backup_path(str(esp))
@@ -122,6 +122,67 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         self.assertIn(os.path.join("plugins", "Official Add-Ons"), bak)
         Path(bak).write_bytes(b"old")
         self.assertIn(bak, self.m.backup_candidates(str(esp)))
+
+    def deployed_package_file(self, name="magewall.dds"):
+        """A Dr_Data texture deployed by hard link from its staged package (the real owner lookup is used)."""
+        import mwdialog_datatree
+        package = self.manager / "staging" / "major_masters" / "Dr_Data-51776"
+        (package / "textures" / "dr").mkdir(parents=True, exist_ok=True)
+        (package / "Dr_Data.esm").write_bytes(b"TES3")
+        staged = package / "textures" / "dr" / name
+        staged.write_bytes(b"dds")
+        (self.data / "textures" / "dr").mkdir(parents=True, exist_ok=True)
+        os.link(staged, self.data / "textures" / "dr" / name)
+        real_owner = mock.patch.object(self.m, "asset_owner_folder", mwdialog_datatree.asset_owner_folder)
+        real_owner.start()
+        self.addCleanup(real_owner.stop)
+        return package, staged
+
+    def test_an_asset_a_staged_package_deployed_is_kept_in_that_packages_off(self):
+        package, _staged = self.deployed_package_file()
+        path = self.m.plugin_off_backup_path(str(self.data), os.path.join("textures", "dr", "magewall.dds"),
+                                             "Unused assets")
+        self.assertEqual(os.path.normcase(path), os.path.normcase(
+            str(package / "Off" / "Dr_Data" / "Unused assets" / "textures" / "dr" / "magewall.dds")))
+
+    def test_an_unused_deployed_asset_leaves_staging_and_restore_puts_it_back(self):
+        import mwdialog_assets
+        import mwmanager_journal
+        package, staged = self.deployed_package_file()
+        mwmanager_journal.Journal(self.manager / "journal").capture_baseline(self.data.parent)
+        rel = os.path.join("textures", "dr", "magewall.dds")
+        mwdialog_assets.apply([("unused", str(self.data / rel), rel, "unused")],
+                              str(self.data), str(self.game), self.m, [])
+        kept = package / "Off" / "Dr_Data" / "Unused assets" / rel
+        self.assertEqual(kept.read_bytes(), b"dds")
+        self.assertFalse((self.data / rel).exists())
+        self.assertFalse(staged.exists())                   # a redeploy can't link it back
+        self.assertFalse((self.data / "Off").exists())      # nothing under Found at Setup
+        mwdialog_assets.restore_unused(str(self.game), str(self.data))
+        self.assertTrue(staged.is_file())
+        self.assertTrue(os.path.samefile(staged, self.data / rel))
+
+    def test_original_install_is_split_between_packages_and_found_at_setup(self):
+        import mwmanager_journal
+        package, staged = self.deployed_package_file()
+        old = self.data / "Off" / "Original Install" / "Unused assets"
+        (old / "textures" / "dr").mkdir(parents=True)
+        os.replace(self.data / "textures" / "dr" / "magewall.dds", old / "textures" / "dr" / "magewall.dds")
+        (old / "textures" / "game.dds").write_bytes(b"shipped")
+        record = self.manager / "outputs" / "mwmanager_unused_assets.txt"
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(f"t\ttextures\\dr\\magewall.dds\t{old / 'textures' / 'dr' / 'magewall.dds'}\tunused\n",
+                          encoding="utf-8")
+        journal = mwmanager_journal.Journal(self.manager / "journal")
+        journal.capture_baseline(self.data.parent)
+        self.assertEqual(journal.migrate_original_install(self.data.parent, [record]), 2)
+        moved = package / "Off" / "Dr_Data" / "Unused assets" / "textures" / "dr" / "magewall.dds"
+        self.assertEqual(moved.read_bytes(), b"dds")
+        self.assertFalse(staged.exists())
+        self.assertEqual((self.data / "Off" / "Found at Setup" / "Unused assets" / "textures" / "game.dds")
+                         .read_bytes(), b"shipped")
+        self.assertFalse((self.data / "Off" / "Original Install").exists())
+        self.assertIn(str(moved), record.read_text(encoding="utf-8"))
 
     def test_initial_tidy_journals_a_shipped_asset_move(self):
         import mwdialog_assets
@@ -135,7 +196,7 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
             [("unused", str(source), os.path.join("textures", "unused.dds"), "unused")],
             str(self.data), str(self.game), self.m, log,
         )
-        destination = self.data / "Off" / "Original Install" / "Unused assets" / "textures" / "unused.dds"
+        destination = self.data / "Off" / "Found at Setup" / "Unused assets" / "textures" / "unused.dds"
         self.assertEqual(destination.read_bytes(), b"original")
         self.assertFalse(source.exists())
         plan = journal.plan_rollback(self.data.parent)
@@ -189,7 +250,7 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         original.write_bytes(b"RIFF vanilla")
         journal = mwmanager_journal.Journal(self.manager / "journal")
         journal.capture_baseline(self.data.parent)
-        kept = self.data / "Off" / "Original Install" / "Unused assets" / "Sound" / "Cr" / "kgout" / "moan2.wav"
+        kept = self.data / "Off" / "Found at Setup" / "Unused assets" / "Sound" / "Cr" / "kgout" / "moan2.wav"
         kept.parent.mkdir(parents=True)
         os.replace(original, kept)                     # what the unused-asset purge did before a master needed it
         log = []

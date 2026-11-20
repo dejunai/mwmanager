@@ -1153,8 +1153,11 @@ class ManagerGUI(tk.Tk):
             journal = mwmanager_journal.Journal(APP_DIR / "journal")
             migrated = journal.migrate_unknown_asset_backups(self.settings["game_dir"])
             migrated += journal.migrate_official_asset_backups(self.settings["game_dir"])
+            migrated += journal.migrate_original_install(
+                self.settings["game_dir"], sorted((APP_DIR / "outputs").glob("*unused_assets.txt")))
             if migrated:
-                self.status.set(f"Migrated {migrated} legacy asset backup files to Off/Original Install.")
+                self.status.set(f"Moved {migrated} kept file(s) from Off/Original Install: a package's own to its "
+                                "Off folder, the rest to Off/Found at Setup.")
         except (OSError, ValueError, RuntimeError) as exc:
             self.status.set(f"Legacy asset-backup migration needs attention: {exc}")
         changed = False

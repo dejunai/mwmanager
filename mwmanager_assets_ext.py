@@ -25,7 +25,7 @@ FEATURE_OF = {"snd": "Reprocessed sounds", "tex": "Reprocessed textures",
               "broken": "Damaged assets", "orphan": "Unused assets", "unused": "Unused assets"}
 
 
-def broken_dest(root_or_mod, rel, sub="broken", plugin="Original Install"):
+def broken_dest(root_or_mod, rel, sub="broken", plugin="Found at Setup"):
     """<mod>\\Off\\<plugin>\\<feature>\\<original path>."""
     owner = os.path.splitext(os.path.basename(plugin))[0]
     return os.path.join(root_or_mod, "Off", owner, sub, rel)
@@ -47,7 +47,14 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
             import mwmanager_journal
             install_ledger = mwmanager_journal.Journal(os.path.join(MANAGER_DIR, "journal"))
             ledger_run = install_ledger.start_run("mwmanager_install.py", {"operation": "initial asset tidy"})
+        data_abs = os.path.normcase(os.path.abspath(data_dir))
+        staged = [p for p in m.hard_link_names(full) if not os.path.normcase(p).startswith(data_abs + os.sep)]
         install_ledger.move_original(game_dir, full, dest, ledger_run["run"], tag="original-install-asset")
+        # deployed from a staged package and now kept in that package's Off: its copy at the deploy path goes
+        # too, or the next deployment links it straight back (--restore-unused puts it back there)
+        for path in staged:
+            if not OFF_MARKER_RE.search(path) and os.path.isfile(path):
+                os.remove(path)
 
     tmp = os.path.join(tempfile.gettempdir(), f"mwmanager_tmp_assets_{os.getpid()}")
     if fixes and not dry:                          # each file is converted or moved one by one: say so
@@ -139,6 +146,7 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
         except OSError as e:
             skipped.append(f"{rel} ({e})")
     if moves:
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
         with open(os.path.join(OUTPUT_DIR, UNUSED_RECORD), "a", encoding="utf-8") as f:
             for rel, dest, why in moves:
                 f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')}\t{rel}\t{dest}\t{why}\n")

@@ -155,6 +155,24 @@ def read_hashdb(path: Path) -> dict[str, tuple[str, str]]:
 
 
 # ------------------------------------------------------------------------------------------------ journal
+_LEDGER_CACHE: dict[str, dict] = {}   # ledger path -> its last read (entries, problems) and the file's size/age then
+
+
+def _ledger_key(path: Path) -> str:
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _ledger_stat(path: Path):
+    try:
+        stat = Path(path).stat()
+    except OSError:
+        return None
+    return stat.st_size, stat.st_mtime_ns
+
+
+FOUND_AT_SETUP = "Found at Setup"      # Off/<this>: files no mod deployed (in Data Files when setup began)
+
+
 class Journal:
     def __init__(self, root: Path | str | None = None):
         self.root = Path(root) if root else DEFAULT_ROOT
@@ -383,6 +401,13 @@ class Journal:
         entries, problems, prev = [], [], None
         if not path.is_file():
             return entries, problems
+        # The install ledger reaches hundreds of MB; reading and checking it took ~10 s, and every recorded move
+        # did that four times. Reuse the last read while the file is the size and age it was then.
+        cache_key = _ledger_key(path)
+        stat = _ledger_stat(path)
+        cached = _LEDGER_CACHE.get(cache_key)
+        if cached is not None and cached["stat"] == stat:
+            return list(cached["entries"]), list(cached["problems"])
         lines = path.read_text(encoding="utf-8").splitlines()
         for number, line in enumerate(lines, 1):
             if not line.strip():
@@ -401,7 +426,8 @@ class Journal:
                 problems.append(f"{path.name}: hash chain broken at line {number}")
             entries.append(entry)
             prev = entry.get("hash")
-        return entries, problems
+        _LEDGER_CACHE[cache_key] = {"stat": stat, "entries": entries, "problems": problems, "originals": None}
+        return list(entries), list(problems)
 
     @classmethod
     def _append(cls, path: Path, entry: dict) -> dict:
@@ -422,14 +448,34 @@ class Journal:
             prepared.append(entry)
             prev, seq = entry["hash"], seq + 1
         path.parent.mkdir(parents=True, exist_ok=True)
+        cached = _LEDGER_CACHE.get(_ledger_key(path))
+        if cached is not None and cached["stat"] != _ledger_stat(path):
+            cached = None                       # changed since it was read: read it fresh next time
         with open(path, "a", encoding="utf-8") as stream:
             stream.writelines(canon(entry) + "\n" for entry in prepared)
             stream.flush()
             os.fsync(stream.fileno())
+        if cached is None:
+            _LEDGER_CACHE.pop(_ledger_key(path), None)
+        else:                                   # what was read, plus what was just written
+            cached["entries"].extend(prepared)
+            cached["stat"] = _ledger_stat(path)
+            if cached["originals"] is not None:
+                cached["originals"].update(key(e["path"]) for e in prepared if e.get("original"))
         return prepared
 
     def entries(self) -> tuple[list[dict], list[str]]:
         return self._read_jsonl(self.ledger)
+
+    def _original_paths(self) -> set[str]:
+        """Paths whose first original is already recorded (a copy: the caller may add to it)."""
+        entries, _problems = self._read_jsonl(self.ledger)
+        cached = _LEDGER_CACHE.get(_ledger_key(self.ledger))
+        if cached is None:                      # no ledger yet
+            return {key(entry["path"]) for entry in entries if entry.get("original")}
+        if cached["originals"] is None:
+            cached["originals"] = {key(entry["path"]) for entry in cached["entries"] if entry.get("original")}
+        return set(cached["originals"])
 
     def first_original(self, rel: str, entries=None) -> dict | None:
         for entry in entries if entries is not None else self.entries()[0]:
@@ -447,8 +493,7 @@ class Journal:
         """One install change. original = {"kind": absent|gog|off|mwse-backups|mwmanager|disabled|baseline,
         "location": "game:<rel>" | "manager:<rel>" | "journal:<rel>", "sha256": ...}. Morrowind.ini edits use
         kind "baseline" with location "journal:baseline/Morrowind.ini".; only the first original for a path counts."""
-        existing, _problems = self.entries()
-        original_paths = {key(entry["path"]) for entry in existing if entry.get("original")}
+        original_paths = self._original_paths()
         entries = []
         for record in records:
             action = record["action"]
@@ -505,7 +550,7 @@ class Journal:
         if not old.is_dir():
             return 0
         files = [path for path in old.rglob("*") if path.is_file()]
-        destinations = [(path, old.parent / "Original Install" / path.relative_to(old)) for path in files]
+        destinations = [(path, old.parent / FOUND_AT_SETUP / path.relative_to(old)) for path in files]
         collision = next((target for _source, target in destinations if target.exists()), None)
         if collision:
             raise FileExistsError(f"cannot migrate legacy asset backup over {collision}")
@@ -522,13 +567,13 @@ class Journal:
         return len(files)
 
     def migrate_official_asset_backups(self, game_dir) -> int:
-        """Consolidate the obsolete second shipped-asset owner under Off/Original Install."""
+        """Consolidate the obsolete second shipped-asset owner under Off/Found at Setup."""
         game_dir = Path(game_dir).resolve()
         old = game_dir / "Data Files" / "Off" / "Official Assets"
         if not old.is_dir():
             return 0
         files = [path for path in old.rglob("*") if path.is_file()]
-        owner = old.parent / "Original Install" / "Official Assets"
+        owner = old.parent / FOUND_AT_SETUP / "Official Assets"
         destinations = [(path, owner / path.relative_to(old)) for path in files]
         collision = next((target for _source, target in destinations if target.exists()), None)
         if collision:
@@ -544,6 +589,65 @@ class Journal:
             Path(folder).rmdir()
         self.finish_run(run)
         return len(files)
+
+    def migrate_original_install(self, game_dir, unused_records=()) -> int:
+        """Off/Original Install held everything these tools took out of Data Files that no plugin folder took:
+        files a staged package deployed went there too. Each one a package deployed (a hard link into staging)
+        now goes to that package's Off/<plugin>/<feature>/ and leaves the package's deploy path; the rest go
+        to Off/Found at Setup/. The unused-asset records are updated so --restore-unused still finds them."""
+        game_dir = Path(game_dir).resolve()
+        data_dir = game_dir / "Data Files"
+        old = data_dir / "Off" / "Original Install"
+        if not old.is_dir():
+            return 0
+        from mwdialog_datatree import hard_link_names
+        data_abs = os.path.normcase(str(data_dir))
+        moves = []
+        for path in sorted(p for p in old.rglob("*") if p.is_file()):
+            feature, *rel_parts = path.relative_to(old).parts
+            staged = [Path(p) for p in hard_link_names(str(path))
+                      if not os.path.normcase(p).startswith(data_abs + os.sep)
+                      and not re.search(r"[\\/]off[\\/]", p, re.I)]
+            target, deploy_copy = old.parent / FOUND_AT_SETUP / path.relative_to(old), None
+            if staged and rel_parts:
+                package = staged[0]
+                for _ in rel_parts:
+                    package = package.parent
+                plugin = next((p.stem for p in sorted(package.iterdir()) if p.suffix.casefold() in (".esp", ".esm")),
+                              package.name) if package.is_dir() else package.name
+                target, deploy_copy = package / "Off" / plugin / feature / Path(*rel_parts), staged[0]
+            if target.exists():
+                raise FileExistsError(f"cannot move {path} over {target}")
+            moves.append((path, target, deploy_copy))
+        run = self.start_run("mwmanager_journal.py", {"operation": "move Off/Original Install"})
+        renamed = {}
+        for source, target, deploy_copy in moves:
+            digest = sha256_file(source)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(source, target)
+            if deploy_copy is not None and deploy_copy.is_file():
+                deploy_copy.unlink()            # kept in the package's Off now: not deployed again
+            self.record(run["run"], rel_of(game_dir, source), "remove", None, None, tag="asset-repair-backup")
+            if target.is_relative_to(game_dir):
+                self.record(run["run"], rel_of(game_dir, target), "create", digest, {"kind": "absent"},
+                            tag="asset-repair-backup")
+            renamed[os.path.normcase(str(source))] = str(target)
+        for folder, _dirs, _names in os.walk(old, topdown=False):
+            Path(folder).rmdir()
+        for record in unused_records:
+            record = Path(record)
+            if not record.is_file():
+                continue
+            lines = record.read_text(encoding="utf-8").splitlines()
+            fixed = []
+            for line in lines:
+                parts = line.split("\t")
+                if len(parts) >= 3 and os.path.normcase(parts[2]) in renamed:
+                    parts[2] = renamed[os.path.normcase(parts[2])]
+                fixed.append("\t".join(parts))
+            record.write_text("\n".join(fixed) + ("\n" if fixed else ""), encoding="utf-8")
+        self.finish_run(run)
+        return len(moves)
 
     # ------------------------------------------------------------------------------------- runs / inputs
     def store_input(self, value) -> str:

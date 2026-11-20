@@ -281,13 +281,15 @@ def off_dest(mod, feature, plugin, rel):
 
 # the Off\\ folder name for a file no plugin owns: shipped assets, or whatever was in Data Files when the user
 # kept an existing install
-ORIGINAL_INSTALL = "Original Install"
+ORIGINAL_INSTALL = "Found at Setup"
+LEGACY_ORIGINAL_INSTALL = "Original Install"     # its earlier name; files kept there are still found
 
 
 def backup_asset_original(data_dir, rel, plugin=None, feature="repair"):
     """Keep one pre-repair original under Off/<plugin>/<feature>/<original relative path>."""
-    shipped = shipped_game_file(data_dir, rel)
-    mod, owner_plugin = (None, None) if shipped else asset_owner_folder(data_dir, rel)
+    # the owner first: a file a staged mod deployed (a hard link) is that mod's, whatever folder it is in
+    mod, owner_plugin = asset_owner_folder(data_dir, rel)
+    shipped = shipped_game_file(data_dir, rel, mod)
     owner = ORIGINAL_INSTALL if shipped else (plugin or owner_plugin or ORIGINAL_INSTALL)
     if owner.lower().endswith((".esp", ".esm", ".omwaddon")):
         owner = os.path.splitext(os.path.basename(owner))[0]
@@ -296,13 +298,14 @@ def backup_asset_original(data_dir, rel, plugin=None, feature="repair"):
     current = os.path.join(data_dir, rel)
     # Reuse an original already retained by an earlier feature/pass; keep the first untouched bytes.
     try:
-        owner_dir = os.path.join(off, owner)
-        if os.path.isdir(owner_dir):
-            for kept_feature in os.listdir(owner_dir):
-                feature_dir = os.path.join(owner_dir, kept_feature)
-                existing = os.path.join(feature_dir, rel)
-                if os.path.exists(existing):
-                    return existing
+        for owner_name in [owner] + ([LEGACY_ORIGINAL_INSTALL] if owner == ORIGINAL_INSTALL else []):
+            owner_dir = os.path.join(off, owner_name)
+            if os.path.isdir(owner_dir):
+                for kept_feature in os.listdir(owner_dir):
+                    feature_dir = os.path.join(owner_dir, kept_feature)
+                    existing = os.path.join(feature_dir, rel)
+                    if os.path.exists(existing):
+                        return existing
         # Read legacy Off/<feature>/<plugin>/ layouts so a repair never backs up
         # a second copy of the same original during migration.
         for category in os.listdir(off):
@@ -368,9 +371,10 @@ def backup_root_for(mod, data_dir, rel=None):
 
 
 def plugin_off_backup_path(data_dir, rel, feature, plugin=None, unique=True):
-    """Return <mod>/Off/<plugin>/<feature>/<original path>, using the Vortex hard link owner."""
-    shipped = shipped_game_file(data_dir, rel)
-    mod, owner_plugin = (None, None) if shipped else asset_owner_folder(data_dir, rel)
+    """Return <mod>/Off/<plugin>/<feature>/<original path>, using the hard link owner. A file no mod deployed
+    (in Data Files when MWManager first set up the game) goes under Off/Found at Setup/."""
+    mod, owner_plugin = asset_owner_folder(data_dir, rel)
+    shipped = shipped_game_file(data_dir, rel, mod)
     owner = ORIGINAL_INSTALL if shipped else (plugin or owner_plugin or ORIGINAL_INSTALL)
     if owner.lower().endswith((".esp", ".esm", ".omwaddon")):
         owner = os.path.splitext(owner)[0]
