@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-19 (America/Los_Angeles); refreshed to 2556ed8",
+  "SyncedAt": "2026-11-19 (America/Los_Angeles); refreshed to 2556ed8; mwdialog_luafix.py and tests\\test_luafix.py refreshed to b7b71aa",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -540,10 +540,10 @@
     },
     {
       "RelativePath": "mwdialog_luafix.py",
-      "Bytes": 137520,
-      "SHA256": "d0c3c4de087551c0637fa6c9e87eff677b3f73dd7b2380b70d20e179193eba90",
+      "Bytes": 139717,
+      "SHA256": "af14aa6e1254bfb5d19220a3b30b1fd55ca59b055ec21fb6a5658aa62f8e5f4c",
       "Source": "<Steam Morrowind>\\mwdialog_luafix.py",
-      "SourceModified": "2026-11-19T12:19:25"
+      "SourceModified": "2026-11-19T19:26:15"
     },
     {
       "RelativePath": "mwdialog_master_sizes.json",
@@ -909,10 +909,10 @@
     },
     {
       "RelativePath": "tests\\test_luafix.py",
-      "Bytes": 48597,
-      "SHA256": "cbf73e3fb8d704bd15164f643681c6deae98b1ee893dc3fa6503d3f4ed8a8aa6",
+      "Bytes": 49360,
+      "SHA256": "959df5b6dbf45707f2ed66af85ded36e66f978f96decab5fea6a89dc52e2d377",
       "Source": "<Steam Morrowind>\\tests\\test_luafix.py",
-      "SourceModified": "2026-11-19T12:19:29"
+      "SourceModified": "2026-11-19T19:26:15"
     },
     {
       "RelativePath": "tests\\test_mastercheck.py",
