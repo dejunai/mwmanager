@@ -1720,7 +1720,7 @@ def apply(moves, staging, progress=None, head_extra=None):
             progress.append(index)
         if (os.environ.get("MWMANAGER_GUI") == "1"
                 and (force or index == 0 or ((index + 1) % 2000 == 0 and index != total - 1)
-                     or index == total - 1 or time.monotonic() - last_time >= 5)   # a slow stretch still reports
+                     or index == total - 1 or time.monotonic() - last_time >= 20)  # a slow stretch still reports
                 and index != last_reported):
             print(f"MWMANAGER-PROGRESS: Applying Tidy moves {index + 1:,} of {total:,}",
                   file=sys.stderr, flush=True)
