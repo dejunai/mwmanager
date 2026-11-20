@@ -71,6 +71,14 @@ MGE_REGENERATED = ("data files/distantland/*", "mgexe.toml")
 
 def mge_regenerated(k: str) -> bool:
     return any(fnmatch.fnmatchcase(k, pat) for pat in MGE_REGENERATED)
+
+
+def wipe_folder(path) -> None:
+    """Delete a folder and everything in it at once, with no per-file bookkeeping. (A robocopy mirror of an
+    empty folder was measured at twice the time of a plain delete: 10 s against 4.7 s for 20,000 files.)"""
+    path = Path(path)
+    if path.is_dir() and not path.is_symlink():
+        shutil.rmtree(path)
 BACKUP_PREFIXES = ("data files/off/", "data files/mwse/backups/")
 
 
@@ -877,8 +885,53 @@ class Journal:
         if staging.is_symlink() or not staging.is_dir() or staging.resolve().parent != manager:
             raise ValueError(f"Refusing to clear an unexpected staging path: {staging}")
         entries = len(list(staging.iterdir()))
-        shutil.rmtree(staging)
+        wipe_folder(staging)
         return entries
+
+    def fast_wipe(self, game_dir, *, preserve_prerequisites: bool = True) -> dict:
+        """Dev only (--fast-wipe): back to the checkpoint without hashing or checking a single file. A folder
+        holding nothing the checkpoint keeps is deleted whole (wipe_folder); elsewhere every file the checkpoint
+        doesn't list goes; the recorded originals (and Morrowind.ini) are copied back. Saves and logs stay, and
+        with MGE XE kept its distant land and mgeXE.toml. For a test install known to hold no hand changes."""
+        game_dir = Path(game_dir).resolve()
+        keep = set(self.checkpoint_state(preserve_prerequisites))
+
+        def protected(k):
+            return classify(k) in IGNORED_DIFF_LAYERS or (preserve_prerequisites and mge_regenerated(k))
+
+        kept_dirs = {"/".join(k.split("/")[:i]) for k in keep for i in range(1, k.count("/") + 1)}
+        wiped = removed = 0
+        for base, dirs, files in os.walk(game_dir):
+            base_path = Path(base)
+            for name in list(dirs):
+                k = key(rel_of(game_dir, base_path / name))
+                if k in kept_dirs or protected(k + "/x"):
+                    continue
+                wipe_folder(base_path / name)
+                dirs.remove(name)
+                wiped += 1
+            for name in files:
+                path = base_path / name
+                k = key(rel_of(game_dir, path))
+                if k not in keep and not protected(k):
+                    path.unlink()
+                    removed += 1
+        restored = 0
+        for k, original in self._originals(self.entries()[0]).items():
+            if k == "morrowind.ini" or k not in keep or original.get("kind") == "absent":
+                continue
+            try:
+                source = self._resolve(game_dir, original["location"])
+            except (KeyError, ValueError):
+                continue
+            if source.is_file():
+                target = game_dir / original["path"]
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, target)
+                restored += 1
+        if self.baseline_ini.is_file():
+            shutil.copy2(self.baseline_ini, game_dir / "Morrowind.ini")
+        return {"folders_wiped": wiped, "files_removed": removed, "originals_restored": restored}
 
     # -------------------------------------------------------------------------------------- rollback
     def plan_rollback(self, game_dir, *, preserve_prerequisites: bool = True) -> dict:
@@ -1075,6 +1128,16 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
         lines += report["journal_problems"] + report["original_problems"]
         print_report(lines, f"Verify against {args.verify_against}: {'OK' if report['ok'] else 'differences found'}")
         return 0 if report["ok"] else 1
+    if args.rollback and getattr(args, "fast_wipe", False):
+        what = "the store baseline" if args.gog_only else "the prerequisites"
+        if args.dry_run:
+            print_report([f"--fast-wipe: back to {what} without hashing or checking files (dev only)."],
+                         "Rollback plan (dry run, nothing changed):")
+            return 0
+        counts = journal.fast_wipe(game_dir, preserve_prerequisites=not args.gog_only)
+        return _finish_rollback(journal, game_dir, args, None, [
+            f"Fast wipe to {what} (dev only, not verified): {counts['folders_wiped']} folder(s) wiped whole, "
+            f"{counts['files_removed']} file(s) removed, {counts['originals_restored']} original(s) put back."])
     if args.rollback:
         plan = journal.plan_rollback(game_dir, preserve_prerequisites=not args.gog_only)
         lines = [f"{s['op']}: {s['path']}" + (f" (from {s['from']})" if s.get("from") else "") for s in plan["steps"]]
@@ -1101,51 +1164,55 @@ def run_cli(game_dir: Path, args, journal: Journal) -> int:
                 report["journal_problems"] + report["original_problems"]
             print_report(problems, "Rollback files were applied, but verification failed; backups were retained:")
             return 1
-        try:
-            cleared_staging = journal.clear_staging() if args.no_staging else 0
-        except (OSError, ValueError) as exc:
-            print_report([str(exc)], "Game rollback verified, but staging was not cleared:")
-            return 1
-        removed = journal.cleanup_used_backups(game_dir, plan, apply=True)
-        archived = journal.archive_ledger()
-        manager_dir = journal.root.parent
-        # plugins turned off in the GUI belong to the install that was just rolled back: keep them with its ledger
-        stamp = archived.stem if archived else f"install-{_dt.datetime.now():%Y%m%d-%H%M%S}"
-        for name in ("disabled_plugins", "mwmanager_disabled.txt"):
-            if (manager_dir / name).exists():
-                (journal.root / "history").mkdir(parents=True, exist_ok=True)
-                os.replace(manager_dir / name, journal.root / "history" / f"{stamp}-{name}")
-        try:
-            from workflow_safety import atomic_json
-            atomic_json(manager_dir / "major_master_deployments.json", {"version": 1, "deployments": []})
-        except OSError as exc:
-            print_report([str(exc)], "Game rollback verified, but deployment ownership could not be reset:")
-            return 1
-        settings_path = manager_dir / "mwmanager_gui_settings.json"
-        try:
-            settings = json.loads(settings_path.read_text(encoding="utf-8"))
-            settings.update(first_run=1, init_complete=0)
-            settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
-        except (OSError, ValueError, AttributeError):   # missing or damaged settings: setup starts over anyway
-            pass
-        try:
-            import mwmanager_setup_state as setup_state
-            state_path = manager_dir / "mwmanager_setup_state.json"
-            setup_state.start(state_path, game_dir)
-            setup_state.complete(state_path, game_dir, "paths_confirmed")
-            # preflight_complete is not marked, even when the prerequisites were kept: the rollback also took
-            # out the MWSE Lua suite and the moved add-on documents, which the preflight puts back
-        except OSError as exc:
-            print_report([str(exc)], "Game rollback verified, but setup checkpoints could not be reset:")
-            return 1
-        summary = [f"Verified against {against} with full hashes."]
-        if args.no_staging:
-            summary.append(f"Cleared {cleared_staging} staging entr{'y' if cleared_staging == 1 else 'ies'}.")
-        summary += [f"Removed {len(removed)} used backup file(s).",
-                    f"Archived the completed ledger at {archived}."]
-        print_report(summary, "Rollback complete:")
-        return 0
+        return _finish_rollback(journal, game_dir, args, plan, [f"Verified against {against} with full hashes."])
     return 2
+
+
+def _finish_rollback(journal, game_dir, args, plan, summary) -> int:
+    """After the game files are back: staging (--no-staging), used backups, the ledger, and setup start over."""
+    try:
+        cleared_staging = journal.clear_staging() if args.no_staging else 0
+    except (OSError, ValueError) as exc:
+        print_report([str(exc)], "Game rollback verified, but staging was not cleared:")
+        return 1
+    removed = journal.cleanup_used_backups(game_dir, plan, apply=True) if plan else []
+    archived = journal.archive_ledger()
+    manager_dir = journal.root.parent
+    # plugins turned off in the GUI belong to the install that was just rolled back: keep them with its ledger
+    stamp = archived.stem if archived else f"install-{_dt.datetime.now():%Y%m%d-%H%M%S}"
+    for name in ("disabled_plugins", "mwmanager_disabled.txt"):
+        if (manager_dir / name).exists():
+            (journal.root / "history").mkdir(parents=True, exist_ok=True)
+            os.replace(manager_dir / name, journal.root / "history" / f"{stamp}-{name}")
+    try:
+        from workflow_safety import atomic_json
+        atomic_json(manager_dir / "major_master_deployments.json", {"version": 1, "deployments": []})
+    except OSError as exc:
+        print_report([str(exc)], "Game rollback verified, but deployment ownership could not be reset:")
+        return 1
+    settings_path = manager_dir / "mwmanager_gui_settings.json"
+    try:
+        settings = json.loads(settings_path.read_text(encoding="utf-8"))
+        settings.update(first_run=1, init_complete=0)
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n", encoding="utf-8")
+    except (OSError, ValueError, AttributeError):   # missing or damaged settings: setup starts over anyway
+        pass
+    try:
+        import mwmanager_setup_state as setup_state
+        state_path = manager_dir / "mwmanager_setup_state.json"
+        setup_state.start(state_path, game_dir)
+        setup_state.complete(state_path, game_dir, "paths_confirmed")
+        # preflight_complete is not marked, even when the prerequisites were kept: the rollback also took
+        # out the MWSE Lua suite and the moved add-on documents, which the preflight puts back
+    except OSError as exc:
+        print_report([str(exc)], "Game rollback verified, but setup checkpoints could not be reset:")
+        return 1
+    if args.no_staging:
+        summary.append(f"Cleared {cleared_staging} staging entr{'y' if cleared_staging == 1 else 'ies'}.")
+    summary += [f"Removed {len(removed)} used backup file(s).",
+                f"Archived the completed ledger at {archived}."]
+    print_report(summary, "Rollback complete:")
+    return 0
 
 
 def add_arguments(ap: argparse.ArgumentParser) -> None:
@@ -1161,6 +1228,9 @@ def add_arguments(ap: argparse.ArgumentParser) -> None:
                     help="return to the prerequisite checkpoint; --dry-run reports the plan without changes")
     ap.add_argument("--gog-only", action="store_true",
                     help="with --rollback: add a second stage that removes prerequisites too")
+    ap.add_argument("--fast-wipe", action="store_true",
+                    help="with --rollback, dev only: delete whole folders at once and "
+                         "skip hashing and verifying; for a test install known to hold no hand changes")
     ap.add_argument("--no-staging", action="store_true",
                     help="with --rollback: clear MWManager staging after the rollback verifies")
     ap.add_argument("--mod-rollback", metavar="MOD_KEY", help="with --dry-run: check a mod can be re-extracted")

@@ -166,6 +166,37 @@ class BaselineTests(Fixture):
         self.assertFalse(partial.exists())
         self.assertEqual((self.game / "Morrowind.exe").read_bytes(), b"vanilla exe")
 
+    def test_fast_wipe_wipes_folders_whole_and_puts_originals_back(self):
+        import mwmanager_journal as J
+        self.journal.capture_baseline(self.game)
+        self.journal.capture_prerequisites(self.game)
+        deployed = write(self.game / "Data Files/Sound/Vo/TR/a.mp3", b"voice")          # a folder nothing keeps
+        stray = write(self.game / "Data Files/Textures/tr_new.dds", b"deployed")       # beside a kept texture
+        land = write(self.game / "Data Files/distantland/terrain.bin", b"generated")
+        original = self.journal.preserve_original(self.game, self.game / "Data Files/Siege at Firemoth.esp")
+        write(self.game / "Data Files/Siege at Firemoth.esp", b"fixed by --fix")
+        self.journal.record("fix", "Data Files/Siege at Firemoth.esp", "modify", "ab" * 32, original)
+        wiped = []
+        real = J.wipe_folder
+        with mock.patch.object(J, "wipe_folder", lambda path: wiped.append(Path(path).name) or real(path)):
+            counts = self.journal.fast_wipe(self.game)
+        self.assertIn("Sound", wiped)                          # whole, not file by file
+        self.assertFalse(deployed.exists())
+        self.assertFalse(stray.exists())
+        self.assertEqual((self.game / "Data Files/Textures/a.dds").read_bytes(), b"original texture")
+        self.assertEqual((self.game / "Data Files/Siege at Firemoth.esp").read_bytes(), b"siege")
+        self.assertTrue(land.exists())                         # MGE XE kept: its distant land stays
+        self.assertTrue((self.game / "Saves/one.ess").exists())
+        self.assertTrue((self.game / "MWSE.dll").exists())     # a prerequisite
+        self.assertEqual(counts["originals_restored"], 1)
+
+    def test_wipe_folder_leaves_nothing(self):
+        import mwmanager_journal as J
+        folder = self.tmp / "staging"
+        write(folder / "a" / "b" / "c.txt", b"x")
+        J.wipe_folder(folder)
+        self.assertFalse(folder.exists())
+
     def test_mge_distant_land_is_left_alone_when_mge_stays(self):
         self.journal.capture_baseline(self.game)
         write(self.game / "mgeXE.toml", b"[graphics]\nvsync = \"immediate\"\n")
