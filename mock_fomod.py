@@ -1627,6 +1627,27 @@ def _select_vanilla_technology(records: list[dict]) -> list[dict]:
     return [item for item in records if item["key"] not in hidden]
 
 
+def _sole_data_files_choices(records: list[dict]) -> set[str]:
+    """A lone Data Files wrapper is packaging, not an optional decision."""
+    grouped = {}
+    for item in records:
+        group_key = item.get("group_key", f"bain:{item.get('number', 0):02d}")
+        grouped.setdefault(group_key, []).append(item)
+    hidden = set()
+    for items in grouped.values():
+        if len(items) != 1:
+            continue
+        item = items[0]
+        label = re.sub(r"[\\/]+$", "", str(item.get("label") or "")).strip().casefold()
+        path = item.get("path")
+        path_names = set()
+        if isinstance(path, Path):
+            path_names = {path.name.casefold(), path.parent.name.casefold()}
+        if label in {"data files", "00 data files"} or path_names & {"data files", "00 data files"}:
+            hidden.add(item["key"])
+    return hidden
+
+
 def _show_selector(mod_name: str, records: list[dict], previous: set[str], force_targets: set[str],
                    answered_groups: set[str] | None = None) -> set[str] | None:
     answered_groups = answered_groups or set()
@@ -1665,7 +1686,10 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
             if scan_key not in utility_alerted:
                 utility_alerted.add(scan_key)
                 utility_alerts.append(item)
-    hidden_required = {item["key"] for item in records if _is_hidden_required_option(item)}
+    hidden_required = (
+        {item["key"] for item in records if _is_hidden_required_option(item)}
+        | _sole_data_files_choices(records)
+    )
     records = [item for item in records if item["key"] not in hidden_required]
     if not records:
         return hidden_required

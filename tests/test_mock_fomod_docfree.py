@@ -60,6 +60,22 @@ class SeveralCoreFoldersTests(unittest.TestCase):
         records = self.discover("00 - Meshes: choose one of the two.\n00 - Textures: or this one instead of it.\n")
         self.assertFalse(any(mock_fomod._is_hidden_required_option(r) for r in records))
 
+    def test_sole_data_files_wrapper_is_implicitly_selected(self):
+        wrapper = {
+            "key": "nested-plugin:Data Files/example.esp",
+            "label": "Data Files",
+            "group_key": "nested-plugin-files",
+            "path": Path("Data Files/example.esp"),
+            "required": False,
+            "always_optional": True,
+        }
+        self.assertEqual(mock_fomod._sole_data_files_choices([wrapper]), {wrapper["key"]})
+
+    def test_data_files_wrapper_remains_visible_when_group_has_alternatives(self):
+        first = {"key": "data", "label": "Data Files", "group_key": "choice", "path": Path("Data Files/a.esp")}
+        second = {"key": "other", "label": "Other", "group_key": "choice", "path": Path("Other/b.esp")}
+        self.assertEqual(mock_fomod._sole_data_files_choices([first, second]), set())
+
 
 class KnownOptionMastersTests(unittest.TestCase):
     def test_wares_nod_patch_requires_nod_core_even_when_its_header_does_not(self):
