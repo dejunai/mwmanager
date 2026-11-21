@@ -494,11 +494,14 @@ class GuiSmokeTests(unittest.TestCase):
                 mock.patch.object(self.g.messagebox, "askyesno", return_value=False) as deploy_prompt:
             self.app.stage_major_masters()
             self.pump(0.2)
-        self.assertEqual(tidied, [("Tamriel Data", "Tamriel_Data",
-                                   Path(self.app.settings["game_dir"]) / "Data Files")])
+        self.assertEqual(tidied, [
+            ("Tamriel Data", "Tamriel_Data", Path(self.app.settings["game_dir"]) / "Data Files"),
+            ("Tamriel Data", "Tamriel_Data", Path(self.app.settings["game_dir"]) / "Data Files"),
+        ])
         steps = package_steps(package)
-        for step in ("extracted", "tidied", "bsa_checked"):
+        for step in ("extracted", "options_answered", "tidied", "bsa_checked"):
             self.assertTrue(steps[step]["completed_at"], step)
+        self.assertEqual(steps["options_answered"]["attempts"], 1)
         self.assertEqual(steps["tidied"]["attempts"], 1)
         self.assertEqual(deploy_prompt.call_args.args[0], "Deploy staged major masters?")
         self.assertTrue(self.app._setup_done("major_masters_staged"))
@@ -532,9 +535,10 @@ class GuiSmokeTests(unittest.TestCase):
                 mock.patch.object(self.g.messagebox, "showerror"):
             self.app.stage_major_masters()
         steps = package_steps(package)
-        self.assertIsNone(steps["tidied"]["completed_at"])
-        self.assertEqual(steps["tidied"]["attempts"], 1)
-        self.assertIn("tidy broke", steps["tidied"]["last_error"])
+        self.assertIsNone(steps["options_answered"]["completed_at"])
+        self.assertEqual(steps["options_answered"]["attempts"], 1)
+        self.assertIn("tidy broke", steps["options_answered"]["last_error"])
+        self.assertEqual(steps["tidied"]["attempts"], 0)
         step, entry = self.g.setup_state.interrupted(self.app._setup_path(), self.app.settings["game_dir"])
         self.assertEqual(step, "major_masters_staged")
         self.assertIn("tidy broke", entry["last_error"])
@@ -542,8 +546,10 @@ class GuiSmokeTests(unittest.TestCase):
                 mock.patch.object(self.g.messagebox, "askyesno", return_value=False):
             self.app.stage_major_masters()
         steps = package_steps(package)
+        self.assertTrue(steps["options_answered"]["completed_at"])
+        self.assertEqual(steps["options_answered"]["attempts"], 2)
         self.assertTrue(steps["tidied"]["completed_at"])
-        self.assertEqual(steps["tidied"]["attempts"], 2)
+        self.assertEqual(steps["tidied"]["attempts"], 1)
 
     def test_first_window_lists_detected_installs_and_hands_them_to_options(self):
         import mwmanager_detect

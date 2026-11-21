@@ -2023,9 +2023,10 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
 # What a staged package goes through, in order. Its marker (.mwmanager-stage.json) records each step the way the
 # setup step file does - when it started, when it completed, how many attempts, the last error - so an interrupted
 # Stage run is picked up at the package and step where it stopped.
-PACKAGE_STEPS = ("extracted", "tidied", "bsa_checked")
+PACKAGE_STEPS = ("extracted", "options_answered", "tidied", "bsa_checked")
 PACKAGE_PROCESSING_VERSION = 1
-PACKAGE_STEP_LABELS = {"extracted": "extracting the archive", "tidied": "Tidy and the option picker",
+PACKAGE_STEP_LABELS = {"extracted": "extracting the archive", "options_answered": "the option picker",
+                       "tidied": "Tidy",
                        "bsa_checked": "the BSA check"}
 
 
@@ -2060,6 +2061,16 @@ def package_steps(package: str | Path) -> dict | None:
         for step in PACKAGE_STEPS:
             if isinstance(raw.get(step), dict):
                 steps[step].update({key: raw[step].get(key, value) for key, value in _step_blank().items()})
+        # Stages written before the standalone option phase already completed any options
+        # as part of "tidied". Do not force every deployed major master through FOMOD again
+        # just because the newer marker schema added a separate answer step.
+        if "options_answered" not in raw and steps["tidied"]["completed_at"]:
+            steps["options_answered"].update(
+                started_at=steps["tidied"]["started_at"],
+                completed_at=steps["tidied"]["completed_at"],
+                attempts=max(int(steps["tidied"].get("attempts") or 0), 1),
+                outcome="migrated_from_tidied",
+            )
     else:
         try:
             from datetime import datetime
@@ -2100,6 +2111,11 @@ def complete_package_step(package: str | Path, step: str, *, outcome="completed"
 
 def fail_package_step(package: str | Path, step: str, error) -> dict:
     return _update_package_step(package, step, lambda entry: entry.update(last_error=str(error)[:2000]))
+
+
+def reset_package_step(package: str | Path, step: str) -> dict:
+    return _update_package_step(package, step, lambda entry: entry.update(
+        completed_at=None, last_error=None, outcome=None))
 
 
 IMAGE_ASSET_DIRS = {"textures", "bookart", "icons", "splash"}     # where the game looks for images

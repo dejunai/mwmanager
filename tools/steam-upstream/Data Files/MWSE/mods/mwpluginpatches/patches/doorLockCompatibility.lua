@@ -7,6 +7,19 @@ local function isDoor(ref)
     return ref and ref.object and ref.object.objectType == tes3.objectType.door
 end
 
+local function playerHasKey(ref)
+    local lockNode = ref.lockNode
+    local key = lockNode and lockNode.key
+    if not key then
+        return false
+    end
+    local inv = tes3.player and tes3.player.object and tes3.player.object.inventory
+    if inv and inv:contains(key.id) then
+        return true
+    end
+    return (tes3.getItemCount({ reference = tes3.player, item = key }) or 0) > 0
+end
+
 local function ownerIsAbsent(ref)
     local destination = ref.destination
     local cell = destination and destination.cell
@@ -49,11 +62,15 @@ local function beforeActivate(e)
         if tes3.getLocked({ reference = door }) then
             tes3.unlock({ reference = door })
         end
-        door.data = door.data or {}
-        if not door.data.ab01drlkbl then
+        if door.data and not door.data.ab01drlkbl then
             door.data.ab01drlkbl = 1
             bypassed[door] = true
         end
+        return
+    end
+
+    -- If the player possesses the key, allow legitimate key unlock/entry without sneaking or blocking.
+    if playerHasKey(door) then
         return
     end
 
@@ -71,8 +88,7 @@ local function beforeActivate(e)
         end
 
         -- Let Modern Lockpicking validate the pick and open its interface; abot otherwise consumes activation first.
-        door.data = door.data or {}
-        if not door.data.ab01drlkbl then
+        if door.data and not door.data.ab01drlkbl then
             door.data.ab01drlkbl = 1
             bypassed[door] = true
         end
@@ -87,7 +103,9 @@ end
 local function afterAbot(e)
     local door = e.target
     if bypassed[door] then
-        door.data.ab01drlkbl = nil
+        if door.data then
+            door.data.ab01drlkbl = nil
+        end
         bypassed[door] = nil
     end
 end

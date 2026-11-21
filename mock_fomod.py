@@ -1279,12 +1279,29 @@ def _mark_maintainer_needs(records: list[dict], installed: set[str]) -> None:
     """An option whose notes name a plugin it needs that isn't installed waits for it, like a missing master: the
     batch holds it and looks for that mod's archive."""
     have = {name.casefold() for name in installed}
+
+    def present(need):
+        low = need.casefold()
+        if low in have:
+            return True
+        if low.endswith(" (mod)"):
+            from needed_mods import names_mod
+            return any(names_mod(need, Path(name).stem) for name in installed)
+        return False
+
     for record in records:
         needs = _maintainer_needs(record)
-        missing = [name for name in needs if name.casefold() not in have]
+        missing = [name for name in needs if not present(name)]
         if missing:
             record["needs_mods"] = missing
             record["missing_masters"] = sorted(set(record.get("missing_masters") or []) | set(missing))
+        else:
+            record.pop("needs_mods", None)
+            resolved = {name.casefold() for name in needs}
+            record["missing_masters"] = [
+                name for name in (record.get("missing_masters") or [])
+                if name.casefold() not in resolved
+            ]
         if needs:
             record["targets"] = sorted(set(record.get("targets") or []) | {name.casefold() for name in needs})
 
@@ -2721,9 +2738,18 @@ def record_pending_options(output_dir: Path, mod_dir: Path, records: list[dict],
 
 def held_options(records: list[dict], chosen: set[str], installed: set[str]) -> set[str]:
     """Chosen options held back: one of their plugins needs a master that is neither installed nor staged."""
+    from needed_mods import names_mod
     have = {name.casefold() for name in installed}
+
+    def missing(need):
+        low = need.casefold()
+        if low in have:
+            return False
+        return not (low.endswith(" (mod)")
+                    and any(names_mod(need, Path(name).stem) for name in installed))
+
     return {item["key"] for item in records if item["key"] in chosen
-            and any(m.casefold() not in have for m in (item.get("missing_masters") or []))}
+            and any(missing(m) for m in (item.get("missing_masters") or []))}
 
 
 def ask_see_options(package: str, arrived: list[str], labels: list[str]) -> bool:

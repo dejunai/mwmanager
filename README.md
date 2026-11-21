@@ -29,6 +29,7 @@ MWManager's own behaviour is in extension modules that `mwmanager_upstream.py` l
 | `mwmanager_install.py` | Tidy command line: `--options` → plan → `--apply` (exit 2 = refused, nothing changed) |
 | `mwmanager_gui.py` | the GUI (`python mwmanager_gui.py`) |
 | `mwmanager_workflow.py` | persistent setup window, progress presentation, safe-stop controls and native conflict picker |
+| `mwmanager_batch.py` | durable major-master batch state, serialized option events and extraction/Tidy worker pipeline |
 | `mwmanager_recovery.py` | read-only inventory and scoped recovery for interrupted deployments |
 | `mwmanager_profiles.py` | save, compare, export and apply manager-state profiles |
 | `mwmanager_integrity.py` | deployed-file integrity checks and regression snapshots |
@@ -69,6 +70,10 @@ setup** after a pause; optional community masters can also be explicitly skipped
   staging without extracting again. Staging and deployment are separate. Deployment lists the selected
   masters and asks about loose assets before running preflight, then deploys only that selection in the
   configured priority order. Shared-package assets may serve more than one selected master.
+- **Queued major-master staging:** archive extraction runs ahead of the option queue while answered packages
+  enter Tidy/apply in parallel. FOMOD dialogs stay serialized; installers discovered after option activation
+  are persisted and presented next without interrupting the active dialog. Per-package stages, option answers,
+  and the batch manifest recover independently after a stop or crash.
 - **Legacy staging:** stages created before processing-complete records existed must pass Reopen staged
   options once before deployment. This prevents an interrupted extraction from being mistaken for a
   fully processed package just because its ESM exists.

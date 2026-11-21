@@ -78,6 +78,14 @@ class ShippedNotesTests(unittest.TestCase):
             self.assertIn("separate mod Dark Molag Mar", mock_fomod._maintainer_notes(molag))
 
 
+    def test_wares_nod_patch_names_npc_outfit_diversity(self):
+        """Wares Ultimate's NOD Patch needs NOD - Core.esm, from a mod its package never names."""
+        mod = Path("staging/major_masters/Wares Ultimate-52013-2-1-3-1775985220")
+        item = {"path": mod / "Extras" / "wares-base" / "10 NOD Patch", "label": "NOD Patch",
+                "key": "Extras\\wares-base\\10 NOD Patch", "mod_dir": mod}
+        with mock.patch.object(mock_fomod, "_nexus_mod_id", return_value="52013"):
+            self.assertIn("NPC Outfit Diversity (NOD - Core.esm, Nexus 52091)", mock_fomod._maintainer_notes(item))
+
 class NeededModTests(unittest.TestCase):
     """A note can name a plugin an option needs that its files don't say (a meshes-only patch for another mod):
     chosen without it, the option waits like one with a missing master."""

@@ -95,6 +95,19 @@ class ModNameMatchTests(unittest.TestCase):
                 found = needed_mods.find_needed(["glass glowset (mod)"], dl, Path(tmp) / "i.json", Path(tmp))
         self.assertEqual(found["glass glowset (mod)"].name, "Definative Glass Glowset-42762-2-0.rar")
 
+    def test_animated_containers_prefers_the_full_mod_over_mesh_addon(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            dl = Path(tmp) / "downloads"
+            dl.mkdir()
+            proper = dl / "MW Containers Animated-42238-2-10-1706266667.7z"
+            optional = dl / "Some Improved Animated Containers-44321-0-2-1707072703.zip"
+            optional.write_bytes(b"optional")
+            proper.write_bytes(b"full")
+            with mock.patch.object(needed_mods, "archive_index", return_value={}):
+                found = needed_mods.find_needed(
+                    ["animated containers (mod)"], dl, Path(tmp) / "i.json", Path(tmp))
+        self.assertEqual(found["animated containers (mod)"], proper)
+
 
 class NexusFallbackTests(unittest.TestCase):
     def test_a_missing_mod_opens_a_nexus_search_that_downloads_to_the_archive_folder(self):

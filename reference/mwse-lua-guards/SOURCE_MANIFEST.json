@@ -271,9 +271,9 @@
     {
       "Path": "mods/mwpluginpatches/patches/doorLockCompatibility.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\doorLockCompatibility.lua",
-      "SHA256": "9345357a892c35e58cb48e7874ecd7404f0371b9835392c8c924fe6e1e70dd2e",
-      "Length": 3312,
-      "SourceModified": "2026-11-20T10:25:29"
+      "SHA256": "e2b1efc28f31a686757d4e8b7b340d060db3d4f1c92b4ceadb704d387e3ccea2",
+      "Length": 3866,
+      "SourceModified": "2026-11-20T16:13:54"
     },
     {
       "Path": "mods/mwpluginpatches/patches/jiubDelay.lua",

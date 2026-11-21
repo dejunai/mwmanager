@@ -31,7 +31,8 @@ class StageStepTests(unittest.TestCase):
         folder = self.package("old", {"archive": "a.7z", "selected_masters": ["A.esm"]})
         steps = ca.package_steps(folder)
         self.assertTrue(steps["extracted"]["completed_at"])
-        self.assertEqual(ca.unfinished_packages(self.staging), [(folder, ["tidied", "bsa_checked"])])
+        self.assertEqual(ca.unfinished_packages(self.staging),
+                         [(folder, ["options_answered", "tidied", "bsa_checked"])])
 
     def test_steps_are_stamped_and_attempts_counted(self):
         folder = self.package("pkg", {"archive": "a.7z", "selected_masters": ["A.esm"]})
@@ -45,11 +46,24 @@ class StageStepTests(unittest.TestCase):
         self.assertEqual((entry["attempts"], entry["last_error"]), (2, None))
         self.assertTrue(entry["started_at"] and entry["completed_at"])
         ca.complete_package_step(folder, "bsa_checked")
+        ca.complete_package_step(folder, "options_answered")
         self.assertEqual(ca.unfinished_packages(self.staging), [])
         data = json.loads((folder / ".mwmanager-stage.json").read_text(encoding="utf-8"))
         self.assertEqual(data["archive"], "a.7z")                    # the rest of the marker is kept
         with self.assertRaises(ValueError):
             ca.begin_package_step(folder, "nonsense")
+
+    def test_new_option_step_migrates_from_completed_pre_split_tidy(self):
+        done = {"started_at": "t", "completed_at": "t", "attempts": 1,
+                "last_error": None, "outcome": "completed"}
+        folder = self.package("old", {
+            "archive": "a.7z",
+            "steps": {"extracted": done, "tidied": done, "bsa_checked": done},
+        })
+        steps = ca.package_steps(folder)
+        self.assertEqual(steps["options_answered"]["completed_at"], "t")
+        self.assertEqual(steps["options_answered"]["outcome"], "migrated_from_tidied")
+        self.assertEqual(ca.unfinished_packages(self.staging), [])
 
     def test_partial_extraction_is_emptied_and_keeps_its_attempts(self):
         blank = {"started_at": None, "completed_at": None, "attempts": 0, "last_error": None}

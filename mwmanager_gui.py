@@ -1018,6 +1018,37 @@ def deployed_master_names() -> set[str]:
             if statuses[name.casefold()]["state"] == "deployed"}
 
 
+def waiting_option_count() -> int:
+    try:
+        import mock_fomod
+        pending = json.loads(
+            (APP_DIR / "outputs" / mock_fomod.PENDING_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return 0
+    return sum(
+        1 for entries in pending.values() if isinstance(entries, dict)
+        for entry in entries.values()
+        if isinstance(entry, dict) and entry.get("status") == "waiting"
+    ) if isinstance(pending, dict) else 0
+
+
+def serializable_preflight_signature(signature: tuple) -> list:
+    return [list(item) if isinstance(item, tuple) else item for item in signature]
+
+
+def completed_preflight_signature(manager_settings: dict) -> tuple | None:
+    """Return the persisted signature of a completed preflight, or None if it was never recorded."""
+    raw = manager_settings.get("last_preflight_signature")
+    if not isinstance(raw, list):
+        return None
+
+    def thaw(value):
+        if isinstance(value, list):
+            return tuple(thaw(item) for item in value)
+        return value
+
+    return thaw(raw)
+
 def ordered_signature(plugin_names: list[str], order: list[str], active_names: set[str], game_dir: str) -> str:
     data_dir = Path(game_dir) / "Data Files"
 
@@ -1062,8 +1093,13 @@ class ToolTip:
 
 
 class ManagerGUI(tk.Tk):
+    def _remember_preflight(self, signature: tuple) -> None:
+        self._preflight_signature = signature
+        self.settings["last_preflight_signature"] = serializable_preflight_signature(signature)
+        write_settings(self.settings)
+
     def _release_grab_when_minimized(self, event):
-        if event.widget is self and self.state() == "iconic":
+        if event.widget is self:
             holder = self.grab_current()
             if holder is not None:
                 self._grab_while_minimized = holder
@@ -1090,6 +1126,15 @@ class ManagerGUI(tk.Tk):
         self.bind("<Unmap>", self._release_grab_when_minimized, add="+")
         self.bind("<Map>", self._regrab_when_restored, add="+")
         self.settings = read_settings()
+        persisted_preflight = completed_preflight_signature(self.settings)
+        if (persisted_preflight is not None
+                and self._setup_done("preflight_complete")
+                and persisted_preflight == preflight_signature(self.settings["game_dir"])):
+            self._preflight_signature = persisted_preflight
+        elif self._setup_done("preflight_complete"):
+            # Legacy state predates the persisted signature. The completed setup
+            # checkpoint is the durable proof that prerequisites were accepted.
+            self._remember_preflight(preflight_signature(self.settings["game_dir"]))
         self.gui_state = read_gui_state()
         self.order = read_order()
         self.active_names = {n.casefold() for n in self.order}
@@ -1120,6 +1165,8 @@ class ManagerGUI(tk.Tk):
         self._build_menu()
         self._build_ui()
         self._clear_major_master_scan_cache()
+        self.status.set("MWManager loaded; reconciling the current game state…")
+        self.update_idletasks()
         if first_run:
             if paths_confirmed:
                 self.game_label.config(text="Saved paths loaded. Resuming the incomplete preflight…")
@@ -1149,7 +1196,11 @@ class ManagerGUI(tk.Tk):
                                 or not self.settings.get("archive_downloads_dir")):
             self.after(150, self._ensure_archive_downloads)
         if not first_run and self.settings.get("paths_confirmed"):
-            self.after(2000, self._start_background_integrity)
+            self.after(30000, self._start_background_integrity)
+        if (not first_run and self.settings.get("init_complete", 0) == 1
+                and not recovery_pending(APP_DIR)
+                and waiting_option_count()):
+            self.after(1500, self._resume_waiting_options_after_startup)
 
     def _ensure_core(self):
         order_by_name = {name.casefold(): name for name in self.order}
@@ -1159,6 +1210,9 @@ class ManagerGUI(tk.Tk):
 
     def _start_background_integrity(self):
         """Check tracked deployed files off the Tk thread and surface drift once."""
+        if getattr(self, "_active_job", None):
+            self.after(10000, self._start_background_integrity)
+            return
         if getattr(self, "_integrity_running", False):
             return
         self._integrity_running = True
@@ -1184,6 +1238,19 @@ class ManagerGUI(tk.Tk):
             self.after(0, finish)
 
         threading.Thread(target=work, name="MWManager integrity check", daemon=True).start()
+
+    def _resume_waiting_options_after_startup(self):
+        if getattr(self, "_active_job", None):
+            self.after(3000, self._resume_waiting_options_after_startup)
+            return
+        count = waiting_option_count()
+        if not count:
+            return
+        self.status.set(
+            f"Resuming {count} chosen option dependency "
+            f"{'queue' if count == 1 else 'queues'} after major-master staging…")
+        self._resolve_waiting_options(lambda: self.status.set(
+            "Required-plugin option queue checked; remaining missing downloads stay remembered."))
 
     def _setup_path(self):
         return APP_DIR / "mwmanager_setup_state.json"
@@ -1619,7 +1686,7 @@ class ManagerGUI(tk.Tk):
                                   archive_source=self.settings.get("archive_source"),
                                   archive_dir=self.settings.get("archive_downloads_dir"))
             if result is True:
-                self._preflight_signature = preflight_signature(self.settings["game_dir"])
+                self._remember_preflight(preflight_signature(self.settings["game_dir"]))
             checkpoint(progress)
             return result
 
@@ -2707,7 +2774,7 @@ class ManagerGUI(tk.Tk):
                 preflight_result = run_preinstall(game_dir, APP_DIR, progress,
                                                   archive_dir=self.settings.get("archive_downloads_dir"))
                 if preflight_result is True:
-                    self._preflight_signature = preflight_signature(game_dir)
+                    self._remember_preflight(preflight_signature(game_dir))
             if preflight_result == "restart":
                 return {"processed": 0, "stopped": True, "restart": True,
                         "staging": str(staging_root)}
@@ -3811,15 +3878,28 @@ class ManagerGUI(tk.Tk):
                 and name.casefold() not in unfinished
                 and not (data_dir / name).is_file() for name in masters) else ["disabled"])
 
-        def refresh_masters():
-            if not dialog.winfo_exists():
-                return
+        def scan_masters():
             from major_master_deploy import deployment_statuses, staged_masters
             staged_map = staged_masters(APP_DIR / "staging" / "major_masters", masters)
             statuses = deployment_statuses(masters, data_dir, APP_DIR, staged=staged_map)
+            required_names = self._scan_required_major_master_names()
+            unfinished = {name.casefold()
+                          for name in self._unfinished_master_stages(masters, staged=staged_map)}
+            from major_master_deploy import tracked_deployment_masters
+            return {
+                "staged": staged_map, "statuses": statuses,
+                "required": required_names, "unfinished": unfinished,
+                "tracked": tracked_deployment_masters(APP_DIR),
+            }
+
+        def render_master_scan(scan):
+            if not dialog.winfo_exists():
+                return
+            staged_map = scan["staged"]
+            statuses = scan["statuses"]
+            required_names = scan["required"]
+            unfinished = scan["unfinished"]
             tree.delete(*tree.get_children())
-            required_names = self._required_major_master_names()
-            unfinished = {name.casefold() for name in self._unfinished_master_stages(masters)}
             toggleable.clear()
             for i, name in enumerate(masters, 1):
                 key = name.casefold()
@@ -3843,10 +3923,72 @@ class ManagerGUI(tk.Tk):
                 else:
                     tag = "locked" if required else "deployed" if exists else "staged" if ready else "not_staged"
                 tree.insert("", "end", iid=name, text=f"{i:02d}  {name}", values=(check, state), tags=(tag,))
-            from major_master_deploy import tracked_deployment_masters
             last_scan.update(staged=staged_map, unfinished=unfinished, required=required_names,
-                             tracked=tracked_deployment_masters(APP_DIR))
+                             tracked=scan["tracked"])
             update_master_buttons()
+
+        scan_generation = {"value": 0}
+
+        def refresh_masters(background=False):
+            if not background:
+                render_master_scan(scan_masters())
+                return
+            scan_generation["value"] += 1
+            generation = scan_generation["value"]
+            results = queue.Queue()
+            tree.delete(*tree.get_children())
+            tree.insert("", "end", iid="__scanning__", text="Scanning staged and deployed masters…",
+                        values=("", "Please wait"), tags=("not_staged",))
+            dialog.update_idletasks()
+            wait = tk.Toplevel(dialog)
+            wait.title("Scanning Major Masters")
+            wait.transient(dialog)
+            center_window(wait, dialog, 440, 150)
+            wait.resizable(False, False)
+            body = ttk.Frame(wait, padding=18)
+            body.pack(fill="both", expand=True)
+            ttk.Label(body, text="Scanning staged and deployed masters…",
+                      font=FONTS["h2"]).pack(anchor="w")
+            ttk.Label(body, text="The window is painted and the scan is running in the background. "
+                                  "Large staged packages can take a while; MWManager is not hung.",
+                      wraplength=400).pack(anchor="w", pady=(6, 12))
+            bar = ttk.Progressbar(body, mode="indeterminate")
+            bar.pack(fill="x")
+            bar.start(40)
+            wait.grab_set()
+            wait.protocol("WM_DELETE_WINDOW", lambda: None)
+
+            def worker():
+                try:
+                    scan = scan_masters()
+                except Exception as exc:
+                    scan = {"error": str(exc)}
+                results.put(scan)
+
+            def finish_when_ready():
+                if not dialog.winfo_exists() or generation != scan_generation["value"]:
+                    if wait.winfo_exists():
+                        wait.destroy()
+                    return
+                try:
+                    scan = results.get_nowait()
+                except queue.Empty:
+                    dialog.after(25, finish_when_ready)
+                    return
+                bar.stop()
+                if wait.winfo_exists():
+                    wait.grab_release()
+                    wait.destroy()
+                if "error" not in scan:
+                    render_master_scan(scan)
+                else:
+                    tree.delete(*tree.get_children())
+                    tree.insert("", "end", iid="__error__", text="Major-master scan failed",
+                                values=("", scan["error"][:180]), tags=("problem",))
+
+            threading.Thread(target=worker, name="MWManager major-master scan",
+                             daemon=True).start()
+            dialog.after(25, finish_when_ready)
 
         controls = ttk.Frame(frame)
         controls.pack(fill="x", pady=(8, 0))
@@ -4094,7 +4236,21 @@ class ManagerGUI(tk.Tk):
         self.remove_master_button.pack(side="left", padx=(6, 0))
         self.unstage_master_button = ttk.Button(footer_bottom, text="Unstage selected", command=unstage_selected)
         self.unstage_master_button.pack(side="left", padx=(6, 0))
-        save_button["button"] = ttk.Button(footer_bottom, text="Done", command=save_masters, width=22,
+        def finish_masters():
+            try:
+                if not save_masters():
+                    return
+            except Exception as exc:
+                messagebox.showerror(
+                    "Could not finish Major Masters",
+                    f"MWManager could not save the current master state.\n\n{exc}", parent=dialog)
+                return
+            if waiting_option_count():
+                self._resume_waiting_options_after_startup()
+            else:
+                self.status.set("Major masters are current; no selected options are waiting on other mods.")
+
+        save_button["button"] = ttk.Button(footer_bottom, text="Done", command=finish_masters, width=22,
                                            style="MasterSave.TButton")
         save_button["button"].pack(side="right")
         update_save_label()
@@ -4126,7 +4282,7 @@ class ManagerGUI(tk.Tk):
                         delattr(self, name)
         dialog.bind("<Destroy>", forget_dialog, add="+")
         self._major_master_refresh = refresh_masters
-        refresh_masters()
+        refresh_masters(background=True)
 
     def _master_scan_cached(self, kind, compute):
         """Walking staging and Data Files takes seconds once the big masters are staged, and the master list asks
@@ -4194,11 +4350,12 @@ class ManagerGUI(tk.Tk):
         path.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write(path, (json.dumps(state, indent=2) + "\n").encode("utf-8"))
 
-    def _unfinished_master_stages(self, names):
+    def _unfinished_master_stages(self, names, staged=None):
         from major_master_deploy import staged_masters
         from core_addons import package_steps, PACKAGE_STEPS
         staging = APP_DIR / "staging" / "major_masters"
-        staged = staged_masters(staging, list(names))
+        if staged is None:
+            staged = staged_masters(staging, list(names))
         try:
             state = json.loads(self._master_stage_record().read_text(encoding="utf-8"))
             if not isinstance(state, dict):
@@ -4336,7 +4493,7 @@ class ManagerGUI(tk.Tk):
                                         "No files were deployed. Resolve any missing prerequisites or review the "
                                         "declined warnings, then retry deployment.", parent=self)
                     return
-                self._preflight_signature = preflight_signature(self.settings["game_dir"])
+                self._remember_preflight(preflight_signature(self.settings["game_dir"]))
                 self.deploy_major_masters(_preflight_done=True, _accept_assets=accept_assets)
 
             self._run_progress_job("Pre-deploy checks", "Checking game files and required utilities…",
@@ -5166,6 +5323,12 @@ class ManagerGUI(tk.Tk):
         deployed, or once deployment is declined here - not before."""
         self._set_staging_run(None)
         self._setup_complete("major_masters_staged")
+        from mwmanager_batch import BatchCoordinator
+        from core_addons import unfinished_packages
+        active_batch = BatchCoordinator.resume(APP_DIR)
+        if active_batch is not None and not unfinished_packages(
+                APP_DIR / "staging" / "major_masters"):
+            active_batch.finish()
         if self._staged_major_master_names() and messagebox.askyesno("Deploy staged major masters?", prompt, parent=self):
             self.after(100, lambda: self.deploy_major_masters(_accept_assets=True))    # already confirmed
             return
@@ -5322,7 +5485,8 @@ class ManagerGUI(tk.Tk):
             startup.wShowWindow = subprocess.SW_HIDE
             return {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
 
-        def process_package(progress, py, quiet, mod_dir, group_masters, *, reopen=False):
+        def process_package(progress, py, quiet, mod_dir, group_masters, *, reopen=False,
+                            phase="all"):
             """Tidy with the option installer, then the BSA check. Each step is recorded in the package's marker
             as it starts and completes; a step already completed is not run again."""
             steps = package_steps(mod_dir) or {}
@@ -5339,8 +5503,8 @@ class ManagerGUI(tk.Tk):
             PLUGIN_NAME = marker.get("PLUGIN_NAME") or (primary_master.stem if primary_master else mod_dir.name)
             label = ", ".join(group_masters) or mod_dir.name
 
-            def run(step, work):
-                if (steps.get(step) or {}).get("completed_at"):
+            def run(step, work, *, force=False):
+                if not force and (steps.get(step) or {}).get("completed_at"):
                     return
                 begin_package_step(mod_dir, step)
                 try:
@@ -5350,9 +5514,8 @@ class ManagerGUI(tk.Tk):
                     raise
                 complete_package_step(mod_dir, step, outcome=outcome or "completed")
 
-            def tidy():
-                progress(f"Running tidy and options for {label}. "
-                         "Choose any optional packages in the options window that opens.")
+            def options():
+                progress(f"Collecting options for {label}. Other archive work will continue while the installer is open.")
 
                 def tidy_line(clean_line):
                     if clean_line.startswith("ASSET CHECK"):
@@ -5363,14 +5526,33 @@ class ManagerGUI(tk.Tk):
                 archive_path = _read_staged_archive_marker(mod_dir).get("archive_path")
                 if archive_path:
                     source_archive = Path(archive_path)
+                    env["MWMANAGER_SOURCE_ARCHIVE"] = str(source_archive)
                 elif archive:
                     source_archive = Path(archive)
                     if not source_archive.is_absolute():
                         source_archive = Path(self.settings.get("archive_downloads_dir", "")) / source_archive
                     env["MWMANAGER_SOURCE_ARCHIVE"] = str(source_archive)
                 env["MWMANAGER_PLUGIN_NAME"] = PLUGIN_NAME
+                run_tidy_steps(py, staging, game_data_files, progress, f"Options {mod_dir.name}",
+                               only=mod_dir.name, reopen=reopen, env=env, quiet=quiet, on_line=tidy_line,
+                               ask_only=True)
+
+            def tidy():
+                progress(f"Running Tidy for {label}; saved option answers will be reused.")
+                env = os.environ.copy()
+                archive = _read_staged_archive_marker(mod_dir).get("archive")
+                archive_path = _read_staged_archive_marker(mod_dir).get("archive_path")
+                if archive_path:
+                    env["MWMANAGER_SOURCE_ARCHIVE"] = str(Path(archive_path))
+                elif archive:
+                    source_archive = Path(archive)
+                    if not source_archive.is_absolute():
+                        source_archive = Path(self.settings.get("archive_downloads_dir", "")) / source_archive
+                    env["MWMANAGER_SOURCE_ARCHIVE"] = str(source_archive)
+                env["MWMANAGER_PLUGIN_NAME"] = PLUGIN_NAME
+                env["MWMANAGER_REUSE_FOMOD"] = "1"
                 run_tidy_steps(py, staging, game_data_files, progress, f"Tidy {mod_dir.name}",
-                               only=mod_dir.name, reopen=reopen, env=env, quiet=quiet, on_line=tidy_line)
+                               only=mod_dir.name, env=env, quiet=quiet)
 
             def bsa_check():
                 if not group_masters:
@@ -5391,6 +5573,13 @@ class ManagerGUI(tk.Tk):
                     return "skipped_by_user"
                 return "below_threshold"
 
+            if phase in {"all", "options"}:
+                run("options_answered", options, force=reopen)
+            if phase == "options":
+                progress(f"Saved options for {label}.")
+                return
+            if not (package_steps(mod_dir) or {}).get("options_answered", {}).get("completed_at"):
+                raise RuntimeError(f"{label}: options have not been completed; resume the option queue first.")
             run("tidied", tidy)
             run("bsa_checked", bsa_check)
             progress(f"Finished tidy and options for {label}.")
@@ -5668,27 +5857,85 @@ class ManagerGUI(tk.Tk):
                                                      for found in item.get("core_masters", []))]
                         groups.append((item, masters_in_archive or [master]))
 
-                    staged_paths = []
                     py = console_python()
                     if py is None:
                         raise RuntimeError("The tidy utility needs the Python console executable beside pythonw.exe.")
                     quiet = quiet_options()
+                    from mwmanager_batch import (
+                        BatchCoordinator, BatchUnit, file_sha256, package_id_for,
+                        run_threaded_batch,
+                    )
 
-                    for index, (item, group_masters) in enumerate(groups, 1):
-                        checkpoint(progress)
+                    package_specs = [{
+                        "id": package_id_for(item["archive"]),
+                        "name": Path(item["archive"]).name,
+                        "archive": str(Path(item["archive"]).resolve()),
+                        "selected_masters": list(masters),
+                    } for item, masters in groups]
+                    coordinator = BatchCoordinator.start(APP_DIR, game_dir, package_specs)
+
+                    def config_hash(mod_dir):
+                        from core_addons import _read_staged_archive_marker
+                        marker_hash = str(_read_staged_archive_marker(mod_dir).get("sha256") or "")
+                        candidates = []
+                        try:
+                            candidates = [path for path in mod_dir.rglob("*")
+                                          if path.is_file()
+                                          and path.name.casefold() == "moduleconfig.xml"][:4]
+                        except OSError:
+                            pass
+                        return marker_hash + ":" + ":".join(filter(None, (file_sha256(path) for path in candidates)))
+
+                    def answer_hash(mod_dir):
+                        import mock_fomod
+                        identity = mock_fomod._selection_identity(Path(mod_dir))
+                        answer = mock_fomod._answer_file_path(APP_DIR / "outputs", identity)
+                        return file_sha256(answer)
+
+                    def extract_batch(item, index):
+                        group_masters = item["selected_masters"]
                         self._set_master_stage_ready(group_masters, False)
-                        # Each archive is extracted, tidied and BSA-checked in turn; every step is recorded in
-                        # the package's marker, so a run that stops here resumes at this package and step.
                         progress(f"Staging master {index} of {len(groups)}: {', '.join(group_masters)}")
-                        paths = stage_core_master_archives(plan, group_masters, APP_DIR, game_dir,
-                                                           progress_callback=progress,
-                                                           clear_staging=(index == 1 and not any(staging.iterdir())))
-                        for mod_dir in paths:
-                            staged_paths.append(mod_dir)
-                            process_package(progress, py, quiet, mod_dir, group_masters)
-                        self._set_master_stage_ready(group_masters, True)
-                        checkpoint(progress)
-                    return staged_paths
+                        paths = stage_core_master_archives(
+                            plan, group_masters, APP_DIR, game_dir,
+                            progress_callback=progress,
+                            clear_staging=(index == 1 and not any(staging.iterdir())))
+                        if len(paths) != 1:
+                            raise RuntimeError(
+                                f"Expected one staged package for {group_masters}; found {len(paths)}.")
+                        return BatchUnit(item["id"], Path(paths[0]), {
+                            "masters": list(group_masters),
+                        })
+
+                    def prepare_options(unit, reopen):
+                        process_package(
+                            progress, py, quiet, unit.path, unit.context["masters"],
+                            reopen=reopen, phase="options")
+
+                    def apply_package(unit):
+                        process_package(
+                            progress, py, quiet, unit.path, unit.context["masters"], phase="apply")
+
+                    def reset_after_option_change(unit):
+                        from core_addons import reset_package_step
+                        reset_package_step(unit.path, "tidied")
+                        reset_package_step(unit.path, "bsa_checked")
+
+                    units = run_threaded_batch(
+                        coordinator,
+                        package_specs,
+                        extract=extract_batch,
+                        prepare_options=prepare_options,
+                        apply=apply_package,
+                        fingerprint=lambda unit: answer_hash(unit.path),
+                        config_fingerprint=lambda unit: config_hash(unit.path),
+                        reset_after_option_change=reset_after_option_change,
+                        on_ready=lambda unit: self._set_master_stage_ready(
+                            unit.context["masters"], True),
+                        progress=progress,
+                    )
+                    progress("All selected major-master FOMODs and nested installer rescans are complete.")
+                    return [unit.path for unit in units]
 
                 self._setup_begin("major_masters_staged")
                 self.status.set("Unpacking major masters into staging…")

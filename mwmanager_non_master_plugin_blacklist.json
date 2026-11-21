@@ -216,6 +216,13 @@
       "archives": [
         "Raym's Vampire Rumors - Patch for Purists-48955-1-0-1652282311.7z"
       ]
+    },
+    "totsp_patch_for_purists_5.0.6.esp": {
+      "filename": "TOTSP_Patch_for_Purists_5.0.6.esp",
+      "classification": "not in configured major-master list",
+      "archives": [
+        "Patch for Purists Patch for PfP 5.0.6-46810-2-3-0-1766252023.7z"
+      ]
     }
   },
   "archives": {
@@ -607,6 +614,14 @@
       "size_bytes": 180115935,
       "mtime_ns": 1794826876008051700,
       "plugins": []
+    },
+    "k:\\downloads\\vortex\\morrowind\\patch for purists patch for pfp 5.0.6-46810-2-3-0-1766252023.7z": {
+      "archive": "K:\\Downloads\\Vortex\\morrowind\\Patch for Purists Patch for PfP 5.0.6-46810-2-3-0-1766252023.7z",
+      "size_bytes": 581,
+      "mtime_ns": 1795010330577748700,
+      "plugins": [
+        "TOTSP_Patch_for_Purists_5.0.6.esp"
+      ]
     }
   }
 }

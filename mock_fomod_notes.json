@@ -32,9 +32,25 @@
       "options": {
         "*Windoors*": "Windoors is a very hard to find mod from a Russian author. If you do not have a copy, or a reasonable idea how to get it, don't install this patch.",
         "Dark Molag Mar*": {
-          "note": "A patch for the separate mod Dark Molag Mar (on Nexus), not part of Glow in the Dahrk. Its meshes (Meshes\\rtfmm\\) only do something when Dark Molag Mar is installed; without it, leave this unchecked.",
-          "needs": []
+          "note": "MWMANAGER INSIGHT: This patch is for the separate mod Dark Molag Mar, a readily available plugin from Nexus; it is not part of Glow in the Dahrk. Nexus ID 32101. Its meshes (Meshes\\rtfmm\\) only do something with Dark Molag Mar installed. If selected, MWManager queues Dark Molag Mar and uses its archive when available; otherwise it opens the Nexus mod page for download. If not selected, that choice is remembered and offered again when Dark Molag Mar is installed later.",
+          "needs": ["Dark Molag Mar (mod)"]
         }
+      }
+    },
+    {
+      "name": "OAAB Data",
+      "nexus_id": 49042,
+      "packages": ["OAAB_Data *"],
+      "options": {
+        "Animated Containers": "MWMANAGER INSIGHT: this needs the full MW Containers Animated mod, Nexus ID 42238. It supplies the AC meshes and sounds. 'Some Improved Animated Containers' (Nexus 44321) is only an optional mesh overwrite and never substitutes for the full mod."
+      }
+    },
+    {
+      "name": "Wares Ultimate",
+      "nexus_id": 52013,
+      "packages": ["Wares Ultimate*"],
+      "options": {
+        "NOD Patch": "Needs NPC Outfit Diversity (NOD - Core.esm, Nexus 52091), which nothing in this package says. Without it this option waits, and the batch installs NPC Outfit Diversity from your downloads first."
       }
     }
   ]

@@ -223,6 +223,40 @@ class HeldOptionTests(unittest.TestCase):
             entry = next(iter(journal["mods"].values()))
             self.assertEqual(entry["held"], ["01 Epic Plants"])
 
+    def test_gitd_dark_molag_mar_note_queues_the_separate_mod(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mod = Path(tmp) / "Glow in the Dahrk 45886 1.0"
+            mod.mkdir()
+            option = {
+                "key": "dark-molag-mar",
+                "label": "Dark Molag Mar",
+                "path": mod / "10 Dark Molag Mar",
+                "mod_dir": mod,
+                "missing_masters": [],
+                "targets": [],
+            }
+            note = mock_fomod._maintainer_notes(option)
+            self.assertIn("Nexus ID 32101", note)
+            mock_fomod._mark_maintainer_needs([option], set())
+            self.assertIn("Dark Molag Mar (mod)", option["needs_mods"])
+            self.assertIn("dark molag mar (mod)", option["targets"])
+            waiting = mock_fomod.record_pending_options(
+                Path(tmp) / "outputs", mod, [option], {"dark-molag-mar"}, set())
+            self.assertEqual(waiting["dark-molag-mar"]["status"], "waiting")
+            mock_fomod._mark_maintainer_needs([option], {"Dark Molag Mar.esp"})
+            self.assertNotIn("needs_mods", option)
+            self.assertEqual(mock_fomod.held_options(
+                [option], {"dark-molag-mar"}, {"Dark Molag Mar.esp"}), set())
+
+    def test_dark_molag_mar_missing_dependency_opens_its_exact_nexus_page(self):
+        import needed_mods
+        self.assertEqual(
+            needed_mods.nexus_search_url("Dark Molag Mar (mod)"),
+            "https://www.nexusmods.com/morrowind/mods/32101")
+        self.assertEqual(
+            needed_mods.nexus_search_url("NPC Outfit Diversity (mod)"),
+            "https://www.nexusmods.com/morrowind/mods/52091")
+
     def test_a_held_option_goes_in_without_asking_once_its_mod_is_installed(self):
         journal = {"version": 1, "known_installed_plugins": [], "mods": {"oaab": {
             "plugin": "OAAB_Data.esm", "targets": ["epic plants.esp"], "selected": [],

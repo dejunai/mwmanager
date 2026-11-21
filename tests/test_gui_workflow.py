@@ -6,6 +6,7 @@ import shutil
 import struct
 import tempfile
 import threading
+import time
 import types
 import unittest
 from pathlib import Path
@@ -425,6 +426,12 @@ class WorkflowGuiTests(unittest.TestCase):
                     and str(w.cget("style")) == "MasterSave.TButton")
         self.assertEqual(gold.cget("text"), "Done")
         tree = next(w for w in widgets if isinstance(w, self.g.ttk.Treeview))
+        for _ in range(200):
+            self.app.update()
+            if not tree.exists("__scanning__"):
+                break
+            time.sleep(0.01)
+        self.assertFalse(tree.exists("__scanning__"))
         tree.selection_set(tree.get_children()[0])
         self.app.update()
         with mock.patch.object(self.g.messagebox, "askyesno", return_value=True),                 mock.patch.object(self.g.messagebox, "showwarning"):          # the first move asks to confirm

@@ -9,6 +9,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 import textwrap
 import unittest
 from unittest import mock
@@ -447,8 +448,67 @@ class GuiProbes(unittest.TestCase):
         self.app.selected_major_masters = {name.casefold()}
         return package
 
+    def wait_for_master_scan(self):
+        dialog = self.app._major_master_dialog
+        tree = next(widget for widget in self.descendants(dialog)
+                    if isinstance(widget, self.g.ttk.Treeview))
+        for _ in range(200):
+            self.app.update()
+            if not tree.exists("__scanning__"):
+                return tree
+            time.sleep(0.01)
+        self.fail("Major-master scan did not finish")
+
+    @staticmethod
+    def descendants(widget):
+        for child in widget.winfo_children():
+            yield child
+            yield from GuiProbes.descendants(child)
+
     def capture_worker(self, title, description, worker, complete):
         self.job = (title, worker, complete)
+
+    def test_startup_resumes_waiting_option_queue_without_opening_major_masters(self):
+        outputs = self.g.APP_DIR / "outputs"
+        outputs.mkdir(parents=True, exist_ok=True)
+        (outputs / "mwmanager_pending_options.json").write_text(json.dumps({
+            "OAAB_Data": {
+                "option:1": {"label": "Epic Plants", "needs": ["epic plants (mod)"],
+                             "status": "waiting"},
+            },
+        }), encoding="utf-8")
+        with mock.patch.object(self.app, "_resolve_waiting_options") as resolve:
+            self.app._resume_waiting_options_after_startup()
+        resolve.assert_called_once()
+        self.assertIn("Resuming 1", self.app.status.get())
+
+    def test_completed_setup_seeds_preflight_signature_for_plugin_queue(self):
+        self.app._setup_complete("preflight_complete")
+        expected = gui.preflight_signature(self.app.settings["game_dir"])
+        self.app._preflight_signature = None
+        with mock.patch.object(gui, "read_settings", wraps=gui.read_settings):
+            restored = gui.ManagerGUI.__new__(gui.ManagerGUI)
+            restored.settings = dict(self.app.settings)
+            restored._remember_preflight(expected)
+        self.assertEqual(gui.completed_preflight_signature(
+            restored.settings), expected)
+
+    def test_major_master_done_resumes_the_waiting_option_queue(self):
+        outputs = self.g.APP_DIR / "outputs"
+        outputs.mkdir(parents=True, exist_ok=True)
+        (outputs / "mwmanager_pending_options.json").write_text(json.dumps({
+            "Wares": {"nod": {"label": "NOD Patch", "needs": ["NOD - Core.esm"],
+                             "status": "waiting"}},
+        }), encoding="utf-8")
+        self.app.open_major_masters()
+        self.wait_for_master_scan()
+        done = next(widget for widget in self.descendants(self.app._major_master_dialog)
+                    if isinstance(widget, self.g.ttk.Button) and widget.cget("text") == "Done")
+        with mock.patch.object(self.app, "save"), \
+                mock.patch.object(self.app, "_resume_waiting_options_after_startup") as resume:
+            done.invoke()
+            self.app.update()
+        resume.assert_called_once()
 
     def test_successful_resume_is_ready_for_deployment(self):
         package = self.package()
@@ -502,7 +562,7 @@ class GuiProbes(unittest.TestCase):
         with mock.patch.object(self.g, "run_tidy_steps", side_effect=self.g.TidyPlanPaused("cancelled")):
             with self.assertRaises(self.g.TidyPlanPaused):
                 self.job[1](mock.Mock())
-        self.assertIsNotNone(ca.package_steps(package)["tidied"]["last_error"])
+        self.assertIsNotNone(ca.package_steps(package)["options_answered"]["last_error"])
         self.assertEqual(self.app._unfinished_master_stages(["A.esm"]), ["A.esm"])
         self.app.stage_major_masters()
         with mock.patch.object(self.g, "run_tidy_steps"), \
@@ -568,13 +628,7 @@ class GuiProbes(unittest.TestCase):
         self.assertTrue(all(path.exists() for path in backups))
         self.app.open_major_masters()
 
-        def descendants(widget):
-            for child in widget.winfo_children():
-                yield child
-                yield from descendants(child)
-
-        tree = next(w for w in descendants(self.app._major_master_dialog)
-                    if isinstance(w, self.g.ttk.Treeview))
+        tree = self.wait_for_master_scan()
         tree.selection_set("B.esm")
         self.app.update()
         self.assertTrue(self.app.unstage_master_button.instate(["disabled"]))
@@ -625,12 +679,7 @@ class GuiProbes(unittest.TestCase):
         self.app.selected_major_masters = {"a.esm", "b.esm"}
         self.app.open_major_masters()
 
-        def descendants(widget):
-            for child in widget.winfo_children():
-                yield child
-                yield from descendants(child)
-        tree = next(widget for widget in descendants(self.app._major_master_dialog)
-                    if isinstance(widget, self.g.ttk.Treeview))
+        tree = self.wait_for_master_scan()
         self.app._major_master_dialog.update()
 
         def click(name):
@@ -653,12 +702,7 @@ class GuiProbes(unittest.TestCase):
         data = Path(self.app.settings["game_dir"]) / "Data Files"
         put(data, "A.esm", esm())
         self.app.open_major_masters()
-        def descendants(widget):
-            for child in widget.winfo_children():
-                yield child
-                yield from descendants(child)
-        tree = next(widget for widget in descendants(self.app._major_master_dialog)
-                    if isinstance(widget, self.g.ttk.Treeview))
+        tree = self.wait_for_master_scan()
         self.assertEqual(tree.item("A.esm")["values"][1], "Untracked on disk")
         self.assertFalse(os.path.samefile(package / "A.esm", data / "A.esm"))
 

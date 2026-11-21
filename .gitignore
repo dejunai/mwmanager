@@ -18,11 +18,15 @@ mwmanager_conflict_answers.json
 mwmanager_dates_undo.txt
 mwmanager_luafix.json
 major_master_deployments.json
+mwmanager_master_variants.json
+mwmanager_required_by_cache.json
 archive_scan_cache.json
 game_catalog.sqlite3
 mwmanager_setup_state.json
 STEAM_UTILITY_REVIEW.md
 # working folders
+archive_cache/
+deployment_backups/
 outputs/
 backups/
 _backup/

@@ -66,6 +66,11 @@ def _words(text: str) -> set[str]:
 _FILLER = {"the", "of", "and", "for", "an", "in", "one", "all", "by", "some", "mod", "replacer", "replacement",
            "definitive", "definative", "improved", "remastered", "retexture", "edition", "version", "hd"}
 _VORTEX_TITLES = {}         # (path, mtime) -> {archive stem / mod folder name, casefolded: Nexus title}
+KNOWN_NEXUS_MODS = {
+    "dark molag mar": 32101,
+    "npc outfit diversity": 52091,
+    "animated containers": 42238,
+}
 
 
 def vortex_mod_titles(game="morrowind") -> dict[str, str]:
@@ -104,6 +109,24 @@ def _key_words(text: str) -> set[str]:
     return words
 
 
+def archives_for_need(need: str, downloads: Path) -> list[Path]:
+    """Known exact Nexus mod identity for a named dependency."""
+    if not need.casefold().endswith(" (mod)"):
+        return []
+    name = re.sub(r"\s+", " ", need[:-6].strip()).casefold()
+    mod_id = KNOWN_NEXUS_MODS.get(name)
+    if not mod_id:
+        return []
+    try:
+        candidates = sorted(Path(downloads).iterdir(), key=lambda path: path.name.casefold())
+    except OSError:
+        return []
+    out = []
+    matches = [path for path in candidates
+               if re.search(rf"(?:^|[-_ ]){mod_id}(?:[-_ .]|$)", path.stem)]
+    return [max(matches, key=lambda path: path.stat().st_mtime_ns)] if matches else out
+
+
 def names_mod(needed: str, name: str) -> bool:
     """Does this archive or staged folder name hold the mod an installer option names ("Epic Plants (mod)")?
     Its Nexus title from Vortex first (Epic Plants ships as "All-in-one"), else the name itself. Word match,
@@ -128,6 +151,10 @@ def find_needed(needs, downloads: Path, index_path: Path, manager_dir: Path, pro
     found = {}
     for need in needs:
         if need.endswith(" (mod)"):            # an asset-only mod: no plugin to look for, so go by its name
+            exact = archives_for_need(need, Path(downloads))
+            if exact:
+                found[need] = exact[0]
+                continue
             try:
                 names = [n for n in os.listdir(downloads) if n.casefold().endswith(ARCHIVE_EXTS)]
             except OSError:
@@ -159,6 +186,11 @@ def find_needed(needs, downloads: Path, index_path: Path, manager_dir: Path, pro
 def nexus_search_url(plugin: str) -> str:
     """A Nexus search for the mod a needed plugin comes from (its file name, words only)."""
     from urllib.parse import quote
+    if plugin.casefold().endswith(" (mod)"):
+        name = re.sub(r"\s+", " ", plugin[:-6].strip()).casefold()
+        mod_id = KNOWN_NEXUS_MODS.get(name)
+        if mod_id:
+            return f"https://www.nexusmods.com/morrowind/mods/{mod_id}"
     words = " ".join(re.split(r"[^A-Za-z0-9']+", Path(plugin).stem)).strip()
     return f"https://www.nexusmods.com/games/morrowind/mods?keyword={quote(words)}"
 
