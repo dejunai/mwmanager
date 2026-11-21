@@ -221,6 +221,10 @@ class BatchCoordinator:
     def package(self, package_id: str) -> dict:
         return self.manifest["packages"][package_id]
 
+    def discovery_state(self, discovery_id: str) -> str:
+        with self._lock:
+            return str(self.manifest["discoveries"][discovery_id]["state"])
+
     def add_package(self, package_id: str, **details) -> dict:
         with self._lock:
             if package_id in self.manifest["packages"]:
@@ -531,6 +535,9 @@ def run_threaded_batch(
                         payload_fingerprint=str(before or ""),
                     )
                     if discovery_id is None:
+                        break
+                    if coordinator.discovery_state(discovery_id) == "answered":
+                        coordinator.transition(unit.package_id, "TIDY_COMPLETE", worker_slot="tidy")
                         break
                     coordinator.transition(unit.package_id, "PREPARING_OPTIONS",
                                            worker_slot="tk-options")

@@ -155,6 +155,30 @@ class BatchCoordinatorTests(unittest.TestCase):
         self.assertTrue(all(coordinator == "READY_FOR_DEPLOYMENT" for coordinator in
                             (entry["phase"] for entry in self.coordinator.manifest["packages"].values())))
 
+    def test_answered_rescan_with_no_answer_file_does_not_wait_forever(self):
+        package_path = self.root / "A"
+        package_path.mkdir()
+
+        result = batch.run_threaded_batch(
+            self.coordinator,
+            [{"id": "A"}, {"id": "B"}],
+            extract=lambda item, _index: batch.BatchUnit(
+                item["id"], package_path, {"name": item["id"]}),
+            prepare_options=lambda _unit, _reopen: None,
+            apply=lambda _unit: None,
+            fingerprint=lambda _unit: None,
+            config_fingerprint=lambda unit: "config-" + unit.package_id,
+            reset_after_option_change=lambda _unit: None,
+            on_ready=lambda _unit: None,
+            progress=lambda _message: None,
+        )
+
+        self.assertEqual([unit.package_id for unit in result], ["A", "B"])
+        self.assertTrue(all(
+            package["phase"] == "READY_FOR_DEPLOYMENT"
+            for package in self.coordinator.manifest["packages"].values()
+        ))
+
     def test_corrupt_fomod_blocks_only_its_package(self):
         paths = {}
         for package_id in ("A", "B"):
