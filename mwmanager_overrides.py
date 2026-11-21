@@ -1383,6 +1383,11 @@ def _main(argv=None):
     jg = ap.add_argument_group("install journal (the game folder is the parent of data_dir; nothing is changed)")
     mwmanager_journal.add_arguments(jg)
     args = ap.parse_args(argv)
+    if getattr(args, "data_dir", None):        # another game's answers and rules are set aside first
+        import mwmanager_gamestate
+        switched = mwmanager_gamestate.use_game(MANAGER_DIR, os.path.dirname(os.path.abspath(args.data_dir)))
+        if switched:
+            print(switched)
     if args.capture_baseline or args.verify or args.rollback or args.mod_rollback:
         from pathlib import Path as _Path
         game_dir = _Path(os.path.abspath(args.data_dir)).parent

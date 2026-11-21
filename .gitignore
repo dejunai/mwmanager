@@ -15,6 +15,10 @@ mwmanager_disabled.txt
 mwmanager_added_masters.json
 mwmanager_cell_winners.txt
 mwmanager_conflict_answers.json
+mwmanager_rules.txt
+mwmanager_conflict_blacklist.txt
+mwmanager_state_owner.json
+game_states/
 mwmanager_dates_undo.txt
 mwmanager_luafix.json
 major_master_deployments.json

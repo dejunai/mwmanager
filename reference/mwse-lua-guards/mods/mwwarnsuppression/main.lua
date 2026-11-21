@@ -14,6 +14,7 @@
 
 local CONFIG_NAME = "mwwarnsuppression"
 local defaults = {
+    enabled = false,
     suppressBodyPartWarnings = true,
     suppressShutdownWarnings = true,
 }
@@ -46,11 +47,13 @@ local function findSites()
         if image.text then sites = locate.find(image) end
     end)
     if not ok then mwse.log("[mwwarnsuppression] Could not read the executable's code: %s", tostring(err)) end
+    local LABEL = { bodyPart = "BodyPart" }        -- shown as the game spells it in the warning
     for _, name in ipairs({ "bodyPart", "texture", "nif", "kf" }) do
+        local label = LABEL[name] or name
         if sites[name] then
-            mwse.log("[mwwarnsuppression] %s: found at 0x%X.", name, sites[name].address)
+            mwse.log("[mwwarnsuppression] %s: found at 0x%X.", label, sites[name].address)
         else
-            mwse.log("[mwwarnsuppression] %s: not found in this Morrowind.exe (another build or already patched); left alone.", name)
+            mwse.log("[mwwarnsuppression] %s: not found in this Morrowind.exe (another build or already patched); left alone.", label)
         end
     end
     return sites
@@ -145,6 +148,7 @@ local function applyShutdownPatch(enable)
 end
 
 local function onInitialized()
+    if not config.enabled then return end
     if config.suppressBodyPartWarnings then
         applyBodyPartPatch(true)
     end
@@ -160,13 +164,19 @@ event.register(tes3.event.modConfigReady, function()
     template:saveOnClose(CONFIG_NAME, config)
     template.onClose = function()
         mwse.saveConfig(CONFIG_NAME, config)
-        applyBodyPartPatch(config.suppressBodyPartWarnings)
-        applyShutdownPatch(config.suppressShutdownWarnings)
+        applyBodyPartPatch(config.enabled and config.suppressBodyPartWarnings)
+        applyShutdownPatch(config.enabled and config.suppressShutdownWarnings)
     end
 
     local page = template:createSideBarPage({
         label = "Settings",
         description = "mwwarnsuppression cleans harmless engine warning spam from MWSE.log and Warnings.txt without hiding genuine mod issues or errors.\n\nToggle features on or off as desired.",
+    })
+
+    page:createOnOffButton({
+        label = "Enabled",
+        description = "Off: no warning is suppressed and the game's code is left as it is.",
+        variable = mwse.mcm.createTableVariable({ id = "enabled", table = config }),
     })
 
     page:createOnOffButton({

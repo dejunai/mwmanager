@@ -1,3 +1,0 @@
-; MWManager load-order rules
-; Add [Order], [NearStart], [NearEnd], or [Exact] rules as needed.
-; Without custom rules, installed order is preserved wherever masters and mlox allow it.

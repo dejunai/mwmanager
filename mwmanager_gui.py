@@ -1126,6 +1126,11 @@ class ManagerGUI(tk.Tk):
         self.bind("<Unmap>", self._release_grab_when_minimized, add="+")
         self.bind("<Map>", self._regrab_when_restored, add="+")
         self.settings = read_settings()
+        if self.settings.get("paths_confirmed"):     # another game's answers and rules are set aside first
+            import mwmanager_gamestate
+            switched = mwmanager_gamestate.use_game(APP_DIR, self.settings["game_dir"])
+            if switched:
+                print(switched, flush=True)
         persisted_preflight = completed_preflight_signature(self.settings)
         if (persisted_preflight is not None
                 and self._setup_done("preflight_complete")
