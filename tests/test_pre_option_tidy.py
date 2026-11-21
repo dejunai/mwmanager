@@ -2,6 +2,7 @@
 Extras/<plugin> and their descriptions in Docs/<plugin>."""
 import os
 import io
+import json
 import contextlib
 import shutil
 import struct
@@ -343,13 +344,63 @@ class TotspOptionTests(unittest.TestCase):
         with mock.patch("sys.stdout", new_callable=io.StringIO) as said:
             kept = mock_fomod._drop_superseded_choices(self.mod, records)
         self.assertEqual([r["key"] for r in kept], ["boats"])
-        self.assertIn("TOTSP_Patch_for_Purists_5.0.6.esp in this install is a newer version", said.getvalue())
+        self.assertIn("TOTSP_Patch_for_Purists_5.0.6.esp in this install replaces", said.getvalue())
         self.mod.joinpath("TOTSP_Patch_for_Purists_5.0.6.esp").unlink()   # without the newer one: offered
         self.assertEqual(len(mock_fomod._drop_superseded_choices(self.mod, records)), 2)
         self.assertEqual([r["key"] for r in mock_fomod._drop_superseded_choices(
             self.mod, records, {"TOTSP_Patch_for_Purists_5.0.6.esp"})], ["boats"])
         self.assertEqual(mock_fomod._plugin_version("TOTSP_Patch_for_Purists_4.0.2.esp"),
                          ("totsp_patch_for_purists", (4, 0, 2)))
+
+    def test_selected_companion_hides_older_plugin_before_extraction(self):
+        output = self.mod.parent / "outputs"
+        output.mkdir()
+        archive = "Patch for Purists Patch for PfP 5.0.6.7z"
+        marker = {
+            "selected_masters": ["solstheim tomb of the snow prince.esm"],
+            "companions": [{"archive": str(self.mod.parent / "downloads" / archive)}],
+        }
+        (self.mod / ".mwmanager-stage.json").write_text(json.dumps(marker), encoding="utf-8")
+        (output / "mwmanager_archive_plugins.json").write_text(json.dumps({
+            "version": 1,
+            "archives": {
+                archive: {"stamp": "x", "plugins": ["TOTSP_Patch_for_Purists_5.0.6.esp"]},
+            },
+        }), encoding="utf-8")
+        identity = mock_fomod._selection_identity(self.mod)
+        answer_path = mock_fomod._answer_file_path(output, identity)
+        answer_path.parent.mkdir(parents=True, exist_ok=True)
+        answer_path.write_text(json.dumps({
+            "version": 1, "identity": identity,
+            "selected": ["companion:" + archive], "answered_groups": [],
+        }), encoding="utf-8")
+        available = mock_fomod._selected_companion_plugins(self.mod, output)
+        records = [self.option("pfp", "Patch for Purists 4.0.2",
+                               "100 Patch - Patch for Purists/TOTSP_Patch_for_Purists_4.0.2.esp")]
+
+        self.assertEqual(available, {"totsp_patch_for_purists_5.0.6.esp"})
+        self.assertEqual(mock_fomod._drop_superseded_choices(self.mod, records, available), [])
+
+    def test_stage_marker_nexus_identity_survives_missing_vortex_metadata(self):
+        (self.mod / ".mwmanager-stage.json").write_text(json.dumps({
+            "sha256": "archive-hash",
+            "NEXUS_MOD_PAGE": "https://www.nexusmods.com/morrowind/mods/46810?tab=files",
+        }), encoding="utf-8")
+        with mock.patch("mwdialog_assets.vortex_mod_metadata", return_value={}), \
+                mock.patch("mwdialog_assets.nexus_id", return_value=None):
+            self.assertEqual(mock_fomod._selection_identity(self.mod), "nexus:46810")
+
+    def test_selected_patch_for_purists_master_replaces_totsp_patch_option(self):
+        self.mod.joinpath("TOTSP_Patch_for_Purists_5.0.6.esp").unlink()
+        records = [self.option("pfp", "Patch for Purists 4.0.2",
+                               "100 Patch - Patch for Purists/TOTSP_Patch_for_Purists_4.0.2.esp")]
+
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as said:
+            kept = mock_fomod._drop_superseded_choices(
+                self.mod, records, {"patch for purists.esm"})
+
+        self.assertEqual(kept, [])
+        self.assertIn("patch for purists.esm", said.getvalue().casefold())
 
 
 class WaitingOptionMods(unittest.TestCase):

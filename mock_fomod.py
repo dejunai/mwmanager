@@ -901,6 +901,34 @@ def _available_staged_plugins(mod_dir: Path) -> set[str]:
     return found
 
 
+def _selected_companion_plugins(mod_dir: Path, output_dir: Path) -> set[str]:
+    """Plugins supplied by companions selected in the durable answer, even before extraction."""
+    marker_path = mod_dir / ".mwmanager-stage.json"
+    try:
+        marker = json.loads(marker_path.read_text(encoding="utf-8"))
+        answer = _load_answer_file(output_dir, _selection_identity(mod_dir))
+        selected = set(answer.get("selected", [])) if answer else set()
+        companions = [
+            item for item in marker.get("companions", [])
+            if "companion:" + Path(str(item.get("archive") or "")).name in selected
+        ]
+        index = json.loads((Path(output_dir) / "mwmanager_archive_plugins.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return set()
+    archive_index = {
+        Path(name).name.casefold(): entry for name, entry in index.get("archives", {}).items()
+        if isinstance(entry, dict)
+    }
+    found = set()
+    for companion in companions:
+        entry = archive_index.get(Path(str(companion.get("archive") or "")).name.casefold(), {})
+        found.update(
+            str(name).casefold() for name in entry.get("plugins", [])
+            if Path(str(name)).suffix.casefold() in PLUGIN_EXTS
+        )
+    return found
+
+
 _NOT_MODS = {"mge xe", "mwse", "openmw", "mge xe and mwse", "mwse and mge xe"}   # setup choices, not mods
 
 
@@ -1056,6 +1084,9 @@ def _represented_option_sources(records: list[dict]) -> set[Path]:
 
 
 _VERSIONED_PLUGIN = re.compile(r"^(.*?)[ _-]v?(\d+(?:\.\d+)+)$", re.I)
+_VERSIONED_PLUGIN_REPLACEMENTS = {
+    "totsp_patch_for_purists": {"patch for purists.esm"},
+}
 
 
 def _plugin_version(name: str) -> tuple[str, tuple[int, ...]] | None:
@@ -1071,7 +1102,8 @@ def _drop_superseded_choices(mod_dir: Path, records: list[dict], available_plugi
         present = [p.name for p in mod_dir.iterdir() if p.is_file() and p.suffix.casefold() in PLUGIN_EXTS]
     except OSError:
         present = []
-    for name in list(present) + list(available_plugins):
+    available = list(present) + list(available_plugins)
+    for name in available:
         found = _plugin_version(name)
         if found and found[1] > newest.get(found[0], ((), ""))[0]:
             newest[found[0]] = (found[1], name)
@@ -1080,12 +1112,26 @@ def _drop_superseded_choices(mod_dir: Path, records: list[dict], available_plugi
         plugins = [n for n in (record.get("all_payload_files") or record.get("payload_files") or {})
                    if Path(n).suffix.casefold() in PLUGIN_EXTS]
         versions = [_plugin_version(Path(n).name) for n in plugins]
-        newer = [newest[v[0]][1] for v in versions if v and v[0] in newest and newest[v[0]][0] > v[1]]
-        if record.get("required") or not plugins or len(newer) != len(plugins):
+        superseded_by = []
+        all_superseded = bool(plugins)
+        for version in versions:
+            choices = []
+            if version:
+                if version[0] in newest and newest[version[0]][0] > version[1]:
+                    choices.append(newest[version[0]][1])
+                choices.extend(
+                    name for name in available
+                    if Path(str(name)).name.casefold()
+                    in _VERSIONED_PLUGIN_REPLACEMENTS.get(version[0], set())
+                )
+            if not choices:
+                all_superseded = False
+            superseded_by.extend(choices)
+        if record.get("required") or not all_superseded:
             kept.append(record)
             continue
         print(f"  {mod_dir.name}: not offering '{record.get('label') or record['key']}': "
-              f"{', '.join(sorted(set(newer)))} in this install is a newer version of it.", flush=True)
+              f"{', '.join(sorted(set(superseded_by)))} in this install replaces this older option.", flush=True)
     return kept
 
 
@@ -2422,7 +2468,7 @@ def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str]
                             output_dir=None, installed=None) -> None:
     """Extract each chosen companion to staging/companions (outside the master staging that Tidy treats as
     packages, and outside the package, so it is not deployed as is); its record gets the payload to activate."""
-    from plugin_install import LARGE_ARCHIVE_BYTES, extract_archive
+    from plugin_install import extract_archive
     for record in records:
         companion = record.get("companion")
         if not companion or record["key"] not in chosen or "payload_files" in record:
@@ -2431,14 +2477,23 @@ def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str]
         target = mod_dir.parent.parent / "companions" / re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .")
         if not target.is_dir():
             size = archive.stat().st_size
-            # 7-Zip can't say how far it is: one line before it, no timer
-            if size >= LARGE_ARCHIVE_BYTES:
-                print(f"  {mod_dir.name}: working through {record['label']} ({size / 1048576:,.0f} MB), "
-                      "please be patient...", flush=True)
-            else:
-                print(f"  {mod_dir.name}: extracting {record['label']} ({size / 1048576:,.0f} MB)...", flush=True)
+            print(f"  {mod_dir.name}: extracting {record['label']} ({size / 1048576:,.0f} MB)...", flush=True)
             started = time.monotonic()
-            extract_archive({"archive": str(archive)}, target, Path(__file__).resolve().parent)
+            stopped = threading.Event()
+
+            def heartbeat():
+                while not stopped.wait(30):
+                    elapsed = int(time.monotonic() - started)
+                    print(f"  {mod_dir.name}: still extracting {record['label']} ({elapsed} s); continuing.",
+                          flush=True)
+
+            pulse = threading.Thread(target=heartbeat, name="MWManager companion heartbeat", daemon=True)
+            pulse.start()
+            try:
+                extract_archive({"archive": str(archive)}, target, Path(__file__).resolve().parent)
+            finally:
+                stopped.set()
+                pulse.join()
             print(f"  {mod_dir.name}: extracted {archive.name} in {int(time.monotonic() - started)} s.", flush=True)
         record["path"] = _data_root(target)
         # a companion with options of its own: its own window, and only what is chosen there goes in
@@ -2661,6 +2716,13 @@ def _selection_identity(mod_dir: Path) -> str:
             except (OSError, ValueError):
                 continue
     digest = str(marker.get("sha256", "")).casefold()
+    mod_id = marker.get("NEXUS_MOD_ID") or marker.get("NEXUS_MODID") or marker.get("NEXUS_ID")
+    page = str(marker.get("NEXUS_MOD_PAGE") or "")
+    page_match = re.search(r"/mods/(\d+)(?:\D|$)", page, re.I)
+    if not mod_id and page_match:
+        mod_id = page_match.group(1)
+    if mod_id:
+        return "nexus:" + str(mod_id).casefold()
     if digest:
         return "sha256:" + digest
     masters = sorted(Path(name).name.casefold() for name in marker.get("selected_masters", []) if name)
@@ -2846,6 +2908,8 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             continue
         eligible.append(p)
     eligible_keys = {str(p.resolve()).casefold() for p in eligible}
+    for package_dir in eligible:
+        installed.update(_selected_companion_plugins(package_dir, output_dir))
     legacy_identity_counts = {}
     for package_dir in eligible:
         legacy_identity = _legacy_master_identity(package_dir)
