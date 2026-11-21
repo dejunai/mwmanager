@@ -156,6 +156,25 @@ class PluginPathSafetyTests(unittest.TestCase):
                 zf.writestr("Tools/other.dll", b"new")               # a binary the user never saw stays blocked
             self.assertFalse(plugin_install.analyze_archive(item, root)["safe"])
 
+    def test_approved_payload_is_quarantined_immediately_after_extraction(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "Mod.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("Mod.esp", b"TES3")
+                zf.writestr("Tools/converter.exe", b"utility")
+            plugin_install.allow_payloads(root, archive, ["Tools/converter.exe"])
+            destination = root / "staging" / "Mod"
+
+            plugin_install.extract_archive(
+                {"archive": str(archive), "plugins": ["Mod.esp"]}, destination, root)
+
+            self.assertFalse((destination / "Tools/converter.exe").exists())
+            self.assertEqual(
+                (destination / "Off" / "Mod" / "Executables" / "Tools" / "converter.exe").read_bytes(),
+                b"utility",
+            )
+
     def test_archive_analysis_detects_encryption_from_zip_flags(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

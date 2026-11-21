@@ -112,6 +112,7 @@ def allowed_payloads(manager: Path) -> dict[str, list[str]]:
 
 
 def allow_payloads(manager: Path, archive: str | Path, payloads: list[str]) -> None:
+    """Approve exact archive members for extraction into quarantine, never for deployment."""
     data = allowed_payloads(manager)
     data[Path(archive).name.casefold()] = sorted(set(data.get(Path(archive).name.casefold(), [])) | set(payloads),
                                                   key=str.casefold)
@@ -813,6 +814,9 @@ def pack_package_assets(package: Path, plugin_name: str, manager: Path, progress
 
 def extract_archive(item: dict, destination: Path, manager: Path) -> Path:
     archive = Path(item["archive"])
+    approved = set(item.get("allowed_payloads") or ())
+    approved.update(allowed_payloads(Path(manager)).get(archive.name.casefold(), []))
+    item = {**item, "allowed_payloads": sorted(approved, key=str.casefold)}
     risk = analyze_archive(item, manager)
     if risk["blocked"] or item.get("blocked"):
         reasons = "; ".join(finding["message"] for finding in risk["high_severity_findings"])
@@ -859,6 +863,19 @@ def extract_archive(item: dict, destination: Path, manager: Path) -> Path:
         # Defender or the indexer can still hold freshly extracted files; renaming the folder then fails.
         for attempt in range(10):
             try:
+                owner = next(
+                    (Path(name).stem for name in item.get("plugins", []) if name),
+                    destination.name,
+                )
+                quarantine = temporary / "Off" / owner / "Executables"
+                for payload in sorted(approved, key=str.casefold):
+                    normalized = Path(payload.replace("\\", "/").lstrip("/"))
+                    source = _safe_child(temporary, normalized, label="Approved payload")
+                    if not source.is_file():
+                        continue
+                    target = _safe_child(quarantine, normalized, label="Quarantined payload")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    source.replace(target)
                 os.replace(temporary, destination)
                 break
             except PermissionError:
