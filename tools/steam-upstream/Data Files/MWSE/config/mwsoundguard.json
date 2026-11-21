@@ -1,0 +1,16 @@
+{
+  "enabled": true,
+  "loopGap": 1.0,
+  "suspectLimit": 3,
+  "loopWindow": 10,
+  "maxLoopStarts": 4,
+  "oneShotPerSecond": 8,
+  "oneShotMinGap": 0.05,
+  "globalWindow": 0.05,
+  "globalCap": 32,
+  "summarySeconds": 60,
+  "mainLogReports": 10,
+  "trace": false,
+  "traceLimit": 300,
+  "exemptSounds": {}
+}

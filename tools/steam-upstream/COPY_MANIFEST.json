@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-21 (America/Los_Angeles); mwcompanions: new companion core (2026-11-21)",
+  "SyncedAt": "2026-11-21 (America/Los_Angeles); handoff",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -1133,6 +1133,13 @@
       "Bytes": 8952,
       "SHA256": "c04f0552b5a7d47ca57364d57bf1839e6e6ba6298f1721d8de980d25112830d2",
       "SourceModified": "2026-11-21T13:58:27"
+    },
+    {
+      "RelativePath": "RESUME.md",
+      "Source": "<Steam Morrowind>\\RESUME.md",
+      "Bytes": 5706,
+      "SHA256": "53c8c1e5c7350eeb213ce3cc781611ee3fda8c6d669ae004b07ab2cde4794464",
+      "SourceModified": "2026-11-21T14:45:08"
     },
     {
       "RelativePath": "tests\\test_door_ownership.py",
