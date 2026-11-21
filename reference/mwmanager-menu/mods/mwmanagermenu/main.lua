@@ -18,7 +18,7 @@ local SUITE = {
     "mweffectinspector", "mwpluginpatches", "mwfloatfix", "mwcollide", "mwstranded",
     "mwperformers", "mwinfoloop", "mwsoundguard", "mwhangwatch", "mwguard",
     "mwexitguard", "mwquicktoggle", "mwplainpaperfix", "mwcustomclasspersistence",
-    "mwcriminal",
+    "mwcriminal", "mwcompanions",
 }
 local isSuite = {}
 for _, mod in ipairs(SUITE) do isSuite[mod] = true end
