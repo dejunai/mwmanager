@@ -3,6 +3,7 @@ first game's decisions come back when it is used again."""
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import mwmanager_gamestate as gamestate
 
@@ -12,7 +13,13 @@ class GameStateTests(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.manager = Path(tmp.name)
+        patcher = mock.patch.object(gamestate.tempfile, "gettempdir", return_value=str(Path(tmp.name) / "elsewhere"))
+        patcher.start()                  # these games sit in a temp folder, which use_game otherwise ignores
+        self.addCleanup(patcher.stop)
         self.steam, self.gog = Path(tmp.name) / "Steam" / "Morrowind", Path(tmp.name) / "GOG" / "Morrowind"
+        for game in (self.steam, self.gog):
+            game.mkdir(parents=True)
+            (game / "Morrowind.exe").write_bytes(b"MZ")
 
     def write(self, rel, text):
         path = self.manager / rel
@@ -40,6 +47,20 @@ class GameStateTests(unittest.TestCase):
         gamestate.use_game(self.manager, self.gog)
         self.assertEqual((self.manager / "mwmanager_rules.txt").read_text(encoding="utf-8"), "[Order]\ngog.esp\n")
         self.assertFalse((self.manager / "mwmanager_conflict_answers.json").exists())
+
+
+    def test_a_folder_in_temp_changes_nothing(self):
+        gamestate.use_game(self.manager, self.gog)
+        with mock.patch.object(gamestate.tempfile, "gettempdir", return_value=str(self.steam.parent)):
+            self.assertIsNone(gamestate.use_game(self.manager, self.steam))
+        self.assertIn("GOG", (self.manager / gamestate.OWNER).read_text(encoding="utf-8"))
+
+    def test_a_folder_that_is_not_an_install_changes_nothing(self):
+        gamestate.use_game(self.manager, self.gog)
+        self.write("mwmanager_rules.txt", "[Order]\ngog.esp\n")
+        self.assertIsNone(gamestate.use_game(self.manager, self.manager / "scratch" / "Morrowind"))
+        self.assertTrue((self.manager / "mwmanager_rules.txt").exists())
+        self.assertIn("GOG", (self.manager / gamestate.OWNER).read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

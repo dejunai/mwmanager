@@ -8,6 +8,7 @@ import json
 import os
 import re
 import shutil
+import tempfile
 from pathlib import Path
 
 OWNER = "mwmanager_state_owner.json"
@@ -45,6 +46,9 @@ def _move(source: Path, target: Path) -> None:
 def use_game(manager_dir, game_dir) -> str | None:
     """Make the decisions in `manager_dir` the ones for `game_dir`. Returns a line saying what moved, or None."""
     manager_dir = Path(manager_dir)
+    temp = os.path.normcase(os.path.abspath(tempfile.gettempdir()))
+    if not (Path(game_dir) / "Morrowind.exe").is_file() or _key(game_dir).startswith(temp + os.sep):
+        return None              # not an install (a test's or a scratch folder): leaves every game's state alone
     owner_path = manager_dir / OWNER
     try:
         owner = json.loads(owner_path.read_text(encoding="utf-8")).get("game_dir")
