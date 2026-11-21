@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-21 (America/Los_Angeles); handoff",
+  "SyncedAt": "2026-11-21 (America/Los_Angeles); Extract ownership checks from mwdialog_check",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -515,10 +515,10 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 532189,
-      "SHA256": "f9f0b5b763dcb5657ea662314db52a2375786cc5bf120ec6cad41b0a9eacc4e8",
+      "Bytes": 524878,
+      "SHA256": "7c6273a7bca09839edbff635508d625cebd335c4523af807c808d4235477a0b0",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
-      "SourceModified": "2026-11-21T14:09:31"
+      "SourceModified": "2026-11-21T14:49:15"
     },
     {
       "RelativePath": "mwdialog_check.rules.txt",
@@ -1142,6 +1142,13 @@
       "SourceModified": "2026-11-21T14:45:08"
     },
     {
+      "RelativePath": "mwdialog_ownership.py",
+      "Source": "<Steam Morrowind>\\mwdialog_ownership.py",
+      "Bytes": 5417,
+      "SHA256": "4a8f98c57314f42ac4a49c6090c868a02269fa5a6cedb6c64fba5feffcf39323",
+      "SourceModified": "2026-11-21T14:49:15"
+    },
+    {
       "RelativePath": "tests\\test_door_ownership.py",
       "Source": "<Steam Morrowind>\\tests\\test_door_ownership.py",
       "Bytes": 8605,
@@ -1298,6 +1305,13 @@
       "Bytes": 16062,
       "SHA256": "3f7c2dfe48f629e645f511e5cefc485435f685f804610b97618e91773c4c3785",
       "SourceModified": "2026-11-21T14:35:54"
+    },
+    {
+      "RelativePath": "tests\\test_ownership.py",
+      "Source": "<Steam Morrowind>\\tests\\test_ownership.py",
+      "Bytes": 1217,
+      "SHA256": "c01db803d75a1fa30bbb64e32a051f0a748e292c139fecc5e58d665699f3feb4",
+      "SourceModified": "2026-11-21T14:49:16"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwcriminal\\config.lua",
