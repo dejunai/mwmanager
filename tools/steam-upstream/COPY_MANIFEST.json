@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-20 (America/Los_Angeles); tidy splash rule: cap at 2048, 24-bit, lossless re-encode when 10% smaller",
+  "SyncedAt": "2026-11-21 (America/Los_Angeles); door-lock disable(), herb respawn rewrite, sound guard MCM, hang watch",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -74,10 +74,10 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\config\\mwguard.json",
-      "Bytes": 701,
-      "SHA256": "71d1e584a2b753043f5d5c68f5c5dbbeb02254984cd35a648dae54e54ebb580b",
+      "Bytes": 702,
+      "SHA256": "7cf43331c55755a9f6cf8d2507827907c8cd80013e167beb03e766782596a56e",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\config\\mwguard.json",
-      "SourceModified": "2026-11-20T05:51:59"
+      "SourceModified": "2026-11-20T18:36:55"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwcollide\\main.lua",
@@ -179,9 +179,9 @@
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwhangwatch\\main.lua",
       "Bytes": 33628,
-      "SHA256": "fa4b17c3991422ce1e944713436e25371be437005c3841f7aae1d16e0f1c7a5f",
+      "SHA256": "bad4cd76311173c92564649c41b33d8054a7bd86c6c1c8039e3f5de750d0d073",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwhangwatch\\main.lua",
-      "SourceModified": "2026-11-15T02:17:20"
+      "SourceModified": "2026-11-20T18:07:42"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwinfoloop\\main.lua",
@@ -226,17 +226,17 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\config.lua",
-      "Bytes": 8716,
-      "SHA256": "1467501d625a45dceb08b23bf346d6f1ac4c71a3d64cdb05ff43784d7109b79a",
+      "Bytes": 9182,
+      "SHA256": "862f32111cfd737820b12b0cc3af28677f6d010e4e161785dba788273881ba75",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\config.lua",
-      "SourceModified": "2026-11-20T08:30:48"
+      "SourceModified": "2026-11-20T18:18:10"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\main.lua",
-      "Bytes": 4294,
-      "SHA256": "582c308a241193e96f755bbd49b9415d4c819fa75c2031a0c8213670eb1bd22a",
+      "Bytes": 4524,
+      "SHA256": "396f97db10fa70761bdb9d4f0e24ab6fc419f81e3242179d1181cae581d7cb09",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\main.lua",
-      "SourceModified": "2026-11-20T06:18:17"
+      "SourceModified": "2026-11-20T18:18:19"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\mcm.lua",
@@ -332,9 +332,9 @@
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\doorLockCompatibility.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\doorLockCompatibility.lua",
-      "Bytes": 3866,
-      "SHA256": "e2b1efc28f31a686757d4e8b7b340d060db3d4f1c92b4ceadb704d387e3ccea2",
-      "SourceModified": "2026-11-20T16:13:54"
+      "Bytes": 7433,
+      "SHA256": "ed98a87618ef6c32d98ba5586141edfdf52d615a21e343c471105b94953e2074",
+      "SourceModified": "2026-11-21T13:04:29"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\expandedSounds.lua",
@@ -349,6 +349,13 @@
       "Bytes": 10303,
       "SHA256": "ef69ce86db36c5e890d34d9bbdc2bb60513bfaef87d43ab3b9251cb7a0f208ce",
       "SourceModified": "2026-11-20T06:25:03"
+    },
+    {
+      "RelativePath": "Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\graphicHerbalismRespawn.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\graphicHerbalismRespawn.lua",
+      "Bytes": 3493,
+      "SHA256": "621c0b0eb00f8e830e360c4a8b5364e0f169484779eed0ab55450e6902e298bc",
+      "SourceModified": "2026-11-21T13:05:29"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwsaveguard\\main.lua",
@@ -366,10 +373,17 @@
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwsoundguard\\main.lua",
-      "Bytes": 16184,
-      "SHA256": "fd7f11d4aa56e0d19cba1f0a3bc368208b5bc46310929d4495ed8da7d91dfdb5",
+      "Bytes": 17031,
+      "SHA256": "ab4348ca7a64860d95dbc94930b65228b72367a19657e6c67bfc511d9dcc55b9",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsoundguard\\main.lua",
-      "SourceModified": "2026-11-13T07:37:33"
+      "SourceModified": "2026-11-20T18:41:08"
+    },
+    {
+      "RelativePath": "Data Files\\MWSE\\mods\\mwsoundguard\\mcm.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsoundguard\\mcm.lua",
+      "Bytes": 2454,
+      "SHA256": "68d9b82894e3ffff6f5871c70e50510059f83510f2d2c3352692603a7b132817",
+      "SourceModified": "2026-11-20T18:40:58"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwstranded\\main.lua",
@@ -1166,9 +1180,9 @@
     {
       "RelativePath": "tests\\test_door_lock_compatibility.py",
       "Source": "<Steam Morrowind>\\tests\\test_door_lock_compatibility.py",
-      "Bytes": 4205,
-      "SHA256": "07e03ca1ce0a14cbcc4d4999e85b81b0ecadb437e828cdb804fb502ea7fa5210",
-      "SourceModified": "2026-11-20T10:26:13"
+      "Bytes": 6986,
+      "SHA256": "099c221fc3b3d509719478ada31958ac0a0f5367214912ea58cd7465107f6842",
+      "SourceModified": "2026-11-21T13:04:26"
     },
     {
       "RelativePath": "tests\\test_grass_plugins.py",
@@ -1225,6 +1239,13 @@
       "Bytes": 4642,
       "SHA256": "70f988f615ce37bf7fe262266073a07c39a1d2792bb124638824d50ca7973156",
       "SourceModified": "2026-11-20T10:43:31"
+    },
+    {
+      "RelativePath": "tests\\test_herb_respawn.py",
+      "Source": "<Steam Morrowind>\\tests\\test_herb_respawn.py",
+      "Bytes": 3360,
+      "SHA256": "cd266980c506d2c6f4a4b70fc67e8448a3a99ea26037f61f123aa6a92d4a8101",
+      "SourceModified": "2026-11-21T13:05:19"
     }
   ]
 }

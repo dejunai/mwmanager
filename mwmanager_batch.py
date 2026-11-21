@@ -521,6 +521,7 @@ def run_threaded_batch(
                 apply(unit)
                 coordinator.transition(unit.package_id, "TIDY_COMPLETE", worker_slot="tidy")
 
+                blocked = False
                 for depth in range(max_discovery_depth + 1):
                     before = fingerprint(unit)
                     discovery_id = coordinator.discover_fomod(
@@ -546,7 +547,8 @@ def run_threaded_batch(
                     while not waiter.wait(0.2):
                         checkpoint()
                     if coordinator.package(unit.package_id)["phase"] == "BLOCKED_USER_ACTION":
-                        return
+                        blocked = True          # the options loop recorded it; the other queued units go on
+                        break
                     if before == fingerprint(unit):
                         coordinator.transition(unit.package_id, "TIDY_COMPLETE", worker_slot="tidy")
                         break
@@ -557,6 +559,8 @@ def run_threaded_batch(
                     coordinator.transition(unit.package_id, "TIDY_COMPLETE", worker_slot="tidy")
                 else:
                     raise RuntimeError(f"{unit.path.name}: nested FOMOD discovery did not stabilize.")
+                if blocked:
+                    continue
 
                 coordinator.transition(unit.package_id, "READY_FOR_DEPLOYMENT", worker_slot="tidy")
                 on_ready(unit)

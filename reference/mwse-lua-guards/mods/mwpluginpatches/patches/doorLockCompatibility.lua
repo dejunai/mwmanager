@@ -49,10 +49,81 @@ local function isInteriorExit(ref)
     return sourceIsInterior and destIsExterior
 end
 
+-- tes3reference.disabled is read-only: a reference is disabled and enabled through its methods
+local function setDisabled(ref, disabled)
+    if disabled and not ref.disabled then
+        ref:disable()
+    elseif not disabled and ref.disabled then
+        ref:enable()
+    end
+end
+
+local function syncArrilleInnDoors(cell)
+    cell = cell or (tes3.player and tes3.player.cell)
+    if not (cell and cell.id and cell.id:find("Arrille's Tradehouse")) then
+        return
+    end
+    local rentGlobal = (tes3.getGlobal and tes3.getGlobal("Rent_Arrille"))
+        or (tes3.findGlobal and tes3.findGlobal("Rent_Arrille") and tes3.findGlobal("Rent_Arrille").value)
+    local isRented = rentGlobal == 1
+
+    for ref in cell:iterateReferences(tes3.objectType.door) do
+        local objId = ref.object and ref.object.id and ref.object.id:lower()
+        if objId == "dim_com_m_trapdoor_b" then
+            setDisabled(ref, isRented)
+        elseif objId == "rent_arrille_door" then
+            if isRented and tes3.getLocked({ reference = ref }) then
+                tes3.unlock({ reference = ref })
+                if ref.lockNode then ref.lockNode.locked = false end
+            end
+        end
+    end
+end
+
 local function beforeActivate(e)
     local door = e.target
     if e.activator ~= tes3.player or not isDoor(door) then
         return
+    end
+
+    -- Resolve Seyda Neen Arrille's Tradehouse duplicate trapdoors (Improved Inns vs OAAB Damp Little Squat).
+    local objId = door.object and door.object.id and door.object.id:lower()
+    if objId == "dim_com_m_trapdoor_b" or objId == "rent_arrille_door" then
+        local cell = door.cell or (tes3.player and tes3.player.cell)
+        if cell and cell.id and cell.id:find("Arrille's Tradehouse") then
+            local rentGlobal = (tes3.getGlobal and tes3.getGlobal("Rent_Arrille"))
+                or (tes3.findGlobal and tes3.findGlobal("Rent_Arrille") and tes3.findGlobal("Rent_Arrille").value)
+            local isRented = rentGlobal == 1
+            if isRented then
+                if objId == "dim_com_m_trapdoor_b" then
+                    setDisabled(door, true)
+                    for ref in cell:iterateReferences(tes3.objectType.door) do
+                        if ref.object and ref.object.id and ref.object.id:lower() == "rent_arrille_door" then
+                            if tes3.getLocked({ reference = ref }) then
+                                tes3.unlock({ reference = ref })
+                            end
+                            if ref.lockNode then ref.lockNode.locked = false end
+                            if ref.data and not ref.data.ab01drlkbl then
+                                ref.data.ab01drlkbl = 1
+                                bypassed[ref] = true
+                            end
+                            tes3.player:activate(ref)
+                            return false
+                        end
+                    end
+                elseif objId == "rent_arrille_door" then
+                    if tes3.getLocked({ reference = door }) then
+                        tes3.unlock({ reference = door })
+                    end
+                    if door.lockNode then door.lockNode.locked = false end
+                    if door.data and not door.data.ab01drlkbl then
+                        door.data.ab01drlkbl = 1
+                        bypassed[door] = true
+                    end
+                    return
+                end
+            end
+        end
     end
 
     -- Conceptually, nobody locks you in after hours; they just want you to leave.
@@ -110,10 +181,15 @@ local function afterAbot(e)
     end
 end
 
+this.syncArrilleInnDoors = syncArrilleInnDoors
+
 function this.init()
     event.register(tes3.event.activate, beforeActivate, { priority = 9200 })
     event.register(tes3.event.activate, afterAbot, { priority = 9000 })
-    mwse.log("[mwpluginpatches] Door lock compatibility active (owned-empty locking, free interior exits, sneak-to-pick, standing lock feedback).")
+    if tes3.event and tes3.event.cellChanged then
+        event.register(tes3.event.cellChanged, function(e) syncArrilleInnDoors(e and e.cell) end, { priority = 0 })
+    end
+    mwse.log("[mwpluginpatches] Door lock compatibility active (owned-empty locking, free interior exits, sneak-to-pick, standing lock feedback, inn door resolver).")
 end
 
 return this

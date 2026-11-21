@@ -204,6 +204,44 @@ class BatchCoordinatorTests(unittest.TestCase):
         self.assertEqual(self.coordinator.package("A")["phase"], "BLOCKED_USER_ACTION")
         self.assertEqual(self.coordinator.package("B")["phase"], "READY_FOR_DEPLOYMENT")
 
+    def test_blocked_rescan_does_not_stop_the_tidy_of_other_packages(self):
+        paths = {}
+        for package_id in ("A", "B"):
+            paths[package_id] = self.root / package_id
+            paths[package_id].mkdir()
+        outcome = {}
+
+        def prepare(unit, reopen):
+            if reopen and unit.package_id == "A":
+                raise ValueError("invalid nested ModuleConfig")
+
+        def run():
+            try:
+                batch.run_threaded_batch(
+                    self.coordinator,
+                    [{"id": "A"}, {"id": "B"}],
+                    extract=lambda item, _index: batch.BatchUnit(item["id"], paths[item["id"]], {}),
+                    prepare_options=prepare,
+                    apply=lambda _unit: None,
+                    fingerprint=lambda _unit: "same",
+                    config_fingerprint=lambda unit: "config-" + unit.package_id,
+                    reset_after_option_change=lambda _unit: None,
+                    on_ready=lambda _unit: None,
+                    progress=lambda _message: None,
+                )
+            except RuntimeError as exc:
+                outcome["error"] = str(exc)
+
+        worker = threading.Thread(target=run, daemon=True)
+        worker.start()
+        worker.join(10)
+        if worker.is_alive():
+            self.coordinator.cancel()
+            self.fail("the batch hung after a blocked post-apply rescan")
+        self.assertIn("invalid nested ModuleConfig", outcome.get("error", ""))
+        self.assertEqual(self.coordinator.package("A")["phase"], "BLOCKED_USER_ACTION")
+        self.assertEqual(self.coordinator.package("B")["phase"], "READY_FOR_DEPLOYMENT")
+
 
 if __name__ == "__main__":
     unittest.main()

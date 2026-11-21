@@ -2492,7 +2492,7 @@ def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str]
                             output_dir=None, installed=None) -> None:
     """Extract each chosen companion to staging/companions (outside the master staging that Tidy treats as
     packages, and outside the package, so it is not deployed as is); its record gets the payload to activate."""
-    from plugin_install import extract_archive
+    from plugin_install import LARGE_ARCHIVE_BYTES, extract_archive
     for record in records:
         companion = record.get("companion")
         if not companion or record["key"] not in chosen or "payload_files" in record:
@@ -2501,23 +2501,14 @@ def _materialize_companions(mod_dir: Path, records: list[dict], chosen: set[str]
         target = mod_dir.parent.parent / "companions" / re.sub(r"[^A-Za-z0-9._ -]+", "_", archive.stem).strip(" .")
         if not target.is_dir():
             size = archive.stat().st_size
-            print(f"  {mod_dir.name}: extracting {record['label']} ({size / 1048576:,.0f} MB)...", flush=True)
+            # 7-Zip can't say how far it is: one line before it, no timer
+            if size >= LARGE_ARCHIVE_BYTES:
+                print(f"  {mod_dir.name}: working through {record['label']} ({size / 1048576:,.0f} MB), "
+                      "please be patient...", flush=True)
+            else:
+                print(f"  {mod_dir.name}: extracting {record['label']} ({size / 1048576:,.0f} MB)...", flush=True)
             started = time.monotonic()
-            stopped = threading.Event()
-
-            def heartbeat():
-                while not stopped.wait(30):
-                    elapsed = int(time.monotonic() - started)
-                    print(f"  {mod_dir.name}: still extracting {record['label']} ({elapsed} s); continuing.",
-                          flush=True)
-
-            pulse = threading.Thread(target=heartbeat, name="MWManager companion heartbeat", daemon=True)
-            pulse.start()
-            try:
-                extract_archive({"archive": str(archive)}, target, Path(__file__).resolve().parent)
-            finally:
-                stopped.set()
-                pulse.join()
+            extract_archive({"archive": str(archive)}, target, Path(__file__).resolve().parent)
             print(f"  {mod_dir.name}: extracted {archive.name} in {int(time.monotonic() - started)} s.", flush=True)
         record["path"] = _data_root(target)
         # a companion with options of its own: its own window, and only what is chosen there goes in
