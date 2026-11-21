@@ -1352,6 +1352,36 @@ def _mark_maintainer_needs(records: list[dict], installed: set[str]) -> None:
             record["targets"] = sorted(set(record.get("targets") or []) | {name.casefold() for name in needs})
 
 
+def _option_requirements(record: dict, own: set[str]) -> list[str]:
+    """What an option needs from another mod: its plugins' masters, the masters MWManager knows it omits, the mods
+    its notes or text name - not the base game, and not what its own package ships."""
+    plugins = _option_plugins(record) if record.get("path") or record.get("payload_files") else []
+    names = {name: name for path in plugins for name in _plugin_masters(path)}
+    mod_dir = Path(record.get("mod_dir") or record.get("path") or ".")
+    names.update((name, name) for name in _known_option_masters(mod_dir, str(record.get("label") or "")))
+    names.update((name.casefold(), name) for name in _maintainer_needs(record))
+    names.update((name, name) for name in record.get("targets") or [] if name.endswith(" (mod)"))
+    return [names[key] for key in sorted(names) if key not in BASE_GAME_MASTERS and key not in own]
+
+
+def _attach_requires(records: list[dict], mod_dir: Path, manager_dir: Path) -> None:
+    """Each record's "requires": [{"name", "nexus_id", "archive"}], shown first in its description."""
+    from needed_mods import requirement_sources
+    own = {path.name.casefold() for path in _safe_rglob(mod_dir) if path.suffix.casefold() in PLUGIN_EXTS}
+    for record in records:
+        try:
+            record["requires"] = requirement_sources(_option_requirements(record, own), manager_dir)
+        except Exception as exc:              # a description line: never stop the options over it
+            print(f"  {mod_dir.name}: could not work out what '{record.get('label')}' requires: {exc}", flush=True)
+            record["requires"] = []
+        record["requires_manager"] = str(manager_dir)
+
+
+def _requires_line(requirement: dict) -> str:
+    nexus = f"Nexus {requirement['nexus_id']}" if requirement.get("nexus_id") else "Nexus ID unknown"
+    return f"Requires: {requirement['name']}, {nexus}"
+
+
 def _maintainer_entries(item: dict) -> list:
     """The mock_fomod_notes.json values (a note, or {"note", "needs"}) that match this option."""
     try:
@@ -1991,6 +2021,68 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
 
         window.protocol("WM_DELETE_WINDOW", close_image_window)
 
+    def change_requirement(item, requirement):
+        """Pick the download (or type the Nexus id) of the mod that really supplies this requirement."""
+        from needed_mods import archive_choices, set_requirement_source
+        manager = Path(item["requires_manager"])
+        choices = archive_choices(manager)
+        window = tk.Toplevel(root)
+        window.title(f"Which mod supplies {requirement['name']}?")
+        window.transient(root)
+        frame = ttk.Frame(window, padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, wraplength=560, text=(
+            f"{_requires_line(requirement)}. If that is the wrong mod, pick the download that supplies "
+            f"{requirement['name']}, or type its Nexus ID. The choice is kept for every option that needs it.")
+                  ).pack(fill="x", pady=(0, 8))
+        query = tk.StringVar()
+        ttk.Entry(frame, textvariable=query).pack(fill="x")
+        listing = tk.Listbox(frame, height=16, width=96, exportselection=False)
+        listing.pack(fill="both", expand=True, pady=6)
+        shown = []
+
+        def refill(*_):
+            words = query.get().casefold().split()
+            shown[:] = [choice for choice in choices if all(word in choice[0].casefold() for word in words)][:500]
+            listing.delete(0, "end")
+            for name, mod_id in shown:
+                listing.insert("end", f"{name}   (Nexus {mod_id or '?'})")
+
+        query.trace_add("write", refill)
+        query.set(re.split(r"[^A-Za-z0-9]+", requirement["name"].removesuffix(" (mod)"))[0])
+        typed_row = ttk.Frame(frame)
+        typed_row.pack(fill="x")
+        ttk.Label(typed_row, text="Or Nexus ID:").pack(side="left")
+        typed = tk.StringVar()
+        ttk.Entry(typed_row, textvariable=typed, width=10).pack(side="left", padx=6)
+
+        def use():
+            picked = listing.curselection()
+            archive, mod_id = shown[picked[0]] if picked else ("", None)
+            if typed.get().strip().isdigit():
+                mod_id = int(typed.get().strip())
+            if not mod_id:
+                messagebox.showinfo("Nothing picked", "Pick a download with a Nexus ID, or type the ID.",
+                                    parent=window)
+                return
+            entry = set_requirement_source(requirement["name"], archive, mod_id, manager)
+            for other in records:                       # every option here that needs it
+                for need in other.get("requires") or []:
+                    if need["name"].casefold() == requirement["name"].casefold():
+                        need.update(entry)
+            requirement.update(entry)
+            window.destroy()
+            show(item)
+
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", pady=(8, 0))
+        ttk.Button(buttons, text="Cancel", command=window.destroy).pack(side="right")
+        ttk.Button(buttons, text="Use this mod", command=use).pack(side="right", padx=6)
+        listing.bind("<Double-Button-1>", lambda _event: use())
+        from mwmanager_theme import center
+        center(window, root)
+        window.grab_set()
+
     def show(item, target=detail):
         if target is detail:
             info_state["item"] = item
@@ -2006,6 +2098,15 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         target.delete("1.0", "end")
         caption = item.get("group_label") or f"{item['number']:02d}"
         target.insert("end", f"{caption} — {item['label']}\n\n")
+        for requirement in item.get("requires") or []:
+            target.insert("end", _requires_line(requirement))
+            if target is detail and item.get("requires_manager"):
+                target.insert("end", "  ")
+                target.window_create("end", window=ttk.Button(
+                    target, text="Change…", command=lambda r=requirement: change_requirement(item, r)))
+            target.insert("end", "\n")
+        if item.get("requires"):
+            target.insert("end", "\n")
         if item.get("informational_utility"):
             target.insert("end", "Optional package: Tamriel Data (HD). This is included as an optional package utility and is not required to deploy the Tamriel Data master.\n\n")
         if item.get("utility_folder"):
@@ -2948,6 +3049,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         records = _drop_superseded_choices(mod_dir, records, installed)
         _mark_grass_options(records, mod_dir, data_files)    # always shown; ticked only for a known groundcover
         _mark_maintainer_needs(records, installed)        # a note's needed mod waits like a master
+        _attach_requires(records, mod_dir, output_dir.parent)   # "Requires: <plugin>, Nexus <id>"
         held = set(entry.get("held", []))
         pending = [r for r in records if set(r["targets"]) & newly_relevant and r["key"] not in selected]
         ready = {r["key"] for r in pending if r["key"] in held} - held_options(records, held, installed)
@@ -3021,6 +3123,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         records = _drop_superseded_choices(mod_dir, records, installed)
         _mark_grass_options(records, mod_dir, data_files)    # always shown; ticked only for a known groundcover
         _mark_maintainer_needs(records, installed)        # a note's needed mod waits like a master
+        _attach_requires(records, mod_dir, output_dir.parent)   # "Requires: <plugin>, Nexus <id>"
         if not records:
             continue
         plugin = next((p.name for p in sorted(mod_dir.iterdir(), key=lambda x: x.name.casefold())

@@ -149,7 +149,12 @@ def find_needed(needs, downloads: Path, index_path: Path, manager_dir: Path, pro
     the most words with the plugin's (its own mod rather than a patch bundle that ships a copy), then the newest."""
     index = archive_index(Path(downloads), Path(index_path), core_addons._seven_zip(Path(manager_dir)), progress)
     found = {}
+    picked = _read_json(Path(manager_dir) / "outputs" / REQUIRES_CACHE).get("overrides") or {}
     for need in needs:
+        archive = (picked.get(need.casefold()) or {}).get("archive")
+        if archive and (Path(downloads) / archive).is_file():      # the user's pick of the mod that supplies it
+            found[need] = Path(downloads) / archive
+            continue
         if need.endswith(" (mod)"):            # an asset-only mod: no plugin to look for, so go by its name
             exact = archives_for_need(need, Path(downloads))
             if exact:
@@ -166,21 +171,107 @@ def find_needed(needs, downloads: Path, index_path: Path, manager_dir: Path, pro
                 len(_key_words(Path(n).stem) - want), -os.stat(os.path.join(downloads, n)).st_mtime_ns))
                 if holders else None)
             continue
-        holders = [name for name, plugins in index.items() if any(p.casefold() == need.casefold() for p in plugins)]
-        if not holders:
-            found[need] = None
-            continue
-        want = _words(Path(need).stem)
-
-        def rank(name):
-            try:
-                mtime = os.stat(os.path.join(downloads, name)).st_mtime_ns
-            except OSError:
-                mtime = 0
-            return len(want & _words(name)), mtime
-
-        found[need] = Path(downloads) / max(holders, key=rank)
+        holder = plugin_holder(need, index, downloads)
+        found[need] = Path(downloads) / holder if holder else None
     return found
+
+
+def plugin_holder(plugin: str, index: dict[str, list[str]], downloads=None) -> str | None:
+    """The archive a plugin most likely comes from: the one whose name shares the most words with the plugin's
+    (its own mod rather than a patch bundle that ships a copy), then the newest."""
+    holders = [name for name, plugins in index.items() if any(p.casefold() == plugin.casefold() for p in plugins)]
+    if not holders:
+        return None
+    want = _words(Path(plugin).stem)
+
+    def rank(name):
+        try:
+            mtime = os.stat(os.path.join(downloads, name)).st_mtime_ns if downloads else 0
+        except OSError:
+            mtime = 0
+        return len(want & _words(name)), mtime
+
+    return max(holders, key=rank)
+
+
+# "Requires: <plugin>, Nexus <id>" for an option: which Nexus mod supplies each plugin an option needs.
+REQUIRES_FILE = Path(__file__).resolve().with_name("mwmanager_option_requires.json")   # shipped, tools/build_option_requires.py
+REQUIRES_CACHE = "mwmanager_option_requires.json"    # in outputs: worked out here, and the user's own picks
+
+
+def _read_json(path: Path) -> dict:
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _write_json(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.replace(temp, path)
+
+
+def _cached_index(manager_dir: Path) -> dict[str, list[str]]:
+    """The archive index as last written (no listing of the downloads here)."""
+    entries = _read_json(Path(manager_dir) / "outputs" / "mwmanager_archive_plugins.json").get("archives", {})
+    return {name: entry.get("plugins", []) for name, entry in entries.items() if isinstance(entry, dict)}
+
+
+def resolve_requirement(need: str, index: dict[str, list[str]], downloads=None, vortex=None) -> dict:
+    """{"name", "nexus_id", "archive"} worked out from the archive index; nexus_id None when unknown."""
+    if need.casefold().endswith(" (mod)"):
+        mod_id = KNOWN_NEXUS_MODS.get(re.sub(r"\s+", " ", need[:-6].strip()).casefold())
+        holders = [name for name in index if names_mod(need, Path(name).stem)]
+        want = _key_words(need[:-6])
+        archive = min(holders, key=lambda n: len(_key_words(Path(n).stem) - want)) if holders else ""
+        return {"name": need, "nexus_id": mod_id or (core_addons._archive_mod_id(Path(archive)) if archive else None),
+                "archive": archive}
+    archive = plugin_holder(need, index, downloads) or ""
+    name = next((p for p in index.get(archive, []) if p.casefold() == need.casefold()), need)
+    return {"name": name, "nexus_id": core_addons.master_mod_id(name, archive, vortex={} if vortex is None else vortex),
+            "archive": archive}
+
+
+def requirement_sources(needs, manager_dir: Path) -> list[dict]:
+    """Each need's source: the user's pick, else the shipped table, else the cache, else worked out from the archive
+    index (and cached when a Nexus id was found)."""
+    cache_path = Path(manager_dir) / "outputs" / REQUIRES_CACHE
+    cache = _read_json(cache_path)
+    tables = (cache.get("overrides") or {}, _read_json(REQUIRES_FILE).get("plugins") or {}, cache.get("plugins") or {})
+    index, out, learned = None, [], False
+    for need in needs:
+        entry = next((table[need.casefold()] for table in tables
+                      if isinstance(table.get(need.casefold()), dict) and table[need.casefold()].get("nexus_id")), None)
+        if entry is None:
+            index = _cached_index(manager_dir) if index is None else index
+            entry = resolve_requirement(need, index)
+            if entry["nexus_id"]:
+                cache.setdefault("plugins", {})[need.casefold()] = entry
+                learned = True
+        out.append({"name": entry.get("name") or need, "nexus_id": entry.get("nexus_id"),
+                    "archive": entry.get("archive", "")})
+    if learned:
+        _write_json(cache_path, cache)
+    return out
+
+
+def set_requirement_source(need: str, archive: str, nexus_id: int, manager_dir: Path) -> dict:
+    """The user's pick of the mod that supplies a need: wins over the shipped table and what was worked out."""
+    cache_path = Path(manager_dir) / "outputs" / REQUIRES_CACHE
+    cache = _read_json(cache_path)
+    entry = {"name": need, "nexus_id": int(nexus_id), "archive": archive}
+    cache.setdefault("overrides", {})[need.casefold()] = entry
+    _write_json(cache_path, cache)
+    return entry
+
+
+def archive_choices(manager_dir: Path) -> list[tuple[str, int | None]]:
+    """(archive name, Nexus id) for every indexed download, for picking the mod that supplies a need."""
+    return sorted(((name, core_addons._archive_mod_id(Path(name))) for name in _cached_index(manager_dir)),
+                  key=lambda choice: choice[0].casefold())
 
 
 def nexus_search_url(plugin: str) -> str:
