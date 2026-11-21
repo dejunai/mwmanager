@@ -5899,7 +5899,8 @@ class ManagerGUI(tk.Tk):
                         paths = stage_core_master_archives(
                             plan, group_masters, APP_DIR, game_dir,
                             progress_callback=progress,
-                            clear_staging=(index == 1 and not any(staging.iterdir())))
+                            clear_staging=(index == 1 and not any(staging.iterdir())),
+                            lock_held=True)
                         if len(paths) != 1:
                             raise RuntimeError(
                                 f"Expected one staged package for {group_masters}; found {len(paths)}.")

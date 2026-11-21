@@ -1820,7 +1820,11 @@ def scan_downloads(downloads_dir: str | os.PathLike, manager_dir: str | os.PathL
 
 def stage_core_master_archives(plan: dict, selected_masters: list[str], manager_dir: str | Path,
                                game_dir: str | Path, *, progress_callback=None,
-                               clear_staging: bool = True) -> list[Path]:
+                               clear_staging: bool = True, lock_held: bool = False) -> list[Path]:
+    if lock_held:
+        return _stage_core_master_archives(
+            plan, selected_masters, manager_dir, game_dir,
+            progress_callback=progress_callback, clear_staging=clear_staging)
     from workflow_safety import mutation_lock
     with mutation_lock(manager_dir, game_dir):
         return _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir,

@@ -9,6 +9,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import textwrap
 import unittest
@@ -80,6 +81,43 @@ class BackendProbes(unittest.TestCase):
             self.assertEqual(ca._sha256(cached), digest)
             archive.unlink()
             self.assertEqual(ca.staged_source_archive(staged[0]), cached)
+
+    def test_threaded_staging_reuses_outer_mutation_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager, game = root / "manager", root / "game"
+            manager.mkdir()
+            game.mkdir()
+            archive = root / "A.zip"
+            with zipfile.ZipFile(archive, "w") as stream:
+                stream.writestr("A.esm", esm())
+            plan = {"archives": [{
+                "archive": str(archive),
+                "core_masters": ["A.esm"],
+                "sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                "member_count": 1,
+                "install_blocked": False,
+            }]}
+            result = []
+            errors = []
+
+            def stage():
+                try:
+                    result.extend(ca.stage_core_master_archives(
+                        plan, ["A.esm"], manager, game, clear_staging=False, lock_held=True))
+                except BaseException as exc:
+                    errors.append(exc)
+
+            from workflow_safety import mutation_lock
+            with mutation_lock(manager, game):
+                worker = threading.Thread(target=stage)
+                worker.start()
+                worker.join(5)
+                self.assertFalse(worker.is_alive())
+
+            self.assertEqual(errors, [])
+            self.assertEqual(len(result), 1)
+            self.assertTrue((result[0] / "A.esm").is_file())
 
     def test_stale_partial_staging_tree_is_removed_despite_readonly_flags(self):
         with tempfile.TemporaryDirectory() as tmp:
