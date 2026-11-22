@@ -92,6 +92,17 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         self.assertEqual(self.m.backup_root_for(None, str(staged)), str(staged))
         self.assertEqual(self.m.backup_root_for(str(staged), str(self.data)), str(staged))
 
+    def test_merge_plan_from_the_command_line_is_written_to_mwmanager(self):
+        import mwdialog_mergeplan
+        plan = {"groups": [], "skipped": {}}
+        with mock.patch.object(self.m, "resolve", return_value=([], [], [])), \
+                mock.patch.object(mwdialog_mergeplan, "recommend", return_value=plan), \
+                mock.patch.object(mwdialog_mergeplan, "write_plan", return_value="x") as write:
+            self.assertEqual(self.m.main([str(self.data), "--merge-plan"]), 0)
+        self.assertEqual(os.path.normcase(write.call_args[0][1]), os.path.normcase(str(self.manager / "outputs")))
+        self.assertNotInGame(os.path.join(write.call_args[0][1], mwdialog_mergeplan.PLAN_TXT))
+        self.assertNotInGame(mwdialog_mergeplan.PLAN_JSON)
+
     def test_plugin_backup_of_a_generated_patch_goes_to_mwmanager(self):
         patch = self.data / "mwdialog_check Multipatch.esp"
         patch.write_bytes(b"TES3")

@@ -304,3 +304,17 @@ Behaviour changes:
   `outputs\mwmanager_door_owners.txt`).
 - A patch made for a different master version still has its edits to references the master no longer has dropped,
   so `--full` no longer stops on them; remapping, moving, size sync and cell renames stay blocked for it.
+
+## Steam sync to morrowind-conflict-tools 8926bf7 — 2026-11-22 (Pacific)
+
+- Refreshed (root and `tools\steam-upstream\`): `mwdialog_check.py`, `mwdialog_cellmods.py`, `mwdialog_footing.py`,
+  `mwdialog_luafix.py`, `mwdialog_records.py`, `mwdialog_redundant.py`; new `mwdialog_mergeplan.py` and
+  `mwdialog_pathgrid.py` (`mwdialog_check` imports it; the root copy was missing). Snapshot also gains their tests and
+  the repo's `diag\` scripts; `mwfloatfix` is refreshed in the snapshot and the shipped suite. Backup:
+  `_backup\pre-mergeplan-sync-20261122-151655\`.
+- New state redirected to `outputs\`: `mwmanager_pathgrid_cache.json`, `mwmanager_pathgrid_fixes.txt`,
+  `mwmanager_doubled_deleted.txt`, `mwmanager_object_cache.json`, `mwmanager_merge_plan.txt` / `.json`.
+- `--merge-plan` / `--plan-size` added to MWManager's command line (read-only; Tools → Merge recommendations… is the
+  GUI way). Tools → Auto-merge plugins… runs `--auto-merge --yes` with its follow-up `--fix --multipatch`.
+- `--fix` checks pathgrids, reusing `mwmanager_pathgrid_cache.json` for unchanged cells. The float list now also
+  sees our own patches' deletions (a dock Cell Fixes deletes still lists the items left on it).

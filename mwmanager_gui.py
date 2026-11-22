@@ -1360,6 +1360,8 @@ class ManagerGUI(tk.Tk):
         tools_menu.add_command(label="Capture integrity snapshot…", command=self.capture_integrity_snapshot)
         tools_menu.add_command(label="Compare integrity snapshot…", command=self.compare_integrity_snapshot)
         tools_menu.add_command(label="Record conflict report…", command=self.show_record_conflicts)
+        tools_menu.add_command(label="Merge recommendations…", command=self.show_merge_plan)
+        tools_menu.add_command(label="Auto-merge plugins…", command=self.run_auto_merge)
         tools_menu.add_command(label="Save setup profile…", command=self.save_install_profile)
         tools_menu.add_command(label="Apply setup profile…", command=self.apply_install_profile)
         tools_menu.add_separator()
@@ -1403,6 +1405,94 @@ class ManagerGUI(tk.Tk):
         report = mwmanager_record_report.load_conflicts(
             APP_DIR / "game_catalog.sqlite3", active_plugins=read_order())
         self._show_tool_report("Catalog record conflicts", mwmanager_record_report.render(report))
+
+    def show_merge_plan(self):
+        """Read-only: which active plugins could be merged together (mwdialog_mergeplan), shown as a report."""
+        if getattr(self, "_merge_plan_running", False):
+            return
+        self._merge_plan_running = True
+        game_dir = Path(self.settings["game_dir"])
+        data_dir = game_dir / "Data Files"
+        names = read_order() or read_game_ini_order(game_dir)
+        self.status.set("Working out merge recommendations…")
+
+        def work():
+            import mwdialog_mergeplan
+            try:
+                order = [(n, str(data_dir / n)) for n in names if (data_dir / n).is_file()]
+                (APP_DIR / "outputs").mkdir(parents=True, exist_ok=True)
+                plan = mwdialog_mergeplan.recommend(order, str(data_dir), str(game_dir))
+                path = Path(mwdialog_mergeplan.write_plan(plan, str(APP_DIR / "outputs"), len(order)))
+                lines = path.read_text(encoding="utf-8").splitlines()
+                error = None
+            except (OSError, ValueError) as exc:
+                lines, error = [], exc
+
+            def finish():
+                self._merge_plan_running = False
+                if error:
+                    self.status.set("Merge recommendations failed.")
+                    messagebox.showerror("Merge recommendations failed", str(error), parent=self)
+                    return
+                self.status.set(f"Merge recommendations saved to {path}")
+                self._show_tool_report("Merge recommendations", lines)
+
+            self.after(0, finish)
+
+        threading.Thread(target=work, name="MWManager merge plan", daemon=True).start()
+
+    def run_auto_merge(self):
+        """--auto-merge on its own (normally part of --full); its follow-up --fix --multipatch rebuilds the patches."""
+        if getattr(self, "_active_job", None):
+            return
+        if not messagebox.askyesno(
+                "Auto-merge plugins",
+                "Merge the eligible plugins into the auto-merge plugin and rebuild the patches?\n\n"
+                "This changes the load order; start a new game if merged plugins place objects in cells.",
+                parent=self):
+            return
+        self.save()
+        data_dir = Path(self.settings["game_dir"]) / "Data Files"
+        command = [str(self._console_python()), "-u", str(APP_DIR / "mwmanager.py"), str(data_dir),
+                   "--auto-merge", "--yes"]
+
+        def worker(report):
+            quiet = {}
+            if os.name == "nt":
+                startup = subprocess.STARTUPINFO()
+                startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startup.wShowWindow = subprocess.SW_HIDE
+                quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
+            env = dict(os.environ, MWMANAGER_GUI="1")
+            process = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
+                             bufsize=1, env=env, **quiet)
+            recent = []
+            for line in process.stdout:
+                message = " ".join(line.strip().split())
+                if message:
+                    recent.append(message)
+                    del recent[:-80]
+                    report(_display_line(line))
+            result = process.wait()
+            if result:
+                raise RuntimeError("Auto-merge did not complete.\n\n" +
+                                   ("\n".join(recent)[-5000:] or f"mwmanager.py exited with code {result}"))
+            return recent
+
+        def completed(result, error):
+            self.order = read_order()
+            self.active_names = {name.casefold() for name in self.order}
+            self.refresh()
+            self._update_action_buttons()
+            if error:
+                self.status.set("Auto-merge stopped with an error.")
+                messagebox.showerror("Auto-merge failed", str(error), parent=self)
+                return
+            self.status.set("Auto-merge finished.")
+            self._show_tool_report("Auto-merge", result or [])
+
+        self._run_progress_job("Auto-merge", "Merging eligible plugins…", worker, completed)
 
     def capture_integrity_snapshot(self):
         import mwmanager_integrity

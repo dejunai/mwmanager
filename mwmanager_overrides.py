@@ -1275,6 +1275,12 @@ def _main(argv=None):
                          f"('{AUTO_MERGE_NAME}', or --merge-name), and deactivate them (recorded in {MERGE_RECORD}; "
                          f"--add-all-esp leaves them out). Use --dry-run first")
     mg.add_argument("--merge-name", metavar="NAME.esp", help="with --auto-merge: the merged plugin's name")
+    mg.add_argument("--merge-plan", action="store_true",
+                    help="recommend merges --auto-merge doesn't make (plugins with scripts, cells, land or "
+                         "pathgrids), grouped by kind; read-only: writes outputs\\mwmanager_merge_plan.txt and "
+                         ".json. Merges that place objects in cells need a new game")
+    mg.add_argument("--plan-size", type=int, default=8, metavar="N",
+                    help="with --merge-plan: at most N plugins per merge (small patches aren't capped)")
     mg.add_argument("--no-follow-up", "--no-follow-fix", dest="no_follow_fix", action="store_true",
                     help="don't run the usual follow-ups: --fix --multipatch after --auto-merge or a --sort "
                          "that changed the order, --add-all-esp --sort after --unmerge, and --fix's own re-scans "
@@ -1634,7 +1640,7 @@ def _main(argv=None):
     if args.play:
         actions = (args.sort, args.add_all_esp, args.clean, args.fix, args.multipatch, args.patch_esm,
                    args.header, args.trace, args.restore, args.restore_all, args.restore_dates, args.csv,
-                   args.clean_up, args.merge, args.auto_merge, args.unmerge is not None, args.cell_conflicts, args.reenable is not None, args.remove_generated,
+                   args.clean_up, args.merge, args.auto_merge, args.merge_plan, args.unmerge is not None, args.cell_conflicts, args.reenable is not None, args.remove_generated,
                    args.redundant, args.redundant_auto, args.redundant_undo is not None, args.restore_textures,
                    args.update_rules)
         if not any(actions):                 # --play on its own: just start the game
@@ -1681,6 +1687,17 @@ def _main(argv=None):
 
     report = Report()
     plugins, bsas, data_dirs = resolve(args, report)
+    if args.merge_plan:
+        import mwdialog_mergeplan as MPL
+        data_dir = os.path.abspath(args.data_dir)
+        print(f"Reading {len(plugins)} plugins...", file=sys.stderr)
+        plan = MPL.recommend(plugins, data_dir, os.path.dirname(data_dir), max(2, args.plan_size),
+                             log=lambda s: print(s, file=sys.stderr))
+        path = MPL.write_plan(plan, OUTPUT_DIR, len(plugins))
+        merged = sum(len(g["inputs"]) for g in plan["groups"])
+        print(f"Merge plan: {merged} plugin(s) in {len(plan['groups'])} merge(s) would free "
+              f"{merged - len(plan['groups'])} slot(s). Report: {path}")
+        return 0
     if args.unmerge is not None:
         rc = run_unmerge(args, plugins)
         if rc == 0 and not args.no_follow_fix:

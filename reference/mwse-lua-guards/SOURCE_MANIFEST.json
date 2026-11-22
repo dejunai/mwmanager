@@ -1,6 +1,6 @@
 {
   "Description": "The user's mw* MWSE Lua suite as it is in the Steam Morrowind install, copied byte for byte. dejespreplacements (formerly mwespreplacements) is excluded (user's personal load-order patches).",
-  "CopiedAt": "2026-11-20 (America/Los_Angeles); refreshed mwpluginpatches door-lock compatibility",
+  "CopiedAt": "2026-11-22 (America/Los_Angeles); mwfloatfix refresh",
   "Files": [
     {
       "Path": "metadata/mwcustomclasspersistence-metadata.toml",
@@ -138,9 +138,9 @@
     {
       "Path": "mods/mwfloatfix/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwfloatfix\\main.lua",
-      "SHA256": "d75384aafe6aa4e60829a4945a487cbdbec1c005f85b98e2cf7f4b27d58505b1",
-      "Length": 34779,
-      "SourceModified": "2026-11-21T23:35:55"
+      "SHA256": "afdb169ad3b559a34f7d2db1851fc244fd959ff57a79469df7279eb7ce112de4",
+      "Length": 35044,
+      "SourceModified": "2026-11-22T12:49:38"
     },
     {
       "Path": "mods/mwguard/interop.lua",
@@ -362,9 +362,9 @@
     {
       "Path": "mods/mwsoundguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwsoundguard\\main.lua",
-      "SHA256": "a1fe35dd62498aa732239aea6925152e580cea8f05cfd7c3f4a1c98576ac95d9",
-      "Length": 17032,
-      "SourceModified": "2026-11-21T15:19:55"
+      "SHA256": "d8c2db9e6dfbb93af19403c338595127d39c3de40993197843ee3d74ec125f37",
+      "Length": 18920,
+      "SourceModified": "2026-11-22T10:28:29"
     },
     {
       "Path": "mods/mwsoundguard/mcm.lua",

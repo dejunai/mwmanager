@@ -91,6 +91,9 @@ def state_names(manager_dir):
         "SHORT_MESH_RECORD": os.path.join(out, "mwmanager_short_meshes.txt"),
         "REDUNDANT_RECORD": os.path.join(out, "mwmanager_redundant.txt"),
         "DOOR_OWNERS_LIST": os.path.join(out, "mwmanager_door_owners.txt"),   # per --fix: owners changed / left
+        "DOUBLED_DELETED_FILE": os.path.join(out, "mwmanager_doubled_deleted.txt"),
+        "PATHGRID_FIXES_FILE": os.path.join(out, "mwmanager_pathgrid_fixes.txt"),
+        "PATHGRID_CACHE_FILE": os.path.join(out, "mwmanager_pathgrid_cache.json"),
         "MISSING_NORMALS_RECORD": os.path.join(out, "mwmanager_missing_normal_maps.txt"),
         "FULLSIZE_DIR": os.path.join(manager_dir, "backups", "fullsize_textures"),
     }
@@ -114,6 +117,9 @@ def module_state_names(manager_dir):
         "mwdialog_luafix": {"JOURNAL": os.path.join(manager_dir, "outputs", "mwmanager_luafix_journal.jsonl"),
                             "BACKUP_ROOT": os.path.join(manager_dir, "backups", "luafix"),
                             "PLAN_FILE": os.path.join(manager_dir, "outputs", "mwmanager_luafix_plan.txt")},
+        "mwdialog_cellmods": {"OBJECT_CACHE_FILE": os.path.join(manager_dir, "outputs", "mwmanager_object_cache.json")},
+        "mwdialog_mergeplan": {"PLAN_TXT": os.path.join(manager_dir, "outputs", "mwmanager_merge_plan.txt"),
+                               "PLAN_JSON": os.path.join(manager_dir, "outputs", "mwmanager_merge_plan.json")},
     }
 
 
