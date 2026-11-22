@@ -3222,9 +3222,8 @@ class ManagerGUI(tk.Tk):
                 progress("Updating the plugin catalog and load order…")
                 command = [str(self._console_python()), "-u", str(APP_DIR / "mwmanager.py"),
                            str(data_dir), "--sort", "--all", "--yes"]
-                process = subprocess.run(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, capture_output=True,
-                                         text=True, encoding="utf-8", errors="replace",
-                                         timeout=7200, **quiet)
+                process = managed_processes.run(command, cwd=str(APP_DIR), text=True, encoding="utf-8",
+                                                errors="replace", timeout=7200, **quiet)
                 if process.returncode:
                     raise RuntimeError((process.stderr or process.stdout or "MWManager checks failed")[-4000:])
                 return result
@@ -3761,8 +3760,8 @@ class ManagerGUI(tk.Tk):
             write_disabled_plugins(entries)
             command = [sys.executable, str(APP_DIR / "mwmanager.py"), str(data_dir), "--reenable", *selected]
             try:
-                result = subprocess.run(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                                        errors="replace", timeout=180)
+                result = managed_processes.run(command, cwd=str(APP_DIR), text=True,
+                                               errors="replace", timeout=180)
             except (OSError, subprocess.TimeoutExpired) as exc:
                 messagebox.showerror("Could not re-enable plugins", str(exc), parent=dialog)
                 return

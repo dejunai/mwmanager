@@ -5,6 +5,7 @@ the AURA text is excerpted from the public mod page.
 """
 import ast
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -24,7 +25,14 @@ try:
     HAVE_WS = True
 except ImportError:
     HAVE_WS = False
-CHROME = shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser")
+CHROME = (shutil.which("google-chrome") or shutil.which("chromium") or shutil.which("chromium-browser")
+          or next((str(path) for path in (
+              Path(os.environ.get("PROGRAMFILES", "")) / "Google/Chrome/Application/chrome.exe",
+              Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Google/Chrome/Application/chrome.exe",
+              Path(os.environ.get("LOCALAPPDATA", "")) / "Google/Chrome/Application/chrome.exe",
+              Path(os.environ.get("PROGRAMFILES", "")) / "Microsoft/Edge/Application/msedge.exe",
+              Path(os.environ.get("PROGRAMFILES(X86)", "")) / "Microsoft/Edge/Application/msedge.exe",
+          ) if path.is_file()), None))
 
 
 def run_capture_js(markup: str) -> dict:
@@ -51,7 +59,7 @@ def run_capture_js(markup: str) -> dict:
                     break
                 except Exception:
                     time.sleep(0.1)
-            ws = websocket.create_connection(target["webSocketDebuggerUrl"], timeout=20)
+            ws = websocket.create_connection(target["webSocketDebuggerUrl"], timeout=20, suppress_origin=True)
             ids = iter(range(1, 1000))
 
             def call(method, **params):

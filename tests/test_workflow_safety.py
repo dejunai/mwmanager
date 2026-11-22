@@ -42,6 +42,17 @@ class SafetyTests(unittest.TestCase):
             self.assertEqual(child.returncode, 0, child.stderr)
             self.assertIn("locked", child.stdout)
 
+    def test_managed_steam_tool_inherits_the_game_lock(self):
+        script = ("import sys; sys.path.insert(0, sys.argv[2]); import mwdialog_paths as paths; "
+                  "print(paths.acquire_game_lock(sys.argv[1]))")
+        game = self.root / "game"
+        game.mkdir()
+        with mutation_lock(self.root, game):
+            child = managed_processes.run(
+                [sys.executable, "-c", script, str(game), str(Path(__file__).resolve().parents[1])], text=True)
+        self.assertEqual(child.returncode, 0, child.stderr)
+        self.assertEqual(child.stdout.strip(), "True")
+
     @unittest.skipIf(os.name == "nt", "POSIX inherited-flock behavior")
     def test_orphaned_tool_keeps_lock_after_parent_dies(self):
         child = ("import sys,time; from pathlib import Path; "
