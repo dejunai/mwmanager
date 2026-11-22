@@ -3,13 +3,6 @@
   "CopiedAt": "2026-11-20 (America/Los_Angeles); refreshed mwpluginpatches door-lock compatibility",
   "Files": [
     {
-      "Path": "metadata/mwcompanionsneak-metadata.toml",
-      "Source": "<Steam Morrowind>\\Data Files\\mwcompanionsneak-metadata.toml",
-      "SHA256": "e82c2190aa9af9c347defe658f8dc23ca96cbcd5d40d7d89892784df6e8ef100",
-      "Length": 295,
-      "SourceModified": "2026-11-14T09:12:03"
-    },
-    {
       "Path": "metadata/mwcustomclasspersistence-metadata.toml",
       "Source": "<Steam Morrowind>\\Data Files\\mwcustomclasspersistence-metadata.toml",
       "SHA256": "cce888065b796795c1db03172eea11f520e8316f70d08b824c0bfb61dece686c",
@@ -66,46 +59,25 @@
       "SourceModified": "2026-11-14T09:03:52"
     },
     {
+      "Path": "metadata/mwcriminal-metadata.toml",
+      "Source": "<Steam Morrowind>\\Data Files\\mwcriminal-metadata.toml",
+      "SHA256": "017dcd910e0d1dbcc8f93c2d779609b7f5181d33cbda2cefe365c6f9031e716e",
+      "Length": 210,
+      "SourceModified": "2026-11-21T19:41:49"
+    },
+    {
+      "Path": "metadata/mwpersonaleffects-metadata.toml",
+      "Source": "<Steam Morrowind>\\Data Files\\mwpersonaleffects-metadata.toml",
+      "SHA256": "0148f8b8e989f3915e2cdeda9cc635fceb6950896e64ef77e62b9a927bf5e092",
+      "Length": 219,
+      "SourceModified": "2026-11-21T19:41:49"
+    },
+    {
       "Path": "mods/mwcollide/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcollide\\main.lua",
       "SHA256": "d9dc9329fea2dd25d42aaf3d642bbd928e30e78acee2f113d208083ce94f6933",
       "Length": 7735,
       "SourceModified": "2026-11-21T13:57:22"
-    },
-    {
-      "Path": "mods/mwcompanionsneak/config.lua",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcompanionsneak\\config.lua",
-      "SHA256": "ef540e93748d76523d54b42dec24ad58b1e4c0f970363993480e275f4742aed0",
-      "Length": 1384,
-      "SourceModified": "2026-11-21T13:37:24"
-    },
-    {
-      "Path": "mods/mwcompanionsneak/inspectorUI.lua",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcompanionsneak\\inspectorUI.lua",
-      "SHA256": "6d99d68ae1ffe080d7ace2ea0d1f50f7c032e3304bdd37ef17c08d30efdab488",
-      "Length": 19309,
-      "SourceModified": "2026-11-14T20:24:58"
-    },
-    {
-      "Path": "mods/mwcompanionsneak/interop.lua",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcompanionsneak\\interop.lua",
-      "SHA256": "c4ad915944a83ce368983379e760b5470b808b8268f9e436c0d7fc9e67aaf667",
-      "Length": 6175,
-      "SourceModified": "2026-11-14T09:11:12"
-    },
-    {
-      "Path": "mods/mwcompanionsneak/main.lua",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcompanionsneak\\main.lua",
-      "SHA256": "f67beea83568237b6b0bc516933fc041103ce809d32e38889b44e0f7c77097c2",
-      "Length": 4859,
-      "SourceModified": "2026-11-21T18:54:13"
-    },
-    {
-      "Path": "mods/mwcompanionsneak/mcm.lua",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcompanionsneak\\mcm.lua",
-      "SHA256": "337cfb6479094e4683f326ed57bcb2312a01aec115e18b5587aca7bb6574bf32",
-      "Length": 4022,
-      "SourceModified": "2026-11-14T20:24:59"
     },
     {
       "Path": "mods/mwcustomclasspersistence/main.lua",
@@ -180,9 +152,9 @@
     {
       "Path": "mods/mwguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwguard\\main.lua",
-      "SHA256": "aea5b7e0cf51f18ec0f5a79889b7998d632b711154bb4095bf3a25b525cfbdbe",
-      "Length": 16161,
-      "SourceModified": "2026-11-21T18:09:37"
+      "SHA256": "47453607adb1b6f900878000a648035a07a0e0fb0962b86d9e835e85ccaa54de",
+      "Length": 16162,
+      "SourceModified": "2026-11-21T19:35:28"
     },
     {
       "Path": "mods/mwhangwatch/main.lua",
@@ -236,23 +208,23 @@
     {
       "Path": "mods/mwpluginpatches/config.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\config.lua",
-      "SHA256": "4ef96a50f5813637a299fc8538fe53687623c4cde9241e8c47558f10cff303c5",
-      "Length": 9234,
-      "SourceModified": "2026-11-21T13:37:25"
+      "SHA256": "978c8d5543b91af75dbf3a611f1e9d5cde64e3abb7efe03ea44c8987863c1baf",
+      "Length": 8822,
+      "SourceModified": "2026-11-21T19:32:40"
     },
     {
       "Path": "mods/mwpluginpatches/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\main.lua",
-      "SHA256": "2f81aa8e0b0f56e4793de21211722e5c17dfff9dba8533596be729d814e665c3",
-      "Length": 4573,
-      "SourceModified": "2026-11-21T18:54:13"
+      "SHA256": "a1f31866642f6c72ca410b3022fb647309457f404cb7f1e4901e7d32f36818c1",
+      "Length": 4313,
+      "SourceModified": "2026-11-21T19:32:40"
     },
     {
       "Path": "mods/mwpluginpatches/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\mcm.lua",
-      "SHA256": "b52f15b0596d9072c267274b46264877c72e8bffd7ae6f9c8a2cd9bf454d88d7",
-      "Length": 18711,
-      "SourceModified": "2026-11-21T13:37:25"
+      "SHA256": "125b683ef942dc2ead2633e5dc6a68e88e14be31f9a32e12279b4a3bc0eb0813",
+      "Length": 18073,
+      "SourceModified": "2026-11-21T19:32:40"
     },
     {
       "Path": "mods/mwpluginpatches/patches/autoStartup.lua",
@@ -308,13 +280,6 @@
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\pandsfixes.lua",
       "SHA256": "992f47ddc8458df2b5ef9cc88d3e346ef77dbe2d6c667824e0f047262bda306a",
       "Length": 7835,
-      "SourceModified": "2026-11-21T18:54:14"
-    },
-    {
-      "Path": "mods/mwpluginpatches/patches/personalEffectsFix.lua",
-      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpluginpatches\\patches\\personalEffectsFix.lua",
-      "SHA256": "6abf81308fd7878c958dc8a68e2e5a186e478236e1db54a30663f9f0240feb96",
-      "Length": 15112,
       "SourceModified": "2026-11-21T18:54:14"
     },
     {
@@ -446,30 +411,44 @@
     {
       "Path": "mods/mwcriminal/config.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcriminal\\config.lua",
-      "SHA256": "fa1329f49b17dc13c66683c5ca8e95a7d5325e1adbcd4fd4be5bd02a8ed5d6e2",
-      "Length": 2177,
-      "SourceModified": "2026-11-21T14:08:13"
+      "SHA256": "b062b43178521f9594a9a6771b6d84ffd1dad11917291bb880b56006777cf631",
+      "Length": 4144,
+      "SourceModified": "2026-11-21T19:43:11"
     },
     {
       "Path": "mods/mwcriminal/core.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcriminal\\core.lua",
-      "SHA256": "fea7bcd0c2cffcdb5e62fee8540bd0ed5dda5f3aa46b3ab7f5360d2c1ddb7926",
-      "Length": 9108,
-      "SourceModified": "2026-11-21T15:08:58"
+      "SHA256": "5f84c401fbf03d26d040d75d2c8feaa0685f2992a7e96f10cc485b25565f2dad",
+      "Length": 12299,
+      "SourceModified": "2026-11-21T19:31:56"
     },
     {
       "Path": "mods/mwcriminal/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcriminal\\main.lua",
-      "SHA256": "4593a788d28c3faa506980f6ee22d8ee317d9cc71f34da3d3fda1d55ce55de18",
-      "Length": 9904,
-      "SourceModified": "2026-11-21T18:54:13"
+      "SHA256": "4d8bd8a6eed409ee2bbd9a99bc6f0e08788b7c7517b303cb4334f8567c43af30",
+      "Length": 12173,
+      "SourceModified": "2026-11-21T19:38:19"
     },
     {
       "Path": "mods/mwcriminal/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcriminal\\mcm.lua",
-      "SHA256": "3fc4d15f12cd83e675842b89701171c21d8ab195345b24a8602c08b68eb145ff",
-      "Length": 4725,
-      "SourceModified": "2026-11-21T14:08:15"
+      "SHA256": "d8bb4e10d7fd940a90dccf1c683a7a2b4d8095cdc36894e1902ee8cb1f78d0fe",
+      "Length": 6439,
+      "SourceModified": "2026-11-21T19:37:22"
+    },
+    {
+      "Path": "mods/mwcriminal/interop.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcriminal\\interop.lua",
+      "SHA256": "a66687e8afcba497f3e7c09fd1344b19f15566047af9035fa8572fc82c37dc20",
+      "Length": 1113,
+      "SourceModified": "2026-11-21T19:32:09"
+    },
+    {
+      "Path": "mods/mwcriminal/inspectorUI.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcriminal\\inspectorUI.lua",
+      "SHA256": "bebcd749e4fee655b5d4b913cf62913b945a43c4f49ed6e5fb295ee046a47275",
+      "Length": 19836,
+      "SourceModified": "2026-11-21T19:32:44"
     },
     {
       "Path": "mods/mwcompanions/config.lua",
@@ -481,23 +460,44 @@
     {
       "Path": "mods/mwcompanions/core.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcompanions\\core.lua",
-      "SHA256": "435bcfc52c9414c1ef4019037ad8f20f2eefe28aff608b1c2ef900c051e67b47",
-      "Length": 5977,
-      "SourceModified": "2026-11-21T14:32:46"
+      "SHA256": "4c0eef3d1c19839f24e206645c7266f066c4f79496ab3de796b4d668481d99c2",
+      "Length": 7619,
+      "SourceModified": "2026-11-21T19:06:55"
     },
     {
       "Path": "mods/mwcompanions/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcompanions\\main.lua",
-      "SHA256": "162ffe1dcf0b630998e055cf390c9775f5b09183a0e5366953bae18212834ee9",
-      "Length": 12903,
-      "SourceModified": "2026-11-21T18:54:13"
+      "SHA256": "22f34f9259cae9ea527df495e1009ab04ddc794c13b774ec176177ebaeea52ab",
+      "Length": 13023,
+      "SourceModified": "2026-11-21T19:07:04"
     },
     {
       "Path": "mods/mwcompanions/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwcompanions\\mcm.lua",
-      "SHA256": "f3e2f3fc98d5fa532afb0de8a7279b4df552b11794bfaa384babc6c54f9a9eb7",
-      "Length": 4604,
-      "SourceModified": "2026-11-21T14:35:46"
+      "SHA256": "d1cf304d9d98ae0323ba5569b9350fa216d0d7954a05305865e40693314f82b6",
+      "Length": 4657,
+      "SourceModified": "2026-11-21T19:06:46"
+    },
+    {
+      "Path": "mods/mwpersonaleffects/config.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpersonaleffects\\config.lua",
+      "SHA256": "b1132cda3bf5d996396e652455bc11affbb1dd1e6bd90a038fe6c35ffc62d79b",
+      "Length": 584,
+      "SourceModified": "2026-11-21T19:32:32"
+    },
+    {
+      "Path": "mods/mwpersonaleffects/main.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpersonaleffects\\main.lua",
+      "SHA256": "963fbc370c9127a48087f59f6f10561de244b5c500c21263f2e5b4d000967475",
+      "Length": 15361,
+      "SourceModified": "2026-11-21T19:34:14"
+    },
+    {
+      "Path": "mods/mwpersonaleffects/mcm.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwpersonaleffects\\mcm.lua",
+      "SHA256": "3e4ea908dc32d36ed3f900f7902f69d9b1c49fbf27de3e3adc80596aa7795d94",
+      "Length": 913,
+      "SourceModified": "2026-11-21T19:32:32"
     }
   ]
 }

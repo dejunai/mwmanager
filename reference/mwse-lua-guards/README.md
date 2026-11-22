@@ -7,8 +7,9 @@ Steam install, then copy them again and refresh the manifest.
 
 - `mods/<name>/` - one folder per suite mod, installed by `--init` to `Data Files\MWSE\mods\<name>\`:
   mwguard, mwhangwatch, mwfloatfix, mwstranded, mwcollide, mwperformers, mwinfoloop, mwsoundguard,
-  mwsaveguard, mwwarnsuppression, mwcompanionsneak, mwpluginpatches, mweffectinspector, mwmouseguard,
-  mwteleportguard, mwexitguard, mwquicktoggle, mwplainpaperfix, mwcustomclasspersistence (19 mods). `dejespreplacements` (formerly mwespreplacements) is the user's own replacement for plugins in one load order;
+  mwsaveguard, mwwarnsuppression, mwcriminal, mwpluginpatches, mweffectinspector, mwmouseguard,
+  mwteleportguard, mwexitguard, mwquicktoggle, mwplainpaperfix, mwcustomclasspersistence, mwpersonaleffects
+  (20 mods). `dejespreplacements` (formerly mwespreplacements) is the user's own replacement for plugins in one load order;
   it is not part of the suite and MWManager does not ship it.
 - `metadata/<name>-metadata.toml` - the MWSE metadata files that go beside them in `Data Files\` (load priority).
 
@@ -21,5 +22,5 @@ one Mod Config Menu entry, "MWManager", one tab per mod: that is `reference/mwma
 (where MWSE never loads Lua from): the consolidated `MWSE\mods\MWManager\` mod (with its `mwquickfixes` tab and
 `off\legacy-standalone\` archive) and a standalone `mwquickfixes` folder. The quick fixes now live in the suite:
 CorruptSaveGuard is mwsaveguard, SuppressBodyPartWarnings and SuppressShutdownWarnings are mwwarnsuppression,
-CompanionSneak is mwcompanionsneak, DeferredDialogueTeleport is mwteleportguard and MouseBleedFix is
+CompanionSneak is absorbed by mwcriminal, DeferredDialogueTeleport is mwteleportguard and MouseBleedFix is
 mwmouseguard. Standalone folders of those older names are the user's own and `--init` leaves them alone.
