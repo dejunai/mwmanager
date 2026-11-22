@@ -21,6 +21,7 @@ mwmanager_state_owner.json
 game_states/
 mwmanager_dates_undo.txt
 mwmanager_luafix.json
+mwdialog_luafix_known_bugs.txt
 major_master_deployments.json
 mwmanager_master_variants.json
 mwmanager_required_by_cache.json
