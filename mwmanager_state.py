@@ -310,7 +310,21 @@ def backup_asset_original(data_dir, rel, plugin=None, feature="repair"):
     root = backup_root_for(mod, data_dir, rel)
     off = os.path.join(root, "Off")
     current = os.path.join(data_dir, rel)
-    # Reuse an original already retained by an earlier feature/pass; keep the first untouched bytes.
+    # An original retained by an earlier feature/pass stays the first; an updated file is kept beside it.
+    kept = _kept_original(off, owner, rel)
+    if kept:
+        return keep_new_original(kept, current)
+    dest = off_dest(root, feature, owner, rel)
+    if not os.path.exists(dest):
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+        shutil.copy2(current, dest)
+        _ASSET_BACKUP_OF[os.path.normcase(os.path.abspath(current))] = dest
+        return dest
+    return keep_new_original(dest, current)
+
+
+def _kept_original(off, owner, rel):
+    """The original an earlier feature, pass or layout kept of `rel`, or None."""
     try:
         for owner_name in [owner] + ([LEGACY_ORIGINAL_INSTALL] if owner == ORIGINAL_INSTALL else []):
             owner_dir = os.path.join(off, owner_name)
@@ -336,13 +350,7 @@ def backup_asset_original(data_dir, rel, plugin=None, feature="repair"):
             return legacy
     except OSError:
         pass
-    dest = off_dest(root, feature, owner, rel)
-    if not os.path.exists(dest):
-        os.makedirs(os.path.dirname(dest), exist_ok=True)
-        shutil.copy2(current, dest)
-        _ASSET_BACKUP_OF[os.path.normcase(os.path.abspath(current))] = dest
-        return dest
-    return keep_new_original(dest, current)
+    return None
 
 
 def _is_under(path, base):
@@ -632,53 +640,22 @@ def backup_candidates(path):
     for off_root in dict.fromkeys(roots):
         off += glob.glob(os.path.join(off_root, "Off", "**", name + ".bak*"), recursive=True)
     legacy = [path + ".bak"] + [f"{path}.bak{n}" for n in range(2, 100)]
-    paths = [p for p in central + off + legacy if os.path.isfile(p)]
+    paths = [p for p in central + off + legacy if not p.endswith(REPAIRED_SIDECAR) and os.path.isfile(p)]
     return sorted(set(paths), key=backup_order)
 
 
 def run_clean_up(args):
-    """Delete backups of plugins that are gone, and keep only the most recent backup of the rest."""
-    data_dir = args.data_dir
-    lookup = index_dir(data_dir)
-    groups = defaultdict(list)
-    candidates = [p for p in glob.glob(os.path.join(BACKUP_DIR, "plugins", "**", "*"), recursive=True)
-                  if os.path.isfile(p)]
-    candidates += [bak for plugin_path in lookup.values() for bak in backup_candidates(plugin_path)]
-    # Older MWManager releases left backups beside plugins; recognize those until the user cleans them up.
-    candidates += [p for p in lookup.values() if os.path.isfile(p)]
-    for path in set(candidates):
-        m = CLEANUP_BAK_RE.match(os.path.basename(path).lower())
-        if m:
-            groups[m.group("plugin")].append((int(m.group("n") or 1), path))
-    if not groups:
-        print("No plugin backups found.")
-        return 0
-    gone, old = [], []
-    kept = {}
-    for plugin, baks in groups.items():
-        baks.sort(key=lambda item: backup_order(item[1]))
-        if plugin not in lookup:
-            gone += [p for _n, p in baks]
-        else:
-            kept[plugin] = baks[-1][1]
-            old += [p for _n, p in baks[:-1]]
-    size = lambda paths: sum(os.path.getsize(p) for p in paths)
-    print(f"{sum(len(b) for b in groups.values())} backup(s) of {len(groups)} plugin(s) in {BACKUP_DIR}")
-    if gone:
-        print(f"\n  Plugin no longer in Data Files, so all its backups go ({len(gone)}, {size(gone) / 1048576:.1f} MB):")
-        for p in sorted(gone, key=str.lower):
-            print(f"    - {os.path.basename(p)}")
-    if old:
-        print(f"\n  Older backups of plugins that are still here ({len(old)}, {size(old) / 1048576:.1f} MB); "
-              "the most recent one is kept here:")
-        by_plugin = defaultdict(list)
-        for p in old:
-            by_plugin[CLEANUP_BAK_RE.match(os.path.basename(p).lower()).group("plugin")].append(p)
-        for plugin in sorted(by_plugin):
-            print(f"    - {plugin}: {len(by_plugin[plugin])} older, keeping {os.path.basename(kept[plugin])}")
-    doomed = gone + old
+    """Delete the backups between each plugin's original (the oldest) and its newest. A plugin that isn't in
+    Data Files keeps all of its backups: before a deployment that can be every plugin."""
+    doomed = []
+    for plugin, path in sorted(index_dir(args.data_dir).items()):
+        baks = [b for b in backup_candidates(path)            # oldest first
+                if (m := CLEANUP_BAK_RE.match(os.path.basename(b).lower())) and m.group("plugin") == plugin]
+        if len(baks) > 2:
+            print(f"    - {plugin}: {len(baks) - 2} in between; keeping the oldest and the newest")
+            doomed += baks[1:-1]
     if not doomed:
-        print("  Nothing to clean up: each plugin has a single backup.")
+        print("  Nothing to clean up: no plugin has backups between its oldest and its newest.")
         return 0
     if args.dry_run:
         print("\nDry run: no files were deleted.")
@@ -699,7 +676,7 @@ def run_clean_up(args):
             done += 1
             lines.append(f"deleted backup {os.path.basename(path)}")
         except OSError as e:
-            print(f"  {os.path.basename(p)}: NOT deleted ({e})")
+            print(f"  {os.path.basename(path)}: NOT deleted ({e})")
     with MT.open_log(args.fix_log, "a", encoding="utf-8") as f:
         import datetime
         f.write(f"\n==== {datetime.datetime.now():%Y-%m-%d %H:%M:%S} clean-up ====\n")
@@ -709,24 +686,24 @@ def run_clean_up(args):
 
 
 def restore_all(data_dir, assume_yes, fix_log):
-    """Put every plugin back to its OLDEST backup (the original) and remove all its backups."""
+    """Put every plugin back to its OLDEST backup (the original). What is replaced is backed up first and no
+    backup is removed: the file there may be a newer version of the mod."""
     lookup = index_dir(data_dir)
-    groups = defaultdict(list)                     # plugin path -> [(n, backup path)]
-    candidates = [p for p in glob.glob(os.path.join(BACKUP_DIR, "plugins", "**", "*"), recursive=True)
-                  if os.path.isfile(p)] + [p for p in lookup.values() if os.path.isfile(p)]
-    candidates += [bak for plugin_path in lookup.values() for bak in backup_candidates(plugin_path)]
-    for bak in set(candidates):
-        m = BAK_RE.match(os.path.basename(bak).lower())
-        if m and m.group("plugin") in lookup and m.group("plugin") not in [x.lower() for x in OUR_PATCHES]:
-            groups[lookup[m.group("plugin")]].append((int(m.group("n") or 1), bak))
+    ours = {x.lower() for x in OUR_PATCHES}
+    groups = {}                                    # plugin path -> its backups, oldest first
+    for plugin, path in lookup.items():
+        if plugin in ours:
+            continue
+        baks = [b for b in backup_candidates(path)
+                if (m := BAK_RE.match(os.path.basename(b).lower())) and m.group("plugin") == plugin]
+        if baks:
+            groups[path] = baks
     if not groups:
         print("No plugin backups found.")
         return 0
-    print("These plugins will be put back to their original (oldest) backup, and all their backups removed:")
+    print("These plugins will be put back to their original (oldest) backup; what is there now is backed up first:")
     for path, baks in sorted(groups.items(), key=lambda kv: kv[0].lower()):
-        baks.sort(key=lambda item: backup_order(item[1]))
-        print(f"  {os.path.basename(path)}  <- {os.path.basename(baks[0][1])}"
-              + (f"  (also removing {len(baks) - 1} newer backup(s))" if len(baks) > 1 else ""))
+        print(f"  {os.path.basename(path)}  <- {os.path.basename(baks[0])}")
     patch = lookup.get(PATCH_NAME.lower())
     if patch:
         print(f"\n'{PATCH_NAME}' is left as it is; the next --fix rebuilds it from scratch.")
@@ -739,19 +716,24 @@ def restore_all(data_dir, assume_yes, fix_log):
             return 0
     done, lines = 0, []
     for path, baks in groups.items():
-        oldest = baks[0][1]
+        oldest = baks[0]
         try:
             st = os.stat(oldest)                   # copy2 kept the plugin's original date on it
             with open(oldest, "rb") as f:
                 data = f.read()
+            with open(path, "rb") as f:
+                now = f.read()
+            if now == data:
+                continue
+            bak = backup_path(path)
+            shutil.copy2(path, bak)
             safe_write_bytes(path, data, keep_times=st)     # in place, so hard links (Vortex) stay intact
             with open(path, "rb") as f:
                 if f.read() != data:
-                    raise OSError("the restored copy doesn't match the backup; backups kept")
-            for _n, b in baks:
-                os.remove(b)
+                    raise OSError("the restored copy doesn't match the backup")
             done += 1
-            lines.append(f"{os.path.basename(path)}: restored from {os.path.basename(oldest)}, {len(baks)} backup(s) removed")
+            lines.append(f"{os.path.basename(path)}: restored from {os.path.basename(oldest)} "
+                         f"(what was there: {os.path.basename(bak)})")
         except OSError as e:
             print(f"  {os.path.basename(path)}: NOT restored ({e})")
     with MT.open_log(fix_log, "a", encoding="utf-8") as f:

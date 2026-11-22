@@ -327,16 +327,16 @@
     {
       "Path": "mods/mwsaveguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwsaveguard\\main.lua",
-      "SHA256": "1050d96bddab68dfad64ff60dd91bdfbc908b4dc245a8c574f3c8742f847001c",
-      "Length": 17106,
-      "SourceModified": "2026-11-21T15:19:55"
+      "SHA256": "0df7681d742e2c7bddb9a90fe71c052b5d4906b00dc0ff31b1fbb70d130c7d99",
+      "Length": 16835,
+      "SourceModified": "2026-11-22T02:37:53"
     },
     {
       "Path": "mods/mwsaveguard/validator.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwsaveguard\\validator.lua",
-      "SHA256": "80f26c77bbfb1a8d19eda9b622b1bca843595d7d259319fc5f98c5905eb45be7",
-      "Length": 4958,
-      "SourceModified": "2026-11-16T22:42:02"
+      "SHA256": "a9264e59ec9482bfd993f87be2f0a0f1a9613d193a48a543ae8ac394f2633d5b",
+      "Length": 5178,
+      "SourceModified": "2026-11-22T02:37:53"
     },
     {
       "Path": "mods/mwsoundguard/main.lua",
@@ -369,9 +369,9 @@
     {
       "Path": "mods/mwteleportguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwteleportguard\\main.lua",
-      "SHA256": "9e66f4544859ab1d6cd933d00cbb6a0927a5d4df0ffd0a6622f3142448c183fc",
-      "Length": 6142,
-      "SourceModified": "2026-11-21T18:54:14"
+      "SHA256": "96d9cd94cda2a115bbb2cf50b6d17dfc8cfb1dea3b8ed00dd23aefc2ac04d166",
+      "Length": 6607,
+      "SourceModified": "2026-11-22T02:37:53"
     },
     {
       "Path": "mods/mwteleportguard/mcm.lua",
@@ -474,9 +474,9 @@
     {
       "Path": "mods/mwpersonaleffects/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpersonaleffects\\main.lua",
-      "SHA256": "963fbc370c9127a48087f59f6f10561de244b5c500c21263f2e5b4d000967475",
-      "Length": 15361,
-      "SourceModified": "2026-11-21T19:34:14"
+      "SHA256": "6e709617a3d38c8674599dcf5daf708196eeb2531a4bb14d74387dc3c9effb70",
+      "Length": 12858,
+      "SourceModified": "2026-11-22T02:37:53"
     },
     {
       "Path": "mods/mwpersonaleffects/mcm.lua",

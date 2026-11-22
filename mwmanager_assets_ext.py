@@ -186,6 +186,8 @@ def restore_unused(game_dir, data_dir):
             if marker:
                 mod = dest[:marker.start()]
                 staged = os.path.join(mod, rel)
+                if os.path.exists(staged):
+                    raise FileExistsError("a newer file is there")
                 os.makedirs(os.path.dirname(staged), exist_ok=True)
                 os.replace(dest, staged)
                 target = os.path.join(data_dir, rel)
@@ -197,6 +199,8 @@ def restore_unused(game_dir, data_dir):
                         shutil.copy2(staged, target)
             else:
                 target = os.path.join(data_dir, rel)
+                if os.path.exists(target):
+                    raise FileExistsError("a newer file is there")
                 os.makedirs(os.path.dirname(target), exist_ok=True)
                 os.replace(dest, target)
             back += 1
@@ -221,11 +225,23 @@ def _backup_owner(plugin_name):
 
 
 def _backup_in_mod(root, rel, full, plugin_name, m, feature="repair"):
-    """Keep one original at Off/<Vortex mod name>/<feature>/<original relative path>."""
+    """Keep the original at Off/<Vortex mod name>/<feature>/<original relative path>, and an update's beside it."""
     owner = _backup_owner(plugin_name)
     off = os.path.join(root, "Off")
-    # Reuse the first original in the canonical Off/<plugin>/<feature>/<path> layout,
-    # while recognizing older layouts so another pass never backs up an already-preserved original.
+    kept = _kept_in_mod(off, owner, rel)
+    if kept:
+        return m.keep_new_original(kept, full)
+    dest = os.path.join(off, owner, feature, rel)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if not os.path.exists(dest):
+        shutil.copy2(full, dest)
+        m._ASSET_BACKUP_OF[os.path.normcase(os.path.abspath(full))] = dest
+        return dest
+    return m.keep_new_original(dest, full)
+
+
+def _kept_in_mod(off, owner, rel):
+    """The first original, in the canonical Off/<plugin>/<feature>/<path> layout or an older one, or None."""
     try:
         owner_dir = os.path.join(off, owner)
         for category in os.listdir(owner_dir):
@@ -246,13 +262,7 @@ def _backup_in_mod(root, rel, full, plugin_name, m, feature="repair"):
             return legacy
     except OSError:
         pass
-    dest = os.path.join(off, owner, feature, rel)
-    os.makedirs(os.path.dirname(dest), exist_ok=True)
-    if not os.path.exists(dest):
-        shutil.copy2(full, dest)
-        m._ASSET_BACKUP_OF[os.path.normcase(os.path.abspath(full))] = dest
-        return dest
-    return m.keep_new_original(dest, full)
+    return None
 
 
 def find_ffmpeg():
@@ -272,10 +282,12 @@ def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
         operations.append({"src": full, "dst": new_full})
     elif os.path.exists(full):
         # If this path was renamed earlier, keep the old-named source in Off\<plugin>\non-ascii\<old path>.
-        import mwmanager as _manager
+        import mwdialog_check as _manager
         keep = _manager.off_dest(root, "non-ascii", None, rel)
         kept_before = _manager.off_dest(root, "names", None, rel)      # where earlier versions kept it
         if os.path.exists(keep) or os.path.exists(kept_before):
+            # an update's file is a new original; raises if it can't be kept
+            _manager.keep_new_original(keep if os.path.exists(keep) else kept_before, full)
             os.remove(full)
             operations.append({"duplicate": new_full, "restore": full})
             log(f"{rel}: ASCII replacement {new_rel} already exists and the original is already kept; "
@@ -329,8 +341,10 @@ def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
                 os.makedirs(os.path.dirname(bak), exist_ok=True)
                 if not os.path.exists(bak):
                     shutil.copy2(pp, bak)
+                _m.keep_new_original(bak, pp)
             with open(pp, "r+b") as f:                 # in place: keeps a Vortex hard link
                 f.write(bytes(new))
+            _m.record_repair(pp, new)
             log(f"{pf}: {hits} name(s) of {rel} changed to {new_rel}")
     return operations
 

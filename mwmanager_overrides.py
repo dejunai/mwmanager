@@ -1374,10 +1374,10 @@ def _main(argv=None):
     fx.add_argument("--no-placeholders", action="store_true",
                     help="with --fix: don't add stand-in gold coins for objects that scripts name but no mod defines")
     fx.add_argument("--restore-all", action="store_true",
-                    help="undo everything: put every plugin back to its oldest .bak (the original), remove all its backups, and exit")
+                    help="undo everything: put every plugin back to its oldest .bak (the original), back up what it replaces, and exit")
     fx.add_argument("--clean-up", action="store_true",
-                    help="delete .bak backups of plugins that are no longer in Data Files, and keep only the most "
-                         "recent .bak of each remaining plugin (use --dry-run to preview)")
+                    help="delete the .bak backups between each installed plugin's oldest and newest "
+                         "(use --dry-run to preview)")
     fx.add_argument("--fix-log", default=os.path.join(OUTPUT_DIR, "mwmanager_fixes.log"), help="where to append a record of fixes (default: MWManager outputs folder)")
     import mwmanager_journal
     jg = ap.add_argument_group("install journal (the game folder is the parent of data_dir; nothing is changed)")

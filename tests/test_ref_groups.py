@@ -51,7 +51,7 @@ class ReferenceGroupFix(unittest.TestCase):
             plugin.write_bytes(header(master.name) + record(b"CELL", plugin_cell))
             args = types.SimpleNamespace(data_dir=str(data_dir), fix_log="fix.log", dry_run=False)
 
-            def write_inplace(path, data):
+            def write_inplace(path, data, read_as=None):
                 Path(path).write_bytes(b"".join(data))
                 return str(Path(path).with_suffix(".bak"))
 
