@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-21 (America/Los_Angeles); Clean documentation whitespace before commit",
+  "SyncedAt": "2026-11-21 (America/Los_Angeles); Record successful two-repository push",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -1102,9 +1102,9 @@
     {
       "RelativePath": "RESUME.md",
       "Source": "<Steam Morrowind>\\RESUME.md",
-      "Bytes": 16155,
-      "SHA256": "249e6c8b6e82585c2b98003c5ab434567c144c2d163583f3a648df1937c64b2e",
-      "SourceModified": "2026-11-21T19:46:51"
+      "Bytes": 16144,
+      "SHA256": "ebbd16815e583dd578071c2c901e721810fa8e8be7c9086290c1aa47bb076764",
+      "SourceModified": "2026-11-21T19:48:58"
     },
     {
       "RelativePath": "mwdialog_ownership.py",
