@@ -5867,7 +5867,7 @@ class ManagerGUI(tk.Tk):
                         raise RuntimeError("The tidy utility needs the Python console executable beside pythonw.exe.")
                     quiet = quiet_options()
                     from mwmanager_batch import (
-                        BatchCoordinator, BatchUnit, file_sha256, package_id_for,
+                        BatchCoordinator, BatchUnit, file_sha256, option_answer_fingerprint, package_id_for,
                         run_threaded_batch,
                     )
 
@@ -5878,15 +5878,22 @@ class ManagerGUI(tk.Tk):
                         "selected_masters": list(masters),
                     } for item, masters in groups]
                     coordinator = BatchCoordinator.start(APP_DIR, game_dir, package_specs)
+                    processing_lock = threading.Lock()
+                    stage_ready_lock = threading.Lock()
+
+                    def set_stage_ready(masters, ready):
+                        with stage_ready_lock:
+                            self._set_master_stage_ready(masters, ready)
 
                     def config_hash(mod_dir):
                         from core_addons import _read_staged_archive_marker
                         marker_hash = str(_read_staged_archive_marker(mod_dir).get("sha256") or "")
                         candidates = []
                         try:
-                            candidates = [path for path in mod_dir.rglob("*")
-                                          if path.is_file()
-                                          and path.name.casefold() == "moduleconfig.xml"][:4]
+                            candidates = sorted(
+                                (path for path in mod_dir.rglob("*") if path.is_file()
+                                 and path.name.casefold() == "moduleconfig.xml"),
+                                key=lambda path: str(path).casefold())
                         except OSError:
                             pass
                         return marker_hash + ":" + ":".join(filter(None, (file_sha256(path) for path in candidates)))
@@ -5895,11 +5902,11 @@ class ManagerGUI(tk.Tk):
                         import mock_fomod
                         identity = mock_fomod._selection_identity(Path(mod_dir))
                         answer = mock_fomod._answer_file_path(APP_DIR / "outputs", identity)
-                        return file_sha256(answer)
+                        return option_answer_fingerprint(answer)
 
                     def extract_batch(item, index):
                         group_masters = item["selected_masters"]
-                        self._set_master_stage_ready(group_masters, False)
+                        set_stage_ready(group_masters, False)
                         progress(f"Staging master {index} of {len(groups)}: {', '.join(group_masters)}")
                         paths = stage_core_master_archives(
                             plan, group_masters, APP_DIR, game_dir,
@@ -5914,13 +5921,18 @@ class ManagerGUI(tk.Tk):
                         })
 
                     def prepare_options(unit, reopen):
-                        process_package(
-                            progress, py, quiet, unit.path, unit.context["masters"],
-                            reopen=reopen, phase="options")
+                        # Options and Tidy share answer, pending-option and compatibility journals.
+                        with processing_lock:
+                            checkpoint(progress)
+                            process_package(
+                                progress, py, quiet, unit.path, unit.context["masters"],
+                                reopen=reopen, phase="options")
 
                     def apply_package(unit):
-                        process_package(
-                            progress, py, quiet, unit.path, unit.context["masters"], phase="apply")
+                        with processing_lock:
+                            checkpoint(progress)
+                            process_package(
+                                progress, py, quiet, unit.path, unit.context["masters"], phase="apply")
 
                     def reset_after_option_change(unit):
                         from core_addons import reset_package_step
@@ -5936,7 +5948,7 @@ class ManagerGUI(tk.Tk):
                         fingerprint=lambda unit: answer_hash(unit.path),
                         config_fingerprint=lambda unit: config_hash(unit.path),
                         reset_after_option_change=reset_after_option_change,
-                        on_ready=lambda unit: self._set_master_stage_ready(
+                        on_ready=lambda unit: set_stage_ready(
                             unit.context["masters"], True),
                         progress=progress,
                     )

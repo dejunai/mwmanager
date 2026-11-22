@@ -1,5 +1,5 @@
 {
-  "about": "MWManager's own notes for option choices, shown in the option window after the FOMOD text, the packaged readmes and the mod page. A mod matches by its Nexus id or by a package-folder pattern; each option pattern is matched (case-insensitive, * and ? wildcards, / or \\) against the option's label, key, file name and path inside the package. '*' notes the whole package. An option's value is a note, or {\"note\": ..., \"needs\": [plugin, ...]}: a chosen option waits until those plugins are installed, like a missing master.",
+  "about": "MWManager's own notes for option choices, shown in the option window after the FOMOD text, the packaged readmes and the mod page. A mod matches by its Nexus id or by a package-folder pattern; each option pattern is matched (case-insensitive, * and ? wildcards, / or \\) against the option's label, key, file name and path inside the package. '*' notes the whole package. An option's value is a note, or an object with a note, optional needs (which hold chosen options), and optional requires objects with name and nexus_id (informational only).",
   "mods": [
     {
       "name": "AATL Data",
@@ -42,9 +42,287 @@
       "nexus_id": 49042,
       "packages": ["OAAB_Data *"],
       "options": {
-        "Animated Containers": "MWMANAGER INSIGHT: this needs the full MW Containers Animated mod, Nexus ID 42238. It supplies the AC meshes and sounds. 'Some Improved Animated Containers' (Nexus 44321) is only an optional mesh overwrite and never substitutes for the full mod."
+        "Animated Containers": {
+          "note": "This needs the full MW Containers Animated mod. Some Improved Animated Containers is only an optional mesh overwrite and does not substitute for it.",
+          "requires": [{"name": "MW Containers Animated (mod)", "nexus_id": 42238}]
+        }
       }
     },
+      {
+        "name": "Better Gnisis Arch",
+        "nexus_id": 46224,
+        "options": {
+          "*Glow in the Dahrk Patch": {
+            "note": "Use this patch with Glow in the Dahrk.",
+            "requires": [{"name": "Glow in the Dahrk (mod)", "nexus_id": 45886}]
+          },
+          "*OMW GITD Patch": {
+            "note": "The OpenMW variant is for Glow in the Dahrk.",
+            "requires": [{"name": "Glow in the Dahrk (mod)", "nexus_id": 45886}]
+          }
+        }
+      },
+      {
+        "name": "Better Morrowind Armor Fixes",
+        "packages": ["Better Morrowind Armor Fixes*"],
+        "options": {
+          "*Glass Glowset*": {
+            "note": "These meshes use Glass Glowset's glow maps.",
+            "requires": [{"name": "Glass Glowset (mod)", "nexus_id": 42762}]
+          },
+          "*HiRez Armors - Native Styles V2*": {
+            "note": "These meshes are for HiRez Armors - Native Styles V2.",
+            "requires": [{"name": "HiRez Armors - Native Styles V2 (mod)", "nexus_id": 41947}]
+          }
+        }
+      },
+      {
+        "name": "Better Waterfalls",
+        "nexus_id": 45424,
+        "options": {
+          "*Tamriel Rebuilt Water": {
+            "note": "This is the Tamriel Data flowing-water mesh patch.",
+            "requires": [{"name": "Tamriel Data (mod)", "nexus_id": 44537}]
+          }
+        }
+      },
+      {
+        "name": "Graphic Herbalism Patches and Replacers",
+        "packages": ["GH Patches and Replacers*"],
+        "options": {
+          "*Vurt's Chokeweed & Roobrush": {
+            "note": "Requires the original textures.",
+            "requires": [{"name": "Vurt's Leafy West Gash II (mod)", "nexus_id": 37400}]
+          },
+          "*Glowing Bitter Coast*": {
+            "note": "Uses the Glowing Bitter Coast textures.",
+            "requires": [{"name": "Glowing Bitter Coast (mod)", "nexus_id": 47946}]
+          },
+          "*Atlas -*": {
+            "note": "Uses Project Atlas mushroom textures.",
+            "requires": [{"name": "Project Atlas (mod)", "nexus_id": 45399}]
+          },
+          "*Atlas - Smoothed Glowmap Patch": {
+            "note": "Also uses the Glowing Bitter Coast textures.",
+            "requires": [{"name": "Glowing Bitter Coast (mod)", "nexus_id": 47946}]
+          },
+          "*Glass Glowset ores": {
+            "note": "Uses Glass Glowset's glow maps.",
+            "requires": [{"name": "Glass Glowset (mod)", "nexus_id": 42762}]
+          },
+          "*Cave Plant Replacer for MC": {
+            "note": "Requires the Improved Cavern Clutter textures.",
+            "requires": [{"name": "Improved Cavern Clutter (mod)", "nexus_id": 44321}]
+          }
+        }
+      },
+      {
+        "name": "Improved Weapon Mesh Compilation",
+        "nexus_id": 50886,
+        "options": {
+          "*Weapon Sheathing Patch": {
+            "note": "For use with Weapon Sheathing.",
+            "requires": [{"name": "Weapon Sheathing (mod)", "nexus_id": 46069}]
+          },
+          "*Claymore Wooden Sheath": {
+            "note": "The wooden sheath requires Weapon Sheathing.",
+            "requires": [{"name": "Weapon Sheathing (mod)", "nexus_id": 46069}]
+          },
+          "*Glass Glowset Patch": {
+            "note": "Uses Glass Glowset's glow maps.",
+            "requires": [{"name": "Glass Glowset (mod)", "nexus_id": 42762}]
+          },
+          "*Patch for Psymon's Iron Mesh Improvements - Uniques": {
+            "note": "Install Psymon's original mod first.",
+            "requires": [{"name": "Psymon's Iron Mesh Improvements - Uniques (mod)", "nexus_id": 34863}]
+          }
+        }
+      },
+      {
+        "name": "Lustrous Pearls",
+        "nexus_id": 52800,
+        "options": {
+          "*Tamriel_Data Pearl Replacer": {
+            "note": "Replaces pearls from Tamriel Data.",
+            "requires": [{"name": "Tamriel Data (mod)", "nexus_id": 44537}]
+          },
+          "*Dynamic Object Replacer": {
+            "note": "Uses Dynamic Object Replacer to replace pearls in the world.",
+            "requires": [{"name": "Dynamic Object Replacer (mod)", "nexus_id": 52105}]
+          }
+        }
+      },
+      {
+        "name": "Kwama Egg sacs and Eggs Replacer",
+        "nexus_id": 43555,
+        "options": {
+          "*Graphic herbalism*": {
+            "note": "These empty egg sac meshes are for Graphic Herbalism.",
+            "requires": [{"name": "Graphic Herbalism (mod)", "nexus_id": 46599}]
+          }
+        }
+      },
+      {
+        "name": "Pherim's Fire Fern and Fire Petal",
+        "nexus_id": 43568,
+        "options": {
+          "*Graphic Herbalism": {
+            "note": "The petal-free meshes are for Graphic Herbalism.",
+            "requires": [{"name": "Graphic Herbalism (mod)", "nexus_id": 46599}]
+          }
+        }
+      },
+      {
+        "name": "NPC Outfit Diversity",
+        "nexus_id": 52091,
+        "options": {
+          "*MWSE Fashionwind*Addon*": {
+            "note": "The Fashionwind addons require Onion - Layered Accessories.",
+            "requires": [{"name": "Onion - Layered Accessories (mod)", "nexus_id": 50352}]
+          }
+        }
+      },
+      {
+        "name": "ST Alchemy",
+        "nexus_id": 53097,
+        "options": {
+          "*MWSE Dynamic Object Replacer*": {
+            "note": "These replacement configurations require Dynamic Object Replacer.",
+            "requires": [{"name": "Dynamic Object Replacer (mod)", "nexus_id": 52105}]
+          }
+        }
+      },
+      {
+        "name": "OAAB Glowbugs",
+        "nexus_id": 50538,
+        "options": {
+          "MGE XE": {
+            "note": "Enable the MWSE Functions option in OAAB Data as well as its core.",
+            "requires": [{"name": "OAAB Data (mod)", "nexus_id": 49042}]
+          },
+          "OpenMW": {
+            "note": "Enable the OpenMW Functions option in OAAB Data as well as its core.",
+            "requires": [{"name": "OAAB Data (mod)", "nexus_id": 49042}]
+          }
+        }
+      },
+      {
+        "name": "Know Thy Ancestors Redux",
+        "nexus_id": 60160,
+        "options": {
+          "Yes - I have Tamriel Rebuilt": {
+            "note": "The mainland banners need Tamriel Rebuilt.",
+            "requires": [{"name": "TR_Mainland.esm", "nexus_id": 42145}]
+          }
+        }
+      },
+      {
+        "name": "OAAB Saplings",
+        "nexus_id": 50334,
+        "options": {
+          "Beautiful Cities of Morrowind": {
+            "note": "The package's BCOM patch is for Beautiful Cities of Morrowind.",
+            "requires": [{"name": "Beautiful Cities of Morrowind (mod)", "nexus_id": null}]
+          },
+          "The Stonewood Pass Reworked": {
+            "note": "Also requires Beautiful Cities of Morrowind and the package's BCOM patch.",
+            "requires": [
+              {"name": "The Stonewood Pass Reworked (mod)", "nexus_id": 49464},
+              {"name": "Beautiful Cities of Morrowind (mod)", "nexus_id": null}
+            ]
+          },
+          "Melchior's Excellent Grazelands Acacia patch": {
+            "note": "For OpenMW groundcover users of this tree replacer.",
+            "requires": [{"name": "Melchior's Excellent Grazelands Acacia (mod)", "nexus_id": 51058}]
+          },
+          "Graht Morrowind Swamp Trees patch": {
+            "note": "For OpenMW groundcover users of this tree replacer.",
+            "requires": [{"name": "Graht Morrowind Swamp Trees (mod)", "nexus_id": null}]
+          },
+          "SM Bitter Coast Tree Replacer patch": {
+            "note": "For OpenMW groundcover users of this tree replacer.",
+            "requires": [{"name": "SM Bitter Coast Tree Replacer (mod)", "nexus_id": null}]
+          }
+        }
+      },
+      {
+        "name": "Morrowind Optimization Patch",
+        "nexus_id": 45384,
+        "options": {
+          "*Weapon Sheathing Patch": {
+            "note": "For use with Weapon Sheathing.",
+            "requires": [{"name": "Weapon Sheathing (mod)", "nexus_id": 46069}]
+          },
+          "*Graphic Herbalism Patch": {
+            "note": "For use with Graphic Herbalism.",
+            "requires": [{"name": "Graphic Herbalism (mod)", "nexus_id": 46599}]
+          }
+        }
+      },
+      {
+        "name": "Nordic Mesh Improvements",
+        "nexus_id": 46792,
+        "options": {
+          "*Weapon Sheathing Patch": {
+            "note": "For use with Weapon Sheathing.",
+            "requires": [{"name": "Weapon Sheathing (mod)", "nexus_id": 46069}]
+          }
+        }
+      },
+      {
+        "name": "Pimp my Lava",
+        "nexus_id": 53808,
+        "options": {
+          "*Tamriel_Data Patch": {
+            "note": "Replaces lava meshes from Tamriel Data.",
+            "requires": [{"name": "Tamriel Data (mod)", "nexus_id": 44537}]
+          }
+        }
+      },
+      {
+        "name": "RR Ghostgate Fortress",
+        "nexus_id": 45822,
+        "options": {
+          "*Glow in the Dahrk Patch": {
+            "note": "For use with Glow in the Dahrk.",
+            "requires": [{"name": "Glow in the Dahrk (mod)", "nexus_id": 45886}]
+          },
+          "*Towers Without Texts - GITD": {
+            "note": "The text-free tower variant is for Glow in the Dahrk.",
+            "requires": [{"name": "Glow in the Dahrk (mod)", "nexus_id": 45886}]
+          }
+        }
+      },
+      {
+        "name": "RR Holamayan",
+        "nexus_id": 43524,
+        "options": {
+          "*Glow in the Dahrk Patch": {
+            "note": "For use with Glow in the Dahrk.",
+            "requires": [{"name": "Glow in the Dahrk (mod)", "nexus_id": 45886}]
+          }
+        }
+      },
+      {
+        "name": "Tel Aruhn Shroom Gate",
+        "nexus_id": 49586,
+        "options": {
+          "*GitD patch": {
+            "note": "The mesh variant is for Glow in the Dahrk.",
+            "requires": [{"name": "Glow in the Dahrk (mod)", "nexus_id": 45886}]
+          }
+        }
+      },
+      {
+        "name": "Mushroom Crabs",
+        "packages": ["mushroom_crabs*"],
+        "options": {
+          "*Glowing Bitter Coast Patch": {
+            "note": "This variant is for Glowing Bitter Coast.",
+            "requires": [{"name": "Glowing Bitter Coast (mod)", "nexus_id": 47946}]
+          }
+        }
+      },
     {
       "name": "Wares Ultimate",
       "nexus_id": 52013,

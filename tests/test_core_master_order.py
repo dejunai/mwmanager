@@ -182,10 +182,8 @@ class PriorityList(unittest.TestCase):
 
 class SortPlacesIt(unittest.TestCase):
     def test_shipped_rules_do_not_contain_install_specific_master_order(self):
-        import mwmanager as m
-        rules = m.parse_rules(str(ROOT / "mwmanager_rules.txt"))[0]
-        self.assertEqual(rules, [])
-        self.assertNotIn(PFP, (ROOT / "mwmanager_rules.txt").read_text(encoding="cp1252"))
+        # no rules are shipped: the file is each install's own, and a rollback sets it aside
+        self.assertIn("mwmanager_rules.txt", (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines())
 
 
 class LongRunningCaches(unittest.TestCase):

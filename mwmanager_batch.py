@@ -428,6 +428,20 @@ def file_sha256(path: str | os.PathLike) -> str | None:
         return None
 
 
+def option_answer_fingerprint(path: str | os.PathLike) -> str | None:
+    """Ignore the save timestamp when deciding whether option choices changed."""
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError(f"Invalid option answer file: {path}")
+    choices = {key: value for key, value in data.items() if key != "updated"}
+    return hashlib.sha256(
+        json.dumps(choices, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 @dataclass
 class BatchUnit:
     package_id: str
@@ -449,7 +463,7 @@ def run_threaded_batch(
     progress: Callable[[str], None],
     max_discovery_depth: int = MAX_DISCOVERY_DEPTH,
 ) -> list[BatchUnit]:
-    """Run extraction ahead, serialize option selection, and apply answered packages concurrently."""
+    """Run extraction ahead and coordinate option selection with the apply worker."""
     notifications: queue.Queue[tuple] = queue.Queue()
     tidy_queue: queue.Queue[tuple | None] = queue.Queue()
     errors: queue.Queue[BaseException] = queue.Queue()
@@ -460,11 +474,12 @@ def run_threaded_batch(
     dynamic_waiters: dict[str, threading.Event] = {}
     answered_dynamic: set[str] = set()
     cancel_check = getattr(progress, "check_cancelled", None)
+    stopping = threading.Event()
 
     def checkpoint() -> None:
         if cancel_check:
             cancel_check()
-        if coordinator.cancel_requested:
+        if stopping.is_set() or coordinator.cancel_requested:
             raise RuntimeError("Batch cancellation was requested.")
 
     def extract_worker() -> None:
@@ -475,19 +490,21 @@ def run_threaded_batch(
                 coordinator.transition(package_id, "EXTRACTING", worker_slot="extract")
                 progress(f"Preparing archive {index} of {len(items)}: {item.get('name', package_id)}")
                 unit = extract(item, index)
+                checkpoint()
                 if unit.package_id != package_id:
                     raise RuntimeError(f"Extractor returned the wrong package: {unit.package_id}")
                 staged[package_id] = unit
                 result.append(unit)
+                config_hash = config_fingerprint(unit)
                 coordinator.transition(
                     package_id, "EXTRACTED", worker_slot="extract",
                     staging_path=str(unit.path.resolve()),
-                    archive_sha256=config_fingerprint(unit),
+                    archive_sha256=config_hash,
                 )
                 coordinator.discover_fomod(
                     package_id,
                     installer_path=str(unit.path),
-                    config_hash=config_fingerprint(unit),
+                    config_hash=config_hash,
                     option_records={"kind": "initial", "context": unit.context},
                     source="batch_extraction",
                     priority=index * 10,
@@ -516,9 +533,11 @@ def run_threaded_batch(
             if unit is None:
                 return
             try:
+                checkpoint()
                 coordinator.transition(unit.package_id, "TIDY_PLANNING", worker_slot="tidy")
                 coordinator.transition(unit.package_id, "TIDY_APPLYING", worker_slot="tidy")
                 apply(unit)
+                checkpoint()
                 coordinator.transition(unit.package_id, "TIDY_COMPLETE", worker_slot="tidy")
 
                 blocked = False
@@ -556,14 +575,15 @@ def run_threaded_batch(
                     coordinator.transition(unit.package_id, "TIDY_PLANNING", worker_slot="tidy")
                     coordinator.transition(unit.package_id, "TIDY_APPLYING", worker_slot="tidy")
                     apply(unit)
+                    checkpoint()
                     coordinator.transition(unit.package_id, "TIDY_COMPLETE", worker_slot="tidy")
                 else:
                     raise RuntimeError(f"{unit.path.name}: nested FOMOD discovery did not stabilize.")
                 if blocked:
                     continue
 
-                coordinator.transition(unit.package_id, "READY_FOR_DEPLOYMENT", worker_slot="tidy")
                 on_ready(unit)
+                coordinator.transition(unit.package_id, "READY_FOR_DEPLOYMENT", worker_slot="tidy")
                 finished.add(unit.package_id)
                 notifications.put(("package_done", unit.package_id))
             except BaseException as exc:
@@ -574,6 +594,8 @@ def run_threaded_batch(
                 package_errors.append(f"{unit.path.name}: {exc}")
                 finished.add(unit.package_id)
                 notifications.put(("package_error", unit.package_id))
+                if stopping.is_set() or coordinator.cancel_requested:
+                    return
 
     extraction_thread = threading.Thread(
         target=extract_worker, name="MWManager batch extract", daemon=True)
@@ -645,10 +667,15 @@ def run_threaded_batch(
         coordinator.cancel()
         raise
     finally:
+        stopping.set()
         tidy_queue.put(None)
-        extraction_thread.join(timeout=5)
-        tidy_thread.join(timeout=5)
+        extraction_thread.join()
+        tidy_thread.join()
 
+    try:
+        raise errors.get_nowait()
+    except queue.Empty:
+        pass
     if package_errors:
         raise RuntimeError(
             "Major-master batch finished with package errors:\n" + "\n".join(package_errors))

@@ -506,6 +506,55 @@ class GuiProbes(unittest.TestCase):
     def capture_worker(self, title, description, worker, complete):
         self.job = (title, worker, complete)
 
+    def test_threaded_stage_extracts_real_archives_and_serializes_shared_journal_steps(self):
+        root = self.g.APP_DIR
+        downloads = root / "downloads"
+        downloads.mkdir(exist_ok=True)
+        archives = []
+        for name in ("A", "B"):
+            archive = downloads / f"{name}.zip"
+            with zipfile.ZipFile(archive, "w") as stream:
+                stream.writestr(f"{name}.esm", esm())
+                stream.writestr(f"Textures/{name}.dds", b"texture")
+            archives.append({"archive": str(archive), "core_masters": [f"{name}.esm"],
+                             "sha256": ca._sha256(archive), "member_count": 2})
+        self.app.major_masters = ["A.esm", "B.esm"]
+        self.app.settings["archive_downloads_dir"] = str(downloads)
+        self.app._run_progress_job = self.capture_worker
+        active = []
+        lock = threading.Lock()
+        calls = []
+
+        def tidy(_py, _staging, _data, _progress, label, **kwargs):
+            with lock:
+                self.assertFalse(active, f"shared journal steps overlap: {active} and {label}")
+                active.append(label)
+            try:
+                time.sleep(0.03)
+                calls.append((label, kwargs.get("ask_only", False)))
+            finally:
+                with lock:
+                    active.remove(label)
+
+        def progress(_message):
+            pass
+
+        with mock.patch("core_addons.review_core_master_install", return_value=["A.esm", "B.esm"]), \
+                mock.patch.object(self.g, "run_tidy_steps", side_effect=tidy), \
+                mock.patch("major_master_deploy.count_bsa_eligible", return_value=0):
+            self.app.stage_major_masters(force_scan=True)
+            self.assertEqual(self.job[0], "Scanning major-master downloads")
+            self.job[2]({"archives": archives}, None)
+            self.assertEqual(self.job[0], "Staging major masters")
+            destinations = self.job[1](progress)
+        self.assertEqual(len(destinations), 2)
+        for master in ("A.esm", "B.esm"):
+            self.assertTrue(any((path / master).is_file() for path in destinations))
+        self.assertEqual(self.app._unfinished_master_stages(["A.esm", "B.esm"]), [])
+        self.assertTrue(any(ask_only for _label, ask_only in calls))
+        self.assertTrue(any(not ask_only for _label, ask_only in calls))
+        self.assertFalse((Path(self.app.settings["game_dir"]) / "Data Files" / "A.esm").exists())
+
     def test_startup_resumes_waiting_option_queue_without_opening_major_masters(self):
         outputs = self.g.APP_DIR / "outputs"
         outputs.mkdir(parents=True, exist_ok=True)

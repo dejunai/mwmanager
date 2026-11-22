@@ -71,9 +71,20 @@ setup** after a pause; optional community masters can also be explicitly skipped
   masters and asks about loose assets before running preflight, then deploys only that selection in the
   configured priority order. Shared-package assets may serve more than one selected master.
 - **Queued major-master staging:** archive extraction runs ahead of the option queue while answered packages
-  enter Tidy/apply in parallel. FOMOD dialogs stay serialized; installers discovered after option activation
+  enter the Tidy/apply worker. Option and Tidy subprocesses are serialized because they share journals;
+  archive extraction continues in parallel. Installers discovered after option activation
   are persisted and presented next without interrupting the active dialog. Per-package stages, option answers,
-  and the batch manifest recover independently after a stop or crash.
+  and the batch manifest recover independently after a stop or crash. Cancellation waits for both workers
+  to stop before releasing the mutation lock. Rescans compare option choices, not their save timestamps.
+- **Option requirements:** the selector lists plugin masters and curated asset-only patch dependencies before
+  their descriptions. Curated informational requirements do not themselves queue or block an installation.
+  An unverified Nexus ID is shown as unknown until the user picks a source.
+  <!-- REMOVE BEFORE SHIPPING: developer-only option editor documentation. -->
+  Developers can set `[Dev] edit_option_requirements = true` in `mwmanager.ini` to edit a displayed Nexus ID
+  or add an informational requirement for any shown option. Edits are saved per package and option in
+  `outputs/mwmanager_option_requirement_overrides.json` and appear immediately in the details pane.
+  `[Dev] edit_option_insights = true` enables an Insights button that saves option-specific text directly to
+  `mock_fomod_notes.json`; closing the editor saves and refreshes the description.
 - **Legacy staging:** stages created before processing-complete records existed must pass Reopen staged
   options once before deployment. This prevents an interrupted extraction from being mistaken for a
   fully processed package just because its ESM exists.

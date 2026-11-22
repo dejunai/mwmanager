@@ -70,3 +70,6 @@ venv/
 
 # Run lock held by the vendored tools
 mwdialog.lock
+
+# Tamriel Data's rename map: kept locally, not redistributed
+tools/Translation.txt

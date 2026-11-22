@@ -42,6 +42,90 @@ class MaintainerNotesTests(unittest.TestCase):
             self.assertEqual(mock_fomod._maintainer_notes({"path": renamed / "x", "label": "x", "mod_dir": renamed}),
                              "Not this one.")
 
+    # REMOVE BEFORE SHIPPING: developer insight authoring tests; keep reader coverage.
+    def test_authored_insight_is_exact_editable_and_preserves_curated_notes(self):
+        item = self.item(self.plugin, "02 Resource ESPs\\Res.esp")
+        original = self.notes.read_text(encoding="utf-8")
+        mock_fomod._save_insight(item, "First line.\nSecond line.")
+        note = mock_fomod._maintainer_notes(item)
+        self.assertIn("Modder's resource.", note)
+        self.assertIn("Whole package note.", note)
+        self.assertIn("First line.\nSecond line.", note)
+        self.assertEqual(json.loads(self.notes.read_text(encoding="utf-8"))["mods"],
+                         json.loads(original)["mods"])
+        sibling = {**item, "key": "another-key"}
+        self.assertNotIn("First line.", mock_fomod._maintainer_notes(sibling))
+        other_pack = {**item, "mod_dir": self.mod.with_name("Some Pack 123 1.0 [2]")}
+        self.assertNotIn("First line.", mock_fomod._maintainer_notes(other_pack))
+        mock_fomod._save_insight(item, "Updated insight.")
+        self.assertIn("Updated insight.", mock_fomod._maintainer_notes(item))
+        self.assertNotIn("First line.", mock_fomod._maintainer_notes(item))
+        self.assertEqual(len(json.loads(self.notes.read_text(encoding="utf-8"))["insights"]), 1)
+        mock_fomod._save_insight(item, "")
+        self.assertNotIn("Updated insight.", mock_fomod._maintainer_notes(item))
+
+    def test_authored_insight_does_not_overwrite_invalid_notes(self):
+        self.notes.write_text("{ broken", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            mock_fomod._save_insight(self.item(self.plugin, "Patch"), "Insight")
+        self.assertEqual(self.notes.read_text(encoding="utf-8"), "{ broken")
+
+    def test_authored_insight_updates_compact_json_without_rewriting_other_fields(self):
+        self.notes.write_text('{"mods":[],"other":{"insights":"keep"},"insights":[]}', encoding="utf-8")
+        item = self.item(self.plugin, "Patch")
+        mock_fomod._save_insight(item, "New insight.")
+        data = json.loads(self.notes.read_text(encoding="utf-8"))
+        self.assertEqual(data["other"], {"insights": "keep"})
+        self.assertEqual(data["insights"][0]["note"], "New insight.")
+        mock_fomod._save_insight(item, "Edited insight.")
+        self.assertEqual(mock_fomod._maintainer_notes(item), "Edited insight.")
+
+    def test_insight_button_saves_on_window_close_and_refreshes(self):
+        import tkinter as tk
+        from tkinter import ttk
+
+        self.mod.mkdir()
+        item = {"key": "fomod:0:0:0", "label": "Patch", "path": self.mod, "mod_dir": self.mod,
+                "number": 1, "required": False, "targets": [], "compatible": [],
+                "missing_masters": [], "docs": "", "fomod_description": "Original description."}
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                yield child
+                yield from walk(child)
+
+        def interact(root):
+            def button(text):
+                return next(w for w in walk(root) if isinstance(w, ttk.Button) and w.cget("text") == text)
+
+            button("Insights…").invoke()
+            dialog = next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel))
+            editor = next(w for w in walk(dialog) if isinstance(w, tk.Text))
+            editor.insert("1.0", "An added insight.")
+            dialog.tk.call(dialog.protocol("WM_DELETE_WINDOW"))
+            details = [w.get("1.0", "end") for w in walk(root) if isinstance(w, tk.Text)]
+            self.assertTrue(any("Original description." in text and "An added insight." in text for text in details))
+            button("Insights…").invoke()
+            dialog = next(w for w in root.winfo_children() if isinstance(w, tk.Toplevel))
+            editor = next(w for w in walk(dialog) if isinstance(w, tk.Text))
+            self.assertEqual(editor.get("1.0", "end-1c"), "An added insight.")
+            editor.delete("1.0", "end")
+            editor.insert("1.0", "Edited insight.")
+            button("Save and close").invoke()
+            details = [w.get("1.0", "end") for w in walk(root) if isinstance(w, tk.Text)]
+            self.assertTrue(any("Edited insight." in text and "An added insight." not in text for text in details))
+            button("Apply selected options").invoke()
+
+        with mock.patch.object(mock_fomod, "_dev_insight_editor_enabled", return_value=True), \
+                mock.patch.object(mock_fomod, "_dev_requirement_editor_enabled", return_value=False), \
+                mock.patch.object(tk.Tk, "mainloop", interact), \
+                mock.patch.object(mock_fomod, "_nexus_page_url", return_value=""):
+            try:
+                mock_fomod._show_selector("Some Pack", [item], set(), set())
+            except tk.TclError as exc:
+                self.skipTest(f"Tk unavailable: {exc}")
+        self.assertIn("Edited insight.", mock_fomod._maintainer_notes(item))
+
     def test_the_shipped_notes_file_is_valid(self):
         data = json.loads((Path(__file__).resolve().parents[1] / "mock_fomod_notes.json").read_text(encoding="utf-8"))
         for mod in data["mods"]:
@@ -50,6 +134,10 @@ class MaintainerNotesTests(unittest.TestCase):
                 if isinstance(value, dict):
                     self.assertTrue(isinstance(value.get("note"), str) and value["note"])
                     self.assertTrue(isinstance(value.get("needs", []), list))
+                    for requirement in value.get("requires", []):
+                        self.assertTrue(isinstance(requirement.get("name"), str) and requirement["name"])
+                        nexus_id = requirement.get("nexus_id")
+                        self.assertTrue(nexus_id is None or isinstance(nexus_id, int) and nexus_id > 0)
                 else:
                     self.assertTrue(isinstance(value, str) and value)
 

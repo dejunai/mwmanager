@@ -235,16 +235,18 @@ def resolve_requirement(need: str, index: dict[str, list[str]], downloads=None, 
             "archive": archive}
 
 
-def requirement_sources(needs, manager_dir: Path) -> list[dict]:
-    """Each need's source: the user's pick, else the shipped table, else the cache, else worked out from the archive
-    index (and cached when a Nexus id was found)."""
+def requirement_sources(needs, manager_dir: Path, curated=None) -> list[dict]:
+    """Resolve sources: user pick, curated option, shipped table, cache, then archive index."""
     cache_path = Path(manager_dir) / "outputs" / REQUIRES_CACHE
     cache = _read_json(cache_path)
-    tables = (cache.get("overrides") or {}, _read_json(REQUIRES_FILE).get("plugins") or {}, cache.get("plugins") or {})
+    curated = curated or {}
+    tables = (cache.get("overrides") or {}, curated, _read_json(REQUIRES_FILE).get("plugins") or {},
+              cache.get("plugins") or {})
     index, out, learned = None, [], False
     for need in needs:
         entry = next((table[need.casefold()] for table in tables
-                      if isinstance(table.get(need.casefold()), dict) and table[need.casefold()].get("nexus_id")), None)
+                      if isinstance(table.get(need.casefold()), dict)
+                      and (table is curated or table[need.casefold()].get("nexus_id"))), None)
         if entry is None:
             index = _cached_index(manager_dir) if index is None else index
             entry = resolve_requirement(need, index)

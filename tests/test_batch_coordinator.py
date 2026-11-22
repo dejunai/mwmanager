@@ -242,6 +242,120 @@ class BatchCoordinatorTests(unittest.TestCase):
         self.assertEqual(self.coordinator.package("A")["phase"], "BLOCKED_USER_ACTION")
         self.assertEqual(self.coordinator.package("B")["phase"], "READY_FOR_DEPLOYMENT")
 
+    def test_readiness_failure_does_not_leave_package_ready_for_deployment(self):
+        with self.assertRaisesRegex(RuntimeError, "readiness write failed"):
+            batch.run_threaded_batch(
+                self.coordinator, [{"id": "A"}],
+                extract=lambda item, _index: batch.BatchUnit(item["id"], self.root, {}),
+                prepare_options=lambda _unit, _reopen: None,
+                apply=lambda _unit: None,
+                fingerprint=lambda _unit: None,
+                config_fingerprint=lambda _unit: "config",
+                reset_after_option_change=lambda _unit: None,
+                on_ready=lambda _unit: (_ for _ in ()).throw(OSError("readiness write failed")),
+                progress=lambda _message: None,
+            )
+        self.assertEqual(self.coordinator.package("A")["phase"], "FAILED_RETRYABLE")
+        self.assertTrue(self.coordinator.path.is_file())
+
+    def test_cancellation_waits_for_extraction_to_stop_before_returning(self):
+        extracting = threading.Event()
+        release = threading.Event()
+        stopped = threading.Event()
+        outcome = {}
+
+        def extract(item, _index):
+            extracting.set()
+            release.wait(10)
+            stopped.set()
+            return batch.BatchUnit(item["id"], self.root, {})
+
+        def run():
+            try:
+                batch.run_threaded_batch(
+                    self.coordinator, [{"id": "A"}], extract=extract,
+                    prepare_options=lambda _unit, _reopen: None,
+                    apply=lambda _unit: None,
+                    fingerprint=lambda _unit: None,
+                    config_fingerprint=lambda _unit: "config",
+                    reset_after_option_change=lambda _unit: None,
+                    on_ready=lambda _unit: None,
+                    progress=lambda _message: None,
+                )
+            except RuntimeError as exc:
+                outcome["error"] = str(exc)
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        try:
+            self.assertTrue(extracting.wait(2))
+            self.coordinator.cancel()
+            worker.join(5.2)
+            self.assertTrue(worker.is_alive(), "batch returned while extraction could still mutate files")
+        finally:
+            release.set()
+            worker.join(3)
+        self.assertFalse(worker.is_alive())
+        self.assertTrue(stopped.is_set())
+        self.assertIn("cancellation", outcome.get("error", ""))
+        self.assertNotEqual(self.coordinator.package("A")["phase"], "READY_FOR_DEPLOYMENT")
+
+    def test_cancellation_during_apply_does_not_apply_queued_packages(self):
+        applying = threading.Event()
+        release = threading.Event()
+        applied = []
+
+        def apply(unit):
+            applied.append(unit.package_id)
+            applying.set()
+            release.wait(5)
+
+        outcome = {}
+
+        def run():
+            try:
+                batch.run_threaded_batch(
+                    self.coordinator, [{"id": "A"}, {"id": "B"}],
+                    extract=lambda item, _index: batch.BatchUnit(item["id"], self.root, {}),
+                    prepare_options=lambda _unit, _reopen: None,
+                    apply=apply,
+                    fingerprint=lambda _unit: None,
+                    config_fingerprint=lambda unit: unit.package_id,
+                    reset_after_option_change=lambda _unit: None,
+                    on_ready=lambda _unit: None,
+                    progress=lambda _message: None,
+                )
+            except RuntimeError as exc:
+                outcome["error"] = str(exc)
+
+        worker = threading.Thread(target=run)
+        worker.start()
+        try:
+            self.assertTrue(applying.wait(2))
+            self.coordinator.cancel()
+        finally:
+            release.set()
+            worker.join(3)
+        self.assertFalse(worker.is_alive())
+        self.assertEqual(applied, ["A"])
+        self.assertIn("cancellation", outcome.get("error", ""))
+
+    def test_answer_fingerprint_ignores_timestamp_but_detects_changed_choices(self):
+        path = self.root / "answer.json"
+        self.assertIsNone(batch.option_answer_fingerprint(path))
+        answer = {"selected": ["core"], "answered_groups": ["base"], "updated": "first"}
+        path.write_text(json.dumps(answer), encoding="utf-8")
+        original = batch.option_answer_fingerprint(path)
+        answer["updated"] = "later"
+        path.write_text(json.dumps(answer), encoding="utf-8")
+        self.assertEqual(batch.option_answer_fingerprint(path), original)
+        answer["selected"].append("patch")
+        path.write_text(json.dumps(answer), encoding="utf-8")
+        self.assertNotEqual(batch.option_answer_fingerprint(path), original)
+        path.write_text("{broken", encoding="utf-8")
+        with self.assertRaises(ValueError):
+            batch.option_answer_fingerprint(path)
+
 
 if __name__ == "__main__":
     unittest.main()

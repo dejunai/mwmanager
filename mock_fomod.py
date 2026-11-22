@@ -541,6 +541,12 @@ def _option_dirs(mod_dir: Path) -> list[Path]:
         nested_option_dirs = [p for p in _safe_rglob(folder) if p.is_dir() and OPTION_RE.match(p.name)]
         if nested_option_dirs:
             continue
+        children = [p for p in folder.iterdir() if p.is_dir() and p.name.casefold() not in ignored]
+        if (len(children) > 1 and not any(p.name.casefold() in GAME_DIRS | {"data files"} for p in children)
+                and not any(p.is_file() and p.suffix.casefold() in payload_suffixes for p in folder.iterdir())
+                and sum(any(p.is_file() and p.suffix.casefold() in payload_suffixes for p in _safe_rglob(child))
+                        for child in children) > 1):
+            continue
         if any(p.is_file() and p.suffix.casefold() in payload_suffixes for p in _safe_rglob(folder)):
             found.append(folder)
     return sorted(set(found), key=lambda p: (len(p.parts), str(p).casefold()))
@@ -1321,6 +1327,12 @@ def _maintainer_needs(item: dict) -> list[str]:
                               for name in entry.get("needs", [])))
 
 
+def _maintainer_requirements(item: dict) -> list[dict]:
+    """Documented option dependencies that should be displayed without changing install order."""
+    return [requirement for entry in _maintainer_entries(item) if isinstance(entry, dict)
+            for requirement in entry.get("requires", [])]
+
+
 def _mark_maintainer_needs(records: list[dict], installed: set[str]) -> None:
     """An option whose notes name a plugin it needs that isn't installed waits for it, like a missing master: the
     batch holds it and looks for that mod's archive."""
@@ -1364,13 +1376,101 @@ def _option_requirements(record: dict, own: set[str]) -> list[str]:
     return [names[key] for key in sorted(names) if key not in BASE_GAME_MASTERS and key not in own]
 
 
+# REMOVE BEFORE SHIPPING: developer-only per-option requirement overrides.
+OPTION_REQUIREMENT_OVERRIDES = "mwmanager_option_requirement_overrides.json"
+
+
+def _option_requirement_key(item: dict, mod_dir: Path) -> str:
+    """Keep local edits specific to this package and option, including the FOMOD label."""
+    return json.dumps([mod_dir.name.casefold(), str(item["key"]).casefold(),
+                       str(item.get("label", "")).casefold()], ensure_ascii=False)
+
+
+def _read_option_requirement_overrides(manager_dir: Path) -> dict:
+    path = manager_dir / "outputs" / OPTION_REQUIREMENT_OVERRIDES
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(f"{path} must contain a JSON object")
+    return data
+
+
+def _set_option_requirement(item: dict, mod_dir: Path, manager_dir: Path, name: str,
+                            nexus_id: int, archive: str = "") -> None:
+    name = name.strip()
+    if not name or not isinstance(nexus_id, int) or nexus_id <= 0:
+        raise ValueError("A requirement name and positive Nexus ID are required.")
+    data = _read_option_requirement_overrides(manager_dir)
+    key = _option_requirement_key(item, mod_dir)
+    entries = data.setdefault(key, {})
+    if not isinstance(entries, dict):
+        raise ValueError("Invalid saved requirements for this option.")
+    entries[name.casefold()] = {"name": name, "nexus_id": nexus_id, "archive": archive}
+    _save_journal(manager_dir / "outputs" / OPTION_REQUIREMENT_OVERRIDES, data)
+
+
+# REMOVE BEFORE SHIPPING: developer-only requirement and insight editor settings.
+def _dev_option_enabled(setting: str) -> bool:
+    ini = configparser.ConfigParser(interpolation=None)
+    try:
+        ini.read(Path(__file__).with_name("mwmanager.ini"), encoding="utf-8")
+        return ini.getboolean("Dev", setting, fallback=False)
+    except (configparser.Error, ValueError, OSError) as exc:
+        print(f"Could not read development setting {setting}: {exc}", flush=True)
+        return False
+
+
+def _dev_requirement_editor_enabled() -> bool:
+    return _dev_option_enabled("edit_option_requirements")
+
+
+def _dev_insight_editor_enabled() -> bool:
+    return _dev_option_enabled("edit_option_insights")
+
+
 def _attach_requires(records: list[dict], mod_dir: Path, manager_dir: Path) -> None:
     """Each record's "requires": [{"name", "nexus_id", "archive"}], shown first in its description."""
     from needed_mods import requirement_sources
     own = {path.name.casefold() for path in _safe_rglob(mod_dir) if path.suffix.casefold() in PLUGIN_EXTS}
+    # REMOVE BEFORE SHIPPING: load developer-only per-option requirement overrides.
+    try:
+        option_overrides = _read_option_requirement_overrides(manager_dir)
+    except (OSError, ValueError) as exc:
+        print(f"Could not read option requirement overrides: {exc}", flush=True)
+        option_overrides = {}
     for record in records:
         try:
-            record["requires"] = requirement_sources(_option_requirements(record, own), manager_dir)
+            needs = _option_requirements(record, own)
+            known = {name.casefold() for name in needs}
+            curated = {}
+            for requirement in _maintainer_requirements(record):
+                name = requirement["name"]
+                key = name.casefold()
+                if key in BASE_GAME_MASTERS or key in own:
+                    continue
+                curated[key] = requirement
+                if key not in known:
+                    needs.append(name)
+                    known.add(key)
+            requirements = requirement_sources(needs, manager_dir, curated)
+            # REMOVE BEFORE SHIPPING: apply developer-only per-option requirement overrides.
+            manual = option_overrides.get(_option_requirement_key(record, mod_dir), {})
+            if not isinstance(manual, dict):
+                raise ValueError("Invalid saved requirements for this option.")
+            for entry in manual.values():
+                if not isinstance(entry, dict) or not isinstance(entry.get("name"), str) \
+                        or not isinstance(entry.get("nexus_id"), int) or entry["nexus_id"] <= 0:
+                    raise ValueError("Invalid saved requirement.")
+                replacement = {**entry, "option_override": True}
+                index = next((i for i, existing in enumerate(requirements)
+                              if existing["name"].casefold() == entry["name"].casefold()), None)
+                if index is None:
+                    requirements.append(replacement)
+                else:
+                    requirements[index] = replacement
+            record["requires"] = requirements
         except Exception as exc:              # a description line: never stop the options over it
             print(f"  {mod_dir.name}: could not work out what '{record.get('label')}' requires: {exc}", flush=True)
             record["requires"] = []
@@ -1382,10 +1482,96 @@ def _requires_line(requirement: dict) -> str:
     return f"Requires: {requirement['name']}, {nexus}"
 
 
+def _insight_identity(item: dict) -> tuple[str, str, str]:
+    mod_dir = Path(item.get("mod_dir") or item["path"])
+    return (mod_dir.name.casefold(), str(item.get("key", "")).replace("\\", "/").casefold(),
+            str(item.get("label", "")).casefold())
+
+
+def _saved_insight(insights: list, item: dict) -> str:
+    identity = _insight_identity(item)
+    for entry in insights:
+        if isinstance(entry, dict) and (
+            str(entry.get("package", "")).casefold(),
+            str(entry.get("key", "")).replace("\\", "/").casefold(),
+            str(entry.get("label", "")).casefold(),
+        ) == identity:
+            return str(entry.get("note", ""))
+    return ""
+
+
+# REMOVE BEFORE SHIPPING: helper for developer-only insight authoring.
+def _json_top_level_value_span(text: str, name: str) -> tuple[int, int]:
+    decoder = json.JSONDecoder()
+    position = text.index("{") + 1
+    while True:
+        position += len(text[position:]) - len(text[position:].lstrip())
+        key, position = decoder.raw_decode(text, position)
+        position += len(text[position:]) - len(text[position:].lstrip())
+        if text[position] != ":":
+            raise ValueError("Invalid notes JSON.")
+        start = position + 1
+        start += len(text[start:]) - len(text[start:].lstrip())
+        _, end = decoder.raw_decode(text, start)
+        if key == name:
+            return start, end
+        position = end
+        position += len(text[position:]) - len(text[position:].lstrip())
+        if text[position] != ",":
+            raise ValueError(f"Cannot locate {name} in the notes file.")
+        position += 1
+
+
+# REMOVE BEFORE SHIPPING: developer-only authoring; keep the saved insight reader.
+def _save_insight(item: dict, note: str) -> None:
+    """Update only the authored insights section, preserving existing curated notes and formatting."""
+    text = MAINTAINER_NOTES.read_text(encoding="utf-8")
+    data = json.loads(text)
+    if not isinstance(data, dict) or not isinstance(data.get("mods"), list):
+        raise ValueError("The notes file must contain a mods list.")
+    insights = data.get("insights", [])
+    if not isinstance(insights, list):
+        raise ValueError("The insights section must be a list.")
+    note = note.strip()
+    if note == _saved_insight(insights, item):
+        return
+    identity = _insight_identity(item)
+    remaining = [entry for entry in insights if not isinstance(entry, dict) or (
+        str(entry.get("package", "")).casefold(),
+        str(entry.get("key", "")).replace("\\", "/").casefold(),
+        str(entry.get("label", "")).casefold(),
+    ) != identity]
+    if note:
+        remaining.append({"package": Path(item.get("mod_dir") or item["path"]).name,
+                          "key": str(item["key"]).replace("\\", "/"),
+                          "label": str(item.get("label", "")), "note": note})
+    if remaining == insights:
+        return
+    formatted = json.dumps(remaining, indent=2, ensure_ascii=False).replace("\n", "\n  ")
+    if "insights" in data:
+        start, end = _json_top_level_value_span(text, "insights")
+        updated = text[:start] + formatted + text[end:]
+    else:
+        opening = text.index("{") + 1
+        updated = text[:opening] + '\n  "insights": ' + formatted + "," + text[opening:]
+    json.loads(updated)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=MAINTAINER_NOTES.parent,
+                                         prefix=".mwmanager-insight-", suffix=".tmp", delete=False) as temp:
+            temp_path = Path(temp.name)
+            temp.write(updated)
+        os.replace(temp_path, MAINTAINER_NOTES)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
+
+
 def _maintainer_entries(item: dict) -> list:
     """The mock_fomod_notes.json values (a note, or {"note", "needs"}) that match this option."""
     try:
-        mods = json.loads(MAINTAINER_NOTES.read_text(encoding="utf-8")).get("mods", [])
+        data = json.loads(MAINTAINER_NOTES.read_text(encoding="utf-8"))
+        mods = data.get("mods", [])
     except (OSError, ValueError):
         return ""
     mod_dir = Path(item.get("mod_dir") or item["path"])
@@ -1410,6 +1596,13 @@ def _maintainer_entries(item: dict) -> list:
             pattern = pattern.replace("\\", "/").casefold()
             if any(fnmatch.fnmatch(name, pattern) for name in names):
                 entries.append(value)
+    insights = data.get("insights", [])
+    if not isinstance(insights, list):
+        print(f"Invalid insights section in {MAINTAINER_NOTES}: expected a list.", flush=True)
+        insights = []
+    insight = _saved_insight(insights, item)
+    if insight:
+        entries.append(insight)
     return entries
 
 
@@ -1736,6 +1929,9 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         print(f"Tk option window unavailable ({exc}); option selection was left unchanged.")
         return None
     root.title(f"MWManager options — {mod_name}")
+    # REMOVE BEFORE SHIPPING: developer-only requirement and insight editor controls.
+    edit_requirements = _dev_requirement_editor_enabled()
+    edit_insights = _dev_insight_editor_enabled()
     from mwmanager_theme import COLORS, apply_theme
     apply_theme(root)
     screen_width, screen_height = root.winfo_screenwidth(), root.winfo_screenheight()
@@ -2021,20 +2217,27 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
 
         window.protocol("WM_DELETE_WINDOW", close_image_window)
 
-    def change_requirement(item, requirement):
-        """Pick the download (or type the Nexus id) of the mod that really supplies this requirement."""
-        from needed_mods import archive_choices, set_requirement_source
+    # REMOVE BEFORE SHIPPING: developer-only requirement editor dialog.
+    def change_requirement(item, requirement=None):
+        """Pick a source or enter a requirement and its Nexus ID for this option."""
+        from needed_mods import archive_choices
         manager = Path(item["requires_manager"])
         choices = archive_choices(manager)
         window = tk.Toplevel(root)
-        window.title(f"Which mod supplies {requirement['name']}?")
+        window.title(f"Which mod supplies {requirement['name']}?" if requirement else "Add option requirement")
         window.transient(root)
         frame = ttk.Frame(window, padding=12)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, wraplength=560, text=(
-            f"{_requires_line(requirement)}. If that is the wrong mod, pick the download that supplies "
-            f"{requirement['name']}, or type its Nexus ID. The choice is kept for every option that needs it.")
-                  ).pack(fill="x", pady=(0, 8))
+            "Choose a download or enter a Nexus ID. This edit applies only to this package and option; "
+            "a newly added requirement is informational and does not block or queue installation."
+        )).pack(fill="x", pady=(0, 8))
+        name = tk.StringVar(value=requirement["name"] if requirement else "")
+        if not requirement:
+            name_row = ttk.Frame(frame)
+            name_row.pack(fill="x", pady=(0, 6))
+            ttk.Label(name_row, text="Required plugin or mod:").pack(side="left")
+            ttk.Entry(name_row, textvariable=name).pack(side="left", fill="x", expand=True, padx=6)
         query = tk.StringVar()
         ttk.Entry(frame, textvariable=query).pack(fill="x")
         listing = tk.Listbox(frame, height=16, width=96, exportselection=False)
@@ -2049,7 +2252,8 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
                 listing.insert("end", f"{name}   (Nexus {mod_id or '?'})")
 
         query.trace_add("write", refill)
-        query.set(re.split(r"[^A-Za-z0-9]+", requirement["name"].removesuffix(" (mod)"))[0])
+        query.set(re.split(r"[^A-Za-z0-9]+", requirement["name"].removesuffix(" (mod)"))[0]
+                  if requirement else "")
         typed_row = ttk.Frame(frame)
         typed_row.pack(fill="x")
         ttk.Label(typed_row, text="Or Nexus ID:").pack(side="left")
@@ -2059,18 +2263,30 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         def use():
             picked = listing.curselection()
             archive, mod_id = shown[picked[0]] if picked else ("", None)
-            if typed.get().strip().isdigit():
-                mod_id = int(typed.get().strip())
+            typed_id = typed.get().strip()
+            if typed_id and (not typed_id.isascii() or not typed_id.isdigit() or int(typed_id) <= 0):
+                messagebox.showerror("Invalid Nexus ID", "Enter a positive numeric Nexus ID.", parent=window)
+                return
+            if typed_id:
+                entered = int(typed_id)
+                if mod_id != entered:
+                    archive = ""
+                mod_id = entered
+            if not name.get().strip():
+                messagebox.showinfo("Requirement name needed", "Enter the required plugin or mod name.",
+                                    parent=window)
+                return
             if not mod_id:
                 messagebox.showinfo("Nothing picked", "Pick a download with a Nexus ID, or type the ID.",
                                     parent=window)
                 return
-            entry = set_requirement_source(requirement["name"], archive, mod_id, manager)
-            for other in records:                       # every option here that needs it
-                for need in other.get("requires") or []:
-                    if need["name"].casefold() == requirement["name"].casefold():
-                        need.update(entry)
-            requirement.update(entry)
+            try:
+                mod_dir = Path(item.get("mod_dir") or item["path"])
+                _set_option_requirement(item, mod_dir, manager, name.get(), mod_id, archive)
+                _attach_requires([item], mod_dir, manager)
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("Could not save requirement", str(exc), parent=window)
+                return
             window.destroy()
             show(item)
 
@@ -2082,6 +2298,48 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         from mwmanager_theme import center
         center(window, root)
         window.grab_set()
+
+    # REMOVE BEFORE SHIPPING: developer-only insight editor dialog.
+    def edit_insight(item):
+        try:
+            data = json.loads(MAINTAINER_NOTES.read_text(encoding="utf-8"))
+            insights = data.get("insights", [])
+            if not isinstance(insights, list):
+                raise ValueError("The insights section must be a list.")
+            current = _saved_insight(insights, item)
+        except (OSError, ValueError, AttributeError) as exc:
+            messagebox.showerror("Could not read insights", str(exc), parent=root)
+            return
+        window = tk.Toplevel(root)
+        window.title("MWManager Insight — " + item["label"])
+        window.transient(root)
+        frame = ttk.Frame(window, padding=12)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, wraplength=500, text=(
+            "Saved to the shipped notes for this package and option. Closing saves; clear the text to remove it."
+        )).pack(fill="x", pady=(0, 6))
+        text = tk.Text(frame, width=65, height=8, wrap="word")
+        text.pack(fill="both", expand=True)
+        text.insert("1.0", current)
+
+        def save():
+            try:
+                _save_insight(item, text.get("1.0", "end-1c"))
+            except (OSError, ValueError) as exc:
+                messagebox.showerror("Could not save insight", str(exc), parent=window)
+                return
+            window.destroy()
+            show(item)
+
+        buttons = ttk.Frame(frame)
+        buttons.pack(fill="x", pady=(8, 0))
+        ttk.Button(buttons, text="Cancel", command=window.destroy).pack(side="right")
+        ttk.Button(buttons, text="Save and close", command=save).pack(side="right", padx=6)
+        window.protocol("WM_DELETE_WINDOW", save)
+        from mwmanager_theme import center
+        center(window, root)
+        window.grab_set()
+        text.focus_set()
 
     def show(item, target=detail):
         if target is detail:
@@ -2100,12 +2358,19 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         target.insert("end", f"{caption} — {item['label']}\n\n")
         for requirement in item.get("requires") or []:
             target.insert("end", _requires_line(requirement))
-            if target is detail and item.get("requires_manager"):
+            # REMOVE BEFORE SHIPPING: developer-only requirement edit buttons.
+            if target is detail and edit_requirements and item.get("requires_manager"):
                 target.insert("end", "  ")
                 target.window_create("end", window=ttk.Button(
                     target, text="Change…", command=lambda r=requirement: change_requirement(item, r)))
             target.insert("end", "\n")
-        if item.get("requires"):
+        # REMOVE BEFORE SHIPPING: developer-only add requirement button.
+        if target is detail and edit_requirements and item.get("requires_manager"):
+            target.window_create("end", window=ttk.Button(
+                target, text="Add requirement…", command=lambda: change_requirement(item)))
+            target.insert("end", "\n")
+        # REMOVE BEFORE SHIPPING: remove the developer-button condition, retaining spacing after requirements.
+        if item.get("requires") or (target is detail and edit_requirements and item.get("requires_manager")):
             target.insert("end", "\n")
         if item.get("informational_utility"):
             target.insert("end", "Optional package: Tamriel Data (HD). This is included as an optional package utility and is not required to deploy the Tamriel Data master.\n\n")
@@ -2148,6 +2413,11 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
             target.insert("end", "No relevant option-specific documentation found.\n\n")
         if note:                                   # last: after the FOMOD, readme and mod-page text
             target.insert("end", "MWManager Insight:\n" + note + "\n\n")
+        # REMOVE BEFORE SHIPPING: developer-only insight editor button.
+        if target is detail and edit_insights:
+            target.window_create("end", window=ttk.Button(
+                target, text="Insights…", command=lambda: edit_insight(item)))
+            target.insert("end", "\n\n")
         status = info_state["status"].get(item["key"])
         if status:
             target.insert("end", status)
