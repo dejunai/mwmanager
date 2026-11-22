@@ -201,23 +201,23 @@
     {
       "Path": "mods/mwpluginpatches/config.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpluginpatches\\config.lua",
-      "SHA256": "12fefa5ab92f3f3174485cc317eb097a3b8cac9a063aa89d3ba55615b52453c1",
-      "Length": 9775,
-      "SourceModified": "2026-11-22T08:04:02"
+      "SHA256": "f13f4fe30fd79a4f7f417306a00fd4efb489a2463f28123d0473ef86cd621354",
+      "Length": 10079,
+      "SourceModified": "2026-11-22T08:57:31"
     },
     {
       "Path": "mods/mwpluginpatches/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpluginpatches\\main.lua",
-      "SHA256": "c4851decafd0d8f0e6fdb57a3f05fdc7a225fa9ab85d504c29a31f6089c0f041",
-      "Length": 4364,
-      "SourceModified": "2026-11-22T08:04:02"
+      "SHA256": "cc521ed176f92c8b9624c76d6eecf1ad38e21d69403add1cc5c7cac7388168cd",
+      "Length": 4561,
+      "SourceModified": "2026-11-22T08:57:31"
     },
     {
       "Path": "mods/mwpluginpatches/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpluginpatches\\mcm.lua",
-      "SHA256": "bc97ea3e64a1ec16f9792b489de04a60e31ca0c986bdb4a7c11a93913f9d52ac",
-      "Length": 20082,
-      "SourceModified": "2026-11-22T08:04:02"
+      "SHA256": "40e8a33cdc2ccf5348ed186de00129fd1796bd40fae71f1fdca91735758ea975",
+      "Length": 20780,
+      "SourceModified": "2026-11-22T08:57:31"
     },
     {
       "Path": "mods/mwpluginpatches/patches/autoStartup.lua",
@@ -330,6 +330,13 @@
       "SHA256": "184bbadb7c443ffd5d031a9a6658f888653906625515e6dbfc72369f1716ec80",
       "Length": 3333,
       "SourceModified": "2026-11-22T08:04:02"
+    },
+    {
+      "Path": "mods/mwpluginpatches/patches/uiExpansionTopics.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpluginpatches\\patches\\uiExpansionTopics.lua",
+      "SHA256": "57428ba67a93eaa1d4fc88009531f549ba3367d7732c3a3ebe5ef828943a9bb5",
+      "Length": 1378,
+      "SourceModified": "2026-11-22T08:57:31"
     },
     {
       "Path": "mods/mwquicktoggle/main.lua",

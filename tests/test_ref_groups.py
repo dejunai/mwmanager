@@ -14,14 +14,17 @@ import mwmanager_upstream  # noqa: E402
 
 class ReferenceGroupFix(unittest.TestCase):
     def test_esm_temporary_reference_is_not_overridden_as_persistent(self):
-        self.flip("Clean_Piran.esp", 1, (0, 1, 1))     # the one plugin allowed to flip an .esm's reference
+        self.flip("Any Plugin.esp", 1, (0, 1, 1))      # nothing flags or names the object: no list of plugins
 
     def test_other_plugins_keep_an_esm_reference_persistent(self):
         """A script finds the object only while the plugin keeps it persistent (huleenBookshelfScript,
         Uvirith_Verena: \"Unable to find referenced object\" and the game quit before the menu)."""
-        self.flip("Uvirith's Legacy_3.53.esp", 0, (1, 0, None))
+        self.flip("Uvirith's Legacy_3.53.esp", 0, (1, 0, None), named=True)
 
-    def flip(self, plugin_name, changed, groups):
+    def test_an_object_flagged_references_persist_stays_persistent(self):
+        self.flip("Clean_Piran.esp", 0, (1, 0, None), flagged=True)
+
+    def flip(self, plugin_name, changed, groups, named=False, flagged=False):
         m = mwmanager_upstream.compose()
         pack = m.pack_sub
 
@@ -48,7 +51,13 @@ class ReferenceGroupFix(unittest.TestCase):
             master = data_dir / "Morrowind.esm"
             plugin = data_dir / plugin_name
             master.write_bytes(header() + record(b"CELL", master_cell))
-            plugin.write_bytes(header(master.name) + record(b"CELL", plugin_cell))
+            extra = b""
+            if named:
+                extra = record(b"SCPT", pack("SCHD", bytes(52)) + pack("SCTX", b'"door_cavern_doors10"->Lock 5'))
+            if flagged:
+                body = pack("NAME", b"door_cavern_doors10\0")
+                extra = b"DOOR" + struct.pack("<III", len(body), 0, 0x400) + body
+            plugin.write_bytes(header(master.name) + extra + record(b"CELL", plugin_cell))
             args = types.SimpleNamespace(data_dir=str(data_dir), fix_log="fix.log", dry_run=False)
 
             def write_inplace(path, data, read_as=None):
