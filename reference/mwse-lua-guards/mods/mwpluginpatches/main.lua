@@ -6,7 +6,6 @@ local ysmirShield = require("mwpluginpatches.patches.ysmirShield")
 local jiubDelay = require("mwpluginpatches.patches.jiubDelay")
 local lostHeirDelay = require("mwpluginpatches.patches.lostHeirDelay")
 local mabrDist = require("mwpluginpatches.patches.mabrDist")
-local noAccidentalTheftBookFix = require("mwpluginpatches.patches.noAccidentalTheftBookFix")
 local caveDripSound = require("mwpluginpatches.patches.caveDripSound")
 local swampSound = require("mwpluginpatches.patches.swampSound")
 local expandedSounds = require("mwpluginpatches.patches.expandedSounds")
@@ -51,11 +50,6 @@ local function onInitialized()
     -- 6. Mabrigash Distribution Popup Suppression
     if config.mabrDistSuppressionEnabled and config.isMabrDistActive() then
         mabrDist.init()
-    end
-
-    -- 7. No Accidental Theft - Book Reading Fix
-    if config.noAccidentalTheftBookFixEnabled and config.isNoAccidentalTheftActive() then
-        noAccidentalTheftBookFix.init()
     end
 
     -- 8. Cave Drips: one drip loop per activator instead of a restart every frame

@@ -35,4 +35,4 @@ category:createYesNoButton({
     variable = mwse.mcm.createTableVariable({ id = "lockInGame", table = config }),
 })
 
-mwse.mcm.register(template)
+template:register()

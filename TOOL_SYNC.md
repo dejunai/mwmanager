@@ -1,5 +1,9 @@
 # Steam utility sync before runs
 
+The current Lua suite deploys under `MWSE\mods\mwsuite`, with a bootstrap that preserves unqualified module
+imports. Earlier dated notes below describe their original flat layout. MWManager archives old flat copies;
+Vortex-staged flat suite folders must be moved and redeployed before an upgrade.
+
 ## Checkout line-ending policy
 
 Shared Python helpers are checked out with LF through `.gitattributes`, and each

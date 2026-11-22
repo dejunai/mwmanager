@@ -281,6 +281,7 @@ event.register("modConfigReady", function()
         .. "bottom of the class list in later games. Picking one fills in the Create Class menu for you." })
     page:createYesNoButton({
         label = "Save and offer custom classes",
+        description = "Save classes created during character generation and offer them when starting later games.",
         variable = mwse.mcm.createTableVariable({ id = "enabled", table = settings }),
     })
     template:register()

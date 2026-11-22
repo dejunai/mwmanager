@@ -59,4 +59,4 @@ category:createYesNoButton({
     variable = mwse.mcm.createTableVariable({ id = "logToMWSE", table = config }),
 })
 
-mwse.mcm.register(template)
+template:register()

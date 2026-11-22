@@ -17,8 +17,8 @@ local function yesNo(parent, id, label, description)
         variable = mwse.mcm.createTableVariable({ id = id, table = config }) })
 end
 
-local function slider(parent, id, label, min, max, step)
-    parent:createSlider({ label = label, min = min, max = max, step = step, jump = step * 10,
+local function slider(parent, id, label, description, min, max, step)
+    parent:createSlider({ label = label, description = description, min = min, max = max, step = step, jump = step * 10,
         variable = mwse.mcm.createTableVariable({ id = id, table = config }) })
 end
 
@@ -28,7 +28,8 @@ page:createYesNoButton({ label = "Enable mwcompanions", description = "Master sw
 local move = page:createCategory("Following")
 yesNo(move, "warp", "Warp followers to the player",
     "Followers farther away than the distance below, or left in another loaded cell, appear behind the player. Companions and summons in a fight stay in it. Replaces Smart Companions' warp. When Attend Me's auto-teleport is enabled, Attend Me handles warping instead.")
-slider(move, "warpDistance", "Warp distance: %s", 500, 8000, 100)
+slider(move, "warpDistance", "Warp distance: %s",
+    "Followers beyond this distance can be warped behind you when warping is enabled.", 500, 8000, 100)
 yesNo(move, "levitateWater", "Followers levitate and water walk with the player",
     "While the player levitates or walks on water, followers do too; it ends when the player's does.")
 yesNo(move, "followerTraits", "Follower traits",
@@ -43,8 +44,10 @@ yesNo(fight, "noFriendlyFire", "No friendly fire",
     "The player and followers can't hurt each other with weapons or harmful spells, and a stray hit doesn't turn them hostile. Soul-trapping a non-companion follower still works.")
 yesNo(fight, "resilient", "Followers collapse instead of dying",
     "A killing blow knocks a follower out instead; it wakes up after the time below and follows again.")
-slider(fight, "collapseSeconds", "Collapse time: %s s", 10, 300, 5)
-slider(fight, "collapseHealth", "Health after a collapse: %s%%", 10, 100, 5)
+slider(fight, "collapseSeconds", "Collapse time: %s s",
+    "How long a protected follower stays unconscious before recovering.", 10, 300, 5)
+slider(fight, "collapseHealth", "Health after a collapse: %s%%",
+    "Percentage of base health restored when a protected follower collapses.", 10, 100, 5)
 yesNo(fight, "assist", "Companions defend the player",
     "Companions attack whoever starts a fight with the player. Escorted NPCs never do.")
 yesNo(fight, "escortSelfDefense", "Escorted NPCs only defend themselves",
@@ -54,6 +57,7 @@ yesNo(fight, "escortProtection", "Escorted NPCs can't die",
 
 -- built each time the page opens, so the list is current
 local blacklist = template:createPage({ label = "Blacklist" })
+blacklist:createInfo({ text = "Remove restores follower handling for that actor ID, unless another rule excludes it." })
 blacklist:createCategory({
     label = "Never followers (water life, guards and the companion suite's list)",
     postCreate = function(self)

@@ -82,7 +82,7 @@ end
 
 local function takeSheet(ref, book)
     local owned = core.isOwned(ref)
-    if owned and not core.isSneaking() then return false end
+    if owned and (config.plainPaperRequireSneak or config.sneakToSteal) and not core.isSneaking() then return false end
     local count = math.max(ref.stackSize or 1, 1)
     local owner = owned and tes3.getOwner({ reference = ref }) or nil
     -- the item data goes with the item: a world object left holding it is written twice by a save, which can crash it
@@ -234,9 +234,7 @@ local function warnOverlaps()
     end
     local pp = mwse.loadConfig("mwpluginpatches") or {}
     local checks = {
-        { config.plainPaper, on("mwplainpaperfix", "enabled", false), "mwplainpaperfix" },
         { config.sneakToSteal, on("noAccidentalTheft", "enabled", lfs.fileexists("Data Files\\MWSE\\mods\\mer\\accidentalTheftProtection\\main.lua")), "Accidental Theft Protection" },
-        { config.readStanding, pp.enabled == true and pp.noAccidentalTheftBookFixEnabled == true, "mwpluginpatches book fix" },
         { config.interiorExit or config.sneakToPick, pp.enabled == true and pp.doorLockCompatibilityEnabled == true, "mwpluginpatches door lock compatibility" },
         { config.eveningLocks or config.knocking, on("abotDoor_Locks", "modEnabled", lfs.fileexists("Data Files\\MWSE\\mods\\abot\\Door Locks\\main.lua")), "abot Door Locks" },
     }

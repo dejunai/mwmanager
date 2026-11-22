@@ -32,7 +32,6 @@ Active Plugin Status:
   • Friends & Frens: %s
   • The Lost Heir: %s
   • Mabrigash Distribution: %s
-  • No Accidental Theft: %s
   • Cave Drips: %s
   • Yet Another Better Sounds Patch: %s
   • Expanded Sounds: %s
@@ -45,7 +44,6 @@ Active Plugin Status:
     config.isFriendsAndFrensActive() and "Active" or "Not Active",
     config.isLostHeirActive() and "Active" or "Not Active",
     config.isMabrDistActive() and "Active" or "Not Active",
-    config.isNoAccidentalTheftActive() and "Active" or "Not Active",
     config.isCaveDripsActive() and "Active" or "Not Active",
     config.isSwampSoundsActive() and "Active" or "Not Active",
     config.isExpandedSoundsActive() and "Active" or "Not Active",
@@ -114,6 +112,11 @@ ysmirCategory:createYesNoButton({
 -- SECTION 5: MORROWIND COMES ALIVE (MCA)
 local mcaCategory = page:createCategory(string.format("Morrowind Comes Alive: AutoStartup%s", getStatusText(config.isMcaActive())))
 
+mcaCategory:createInfo({
+    text = "These questionnaire choices are applied when MCA first initializes in a save. Changing them does not "
+        .. "reconfigure a save where MCA has already been initialized.",
+})
+
 mcaCategory:createYesNoButton({
     label = "Enable Silent AutoStartup for MCA",
     description = "Automatically initializes Morrowind Comes Alive silently without questionnaire popups.",
@@ -121,60 +124,62 @@ mcaCategory:createYesNoButton({
 })
 
 mcaCategory:createYesNoButton({
-    label = "Enable MCA Companions",
+    label = "Enable companions?",
     description = "Allow recruitable companion NPCs and Ordinator Shareel to spawn.",
     variable = mwse.mcm.createTableVariable({ id = "mcaCompanions", table = config }),
 })
 
 mcaCategory:createDropdown({
-    label = "Courtesan Spawns",
+    label = "Enable courtesans?",
     description = "Choose which courtesan NPCs spawn in taverns.",
     options = {
-        { label = "None", value = "none" },
-        { label = "Female Only", value = "female" },
-        { label = "Male Only", value = "male" },
-        { label = "Both", value = "all" },
+        { label = "Enable", value = "all" },
+        { label = "Disable", value = "none" },
+        { label = "Disable male only", value = "female" },
+        { label = "Disable female only", value = "male" },
     },
     variable = mwse.mcm.createTableVariable({ id = "mcaCourtesans", table = config }),
 })
 
 mcaCategory:createYesNoButton({
-    label = "Hostile Drunks in Taverns",
+    label = "Enable hostile drunks in taverns?",
     description = "Allow belligerent drunks to spawn in taverns.",
     variable = mwse.mcm.createTableVariable({ id = "mcaHostileDrunks", table = config }),
 })
 
 mcaCategory:createYesNoButton({
-    label = "Respawning Enemies in Caves & Ruins",
+    label = "Enable respawning hostile NPCs in caves and ruins?",
     description = "Allow hostile bandits, witches, and daedra worshippers to respawn.",
     variable = mwse.mcm.createTableVariable({ id = "mcaRespawnCaves", table = config }),
 })
 
 mcaCategory:createYesNoButton({
-    label = "Bandit Attacks on Towns",
+    label = "Enable bandit attacks in towns?",
     description = "Allow random bandit raids on towns.",
     variable = mwse.mcm.createTableVariable({ id = "mcaBanditAttacksTowns", table = config }),
 })
 
 mcaCategory:createYesNoButton({
-    label = "Hostile Ashlander Outcasts",
+    label = "Enable hostile Ashlanders at outcast Ashlander campsites?",
     description = "Allow hostile Ashlander outcasts and Mabrigash to spawn at outcast camps.",
     variable = mwse.mcm.createTableVariable({ id = "mcaHostileAshlanders", table = config }),
 })
 
 mcaCategory:createYesNoButton({
-    label = "Highwaymen at Crossroads",
+    label = "Enable Brigands and Highwaymen at crossroads?",
     description = "Allow highwaymen bandits to ambush travelers at crossroads.",
     variable = mwse.mcm.createTableVariable({ id = "mcaCrossroadBandits", table = config }),
 })
 
-mcaCategory:createSlider({
-    label = "Hostile Party Size",
-    description = "Extra enemies spawning together in hostile groups (0 = Normal, 1 = +1, 2 = +2, 3 = +3).",
-    min = 0,
-    max = 3,
-    step = 1,
-    jump = 1,
+mcaCategory:createDropdown({
+    label = "Preferred size of hostile NPC parties",
+    description = "Select MCA's hostile party size range. This affects bandits and other hostile NPC parties, "
+        .. "including outcasts, deserters and smugglers. Larger groups make encounters more dangerous.",
+    options = {
+        { label = "2-5", value = 0 },
+        { label = "2-10", value = 1 },
+        { label = "2-20", value = 2 },
+    },
     variable = mwse.mcm.createTableVariable({ id = "mcaPartySize", table = config }),
 })
 
@@ -206,25 +211,6 @@ mabrCategory:createYesNoButton({
     label = "Suppress 'Distributing Mabrigash' Popup",
     description = "Silently suppresses the background distribution notification box on game startup and cell load.",
     variable = mwse.mcm.createTableVariable({ id = "mabrDistSuppressionEnabled", table = config }),
-})
-
--- SECTION 8: NO ACCIDENTAL THEFT (BOOK READING FIX)
-local natCategory = page:createCategory(string.format("No Accidental Theft: Book Reading Fix%s", getStatusText(config.isNoAccidentalTheftActive())))
-
-natCategory:createYesNoButton({
-    label = "Enable Book Reading While Standing",
-    description = "Allows reading owned books and documents in the world without sneaking. When reading an owned book while standing, the Take button is hidden or tinted red.",
-    variable = mwse.mcm.createTableVariable({ id = "noAccidentalTheftBookFixEnabled", table = config }),
-})
-
-natCategory:createDropdown({
-    label = "Take Button Appearance for Owned Books",
-    description = "Choose how the Take button appears when reading an owned book while standing (not sneaking):\n• Disabled / Red Tint: Button is greyed out, red-tinted, unclickable, and shows an informational tooltip.\n• Hidden / Missing: Button is completely removed from the reading window.",
-    options = {
-        { label = "Red tint", value = "disabled" },
-        { label = "Hidden", value = "hidden" },
-    },
-    variable = mwse.mcm.createTableVariable({ id = "ownedBookTakeMode", table = config }),
 })
 
 -- SECTION 10: LOOPING SOUND SCRIPTS
@@ -359,4 +345,4 @@ cgCategory:createYesNoButton({
 })
 
 
-mwse.mcm.register(template)
+template:register()

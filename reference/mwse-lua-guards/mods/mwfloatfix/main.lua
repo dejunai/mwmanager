@@ -661,19 +661,26 @@ event.register(tes3.event.modConfigReady, function()
             .. (floatList and "\n\nOnly the items in MWSE\\config\\mwfloatfix_data.json are checked (written by "
                 .. "mwdialog_check --cell-conflicts)." or ""),
     })
-    page:createOnOffButton({ label = "Enabled", variable = mwse.mcm.createTableVariable({ id = "enabled", table = config }) })
+    page:createOnOffButton({ label = "Enabled", description = "Lower eligible floating objects when their cells load.",
+        variable = mwse.mcm.createTableVariable({ id = "enabled", table = config }) })
     page:createSlider({ label = "Still resting when the gap is up to (units)", min = 1, max = 16, step = 1,
+        description = "Ignore small gaps up to this size to avoid moving items that already look properly placed.",
         variable = mwse.mcm.createTableVariable({ id = "tolerance", table = config }) })
     page:createSlider({ label = "Lower an item by at most (units)", min = 16, max = 512, step = 8,
+        description = "Maximum distance to lower an item; larger gaps are left alone.",
         variable = mwse.mcm.createTableVariable({ id = "maxDrop", table = config }) })
     page:createSlider({ label = "Counts as mounted on a wall within (units)", min = 0, max = 32, step = 1,
+        description = "Wall and hook detection distance for mounted items. The minimum checks are 22 units for walls and 20 for hooks.",
         variable = mwse.mcm.createTableVariable({ id = "wallGap", table = config }) })
     if not floatList then                -- the list never names lights
-        page:createOnOffButton({ label = "Also carryable lights", variable = mwse.mcm.createTableVariable({ id = "lights", table = config }) })
+        page:createOnOffButton({ label = "Also carryable lights", description = "Include loose portable lights when checking for floating items.",
+            variable = mwse.mcm.createTableVariable({ id = "lights", table = config }) })
     end
     page:createOnOffButton({ label = "Write moves to MWSE\\logs\\mwfloatfix.log",
+        description = "Record each item lowered by the floating-item fix.",
         variable = mwse.mcm.createTableVariable({ id = "log", table = config }) })
     page:createKeyBinder({ label = "Hide key (look at an object, or click it in the console, then press)",
+        description = "Hide the targeted object across games; use Hidden Objects to restore the most recently hidden one.",
         allowCombinations = true, variable = mwse.mcm.createTableVariable({ id = "blacklistKey", table = config }) })
 
     template:createExclusionsPage({
@@ -709,7 +716,8 @@ event.register(tes3.event.modConfigReady, function()
         if listInfo.elements and listInfo.elements.info then listInfo.elements.info.text = listInfo.text end
     end
     refreshList()
-    bpage:createButton({ buttonText = "Bring back the last one", callback = function()
+    bpage:createButton({ buttonText = "Bring back the last one",
+        description = "Restore the most recently hidden object in every game.", callback = function()
         local e = undoLast()
         tes3.messageBox(e and ("Back in every game: " .. e.id .. " (" .. e.cell .. ")") or "The list is empty.")
         refreshList()

@@ -461,7 +461,7 @@ def lint_installed_core_mwse(game_dir, *, dry_run=False):
 
 # MWManager's earlier Lua packaging under MWSE\\mods: the consolidated MWManager mod (its mwquickfixes tab,
 # its off\\legacy-standalone archive) and a standalone mwquickfixes folder. The suite replaces them.
-RETIRED_MWSE_MODS = ("MWManager", "mwquickfixes")
+RETIRED_MWSE_MODS = ("MWManager", "mwquickfixes", "mwplainpaperfix")
 
 
 # reference\<folder>\mods\<name> and \metadata: the suite (copies of the Steam install), then MWManager's own
@@ -499,7 +499,7 @@ def _copy_replacing(source_file, target):
 
 
 def install_mwse_lua_guards(args):
-    """Install the mw* MWSE Lua suite: each mod to MWSE\\mods\\<name>, its metadata toml to Data Files."""
+    """Install the mw* MWSE Lua suite under MWSE\\mods\\mwsuite and its metadata in Data Files."""
     data_dir = Path(args.data_dir).resolve()
     mwse_dir = data_dir / "MWSE"
     if not mwse_dir.is_dir():
@@ -511,14 +511,40 @@ def install_mwse_lua_guards(args):
         print(f"--init: MWSE Lua suite source not found: {source}", file=sys.stderr)
         return 2
     target_root = mwse_dir / "mods"
+    suite_root = target_root / "mwsuite"
+    bootstrap = source / "mwmanager-menu" / "bootstrap" / "main.lua"
+    if not bootstrap.is_file():
+        print(f"--init: MWSE Lua suite bootstrap not found: {bootstrap}", file=sys.stderr)
+        return 2
     # Data Files\\MWSE\\backups\\mods\\<name>: beside MWSE, where MWSE never loads Lua from (it runs every main.lua
     # under MWSE\\mods at any depth, so nothing that is not live may stay there).
     legacy_root = mwse_dir / "backups" / "mods"
     existing = {p.name.casefold(): p for p in target_root.iterdir() if p.is_dir()} if target_root.is_dir() else {}
-    retired = [existing[n.casefold()] for n in RETIRED_MWSE_MODS if n.casefold() in existing]
+    retired_names = set(RETIRED_MWSE_MODS) | set(names)
+    retired = [existing[n.casefold()] for n in sorted(retired_names) if n.casefold() in existing]
+    nested = {p.name.casefold(): p for p in suite_root.iterdir() if p.is_dir()} if suite_root.is_dir() else {}
+    deployment = data_dir / "vortex.deployment.json"
+    if deployment.is_file():
+        try:
+            manifest = json.loads(deployment.read_text(encoding="utf-8-sig"))
+            staging = Path(manifest["stagingPath"])
+            for entry in manifest["files"]:
+                rel = Path(entry["relPath"].replace("\\", os.sep))
+                parts = rel.parts
+                if (len(parts) >= 4 and [p.casefold() for p in parts[:2]] == ["mwse", "mods"]
+                        and parts[2].casefold() in {n.casefold() for n in retired_names}
+                        and (staging / entry["source"] / rel).is_file()):
+                    print(f"--init: Vortex still stages the old Lua suite path: {rel}. "
+                          "Move that package to MWSE\\mods\\mwsuite and redeploy before installing.",
+                          file=sys.stderr)
+                    return 2
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            print(f"--init: cannot inspect Vortex deployment manifest {deployment}: {exc}", file=sys.stderr)
+            return 2
     if args.dry_run:
         for name in names:
-            print(f"--dry-run: would install MWSE Lua suite mod {name} to {target_root / name}")
+            print(f"--dry-run: would install MWSE Lua suite mod {name} to {suite_root / name}")
+        print(f"--dry-run: would install suite bootstrap to {suite_root / 'main.lua'}")
         for toml in metadata:
             print(f"--dry-run: would install {toml.name} to {data_dir}")
         for old in retired:
@@ -562,7 +588,7 @@ def install_mwse_lua_guards(args):
         for name in names:
             mod_source = mods[name]
             files = {p.relative_to(mod_source) for p in mod_source.rglob("*") if p.is_file()}
-            destination = existing.get(name.casefold(), target_root / name)
+            destination = nested.get(name.casefold(), suite_root / name)
             # files a suite mod no longer has (older modules, editor backups) leave MWSE\\mods
             stale = sorted(p.relative_to(destination) for p in destination.rglob("*")
                            if p.is_file() and p.relative_to(destination) not in files) if destination.is_dir() else []
@@ -572,6 +598,7 @@ def install_mwse_lua_guards(args):
                     move_file(destination / rel, archived / rel)
             for rel in sorted(files):
                 copy_file(mod_source / rel, destination / rel)
+        copy_file(bootstrap, suite_root / "main.lua")
         for toml in metadata:
             copy_file(toml, data_dir / toml.name)
     except OSError as exc:
@@ -579,7 +606,7 @@ def install_mwse_lua_guards(args):
         return 2
     if install_ledger:
         install_ledger.finish_run(ledger_run)
-    print(f"--init: installed the MWSE Lua suite ({len(names)} mods: {', '.join(names)}) under {target_root}")
+    print(f"--init: installed the MWSE Lua suite ({len(names)} mods: {', '.join(names)}) under {suite_root}")
     for old in retired:
         print(f"--init: moved MWManager's earlier Lua package {old.name} to {legacy_root}")
     return 0

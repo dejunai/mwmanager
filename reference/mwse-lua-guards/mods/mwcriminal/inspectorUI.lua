@@ -19,6 +19,30 @@ function inspectorUI.close()
     end
 end
 
+local function addHeader(parent, text)
+    local header = parent:createBlock({})
+    header.widthProportional = 1.0
+    header.autoHeight = true
+    header.flowDirection = "left_to_right"
+    header.borderBottom = 4
+
+    local title = header:createLabel({ text = text })
+    title.autoWidth = true
+    title.autoHeight = true
+    title.color = tes3ui.getPalette("header_color")
+
+    local spacer = header:createBlock({})
+    spacer.widthProportional = 1.0
+    spacer.autoHeight = true
+
+    local closeBtn = header:createButton({ text = "Close" })
+    closeBtn.autoWidth = true
+    closeBtn.autoHeight = true
+    closeBtn:register("mouseClick", function()
+        inspectorUI.close()
+    end)
+end
+
 function inspectorUI.refresh()
     local menu = tes3ui.findMenu(GUI_ID_MENU)
     if menu then
@@ -62,9 +86,7 @@ function inspectorUI.open()
     mainBlock.flowDirection = "top_to_bottom"
 
     -- Header
-    local title = mainBlock:createLabel({ text = "STEALTH DETECTION INSPECTOR" })
-    title.color = tes3ui.getPalette("header_color")
-    title.borderBottom = 4
+    addHeader(mainBlock, "STEALTH DETECTION INSPECTOR")
 
     local sub = mainBlock:createLabel({
         text = "Actively monitors actors detecting you. Blacklisted entities and companions are excluded."
@@ -280,13 +302,6 @@ function inspectorUI.open()
         inspectorUI.refresh()
     end)
 
-    local closeBtn = footer:createButton({ text = "Close" })
-    closeBtn.autoWidth = true
-    closeBtn.autoHeight = true
-    closeBtn:register("mouseClick", function()
-        inspectorUI.close()
-    end)
-
     if not tes3ui.menuMode() then
         tes3ui.enterMenuMode(GUI_ID_MENU)
     end
@@ -318,9 +333,7 @@ function inspectorUI.openBlacklist()
     mainBlock.flowDirection = "top_to_bottom"
 
     -- Header
-    local title = mainBlock:createLabel({ text = "STEALTH DETECTION BLACKLIST" })
-    title.color = tes3ui.getPalette("header_color")
-    title.borderBottom = 4
+    addHeader(mainBlock, "STEALTH DETECTION BLACKLIST")
 
     local sub = mainBlock:createLabel({
         text = "Entities in this blacklist are completely ignored by stealth detection and cannot reveal you."
@@ -520,13 +533,6 @@ function inspectorUI.openBlacklist()
             inspectorUI.refreshBlacklist()
         end)
     end
-
-    local closeBtn = footer:createButton({ text = "Close" })
-    closeBtn.autoWidth = true
-    closeBtn.autoHeight = true
-    closeBtn:register("mouseClick", function()
-        inspectorUI.close()
-    end)
 
     if not tes3ui.menuMode() then
         tes3ui.enterMenuMode(GUI_ID_BLACKLIST_MENU)

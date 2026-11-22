@@ -455,9 +455,16 @@ class MwseCoreOriginalsStayInTheInstall(unittest.TestCase):
         (old / "off" / "legacy-standalone" / "mwinfoloop" / "main.lua").write_text("-- older\n", encoding="utf-8")
         (self.mwse / "mods" / "mwquickfixes").mkdir(parents=True)
         (self.mwse / "mods" / "mwquickfixes" / "main.lua").write_text("-- standalone\n", encoding="utf-8")
+        (self.mwse / "mods" / "mwplainpaperfix").mkdir(parents=True)
+        (self.mwse / "mods" / "mwplainpaperfix" / "main.lua").write_text("-- retired paper\n", encoding="utf-8")
         (self.mwse / "mods" / "mwfloatfix").mkdir(parents=True)
         (self.mwse / "mods" / "mwfloatfix" / "main.lua").write_text("-- old\n", encoding="utf-8")
         (self.mwse / "mods" / "mwfloatfix" / "old_module.lua").write_text("-- stale\n", encoding="utf-8")
+        nested = self.mwse / "mods" / "mwsuite"
+        (nested / "mwfloatfix").mkdir(parents=True)
+        (nested / "mwfloatfix" / "stale.lua").write_text("-- stale nested\n", encoding="utf-8")
+        (nested / "personalmod").mkdir()
+        (nested / "personalmod" / "main.lua").write_text("-- private\n", encoding="utf-8")
         (self.mwse / "mods" / "mouseBleedFix").mkdir(parents=True)
         (self.mwse / "mods" / "mouseBleedFix" / "main.lua").write_text("-- user's own\n", encoding="utf-8")
         import mwmanager_journal
@@ -467,22 +474,30 @@ class MwseCoreOriginalsStayInTheInstall(unittest.TestCase):
         manifest = json.loads((suite / "SOURCE_MANIFEST.json").read_text("utf-8"))
         for item in manifest["Files"]:
             rel = Path(item["Path"])
-            installed = (self.mwse / "mods" / rel.relative_to("mods")) if rel.parts[0] == "mods" \
+            installed = (self.mwse / "mods" / "mwsuite" / rel.relative_to("mods")) if rel.parts[0] == "mods" \
                 else self.data / rel.name
             self.assertEqual((suite / rel).read_bytes(), installed.read_bytes(), str(rel))
         live = sorted(p.name for p in (self.mwse / "mods").iterdir())
         names = sorted(p.name for p in (suite / "mods").iterdir())
-        self.assertEqual(live, sorted(names + ["mouseBleedFix", "mwmanagermenu", "somemod"]))
+        self.assertEqual(live, sorted(["mwsuite", "mouseBleedFix", "somemod"]))
+        self.assertEqual(sorted(p.name for p in (self.mwse / "mods" / "mwsuite").iterdir()),
+                         sorted(names + ["mwmanagermenu", "main.lua", "personalmod"]))
         menu = ROOT / "reference" / "mwmanager-menu"
         self.assertEqual((menu / "mods" / "mwmanagermenu" / "main.lua").read_bytes(),
-                         (self.mwse / "mods" / "mwmanagermenu" / "main.lua").read_bytes())
+                         (self.mwse / "mods" / "mwsuite" / "mwmanagermenu" / "main.lua").read_bytes())
+        self.assertEqual((menu / "bootstrap" / "main.lua").read_bytes(),
+                         (self.mwse / "mods" / "mwsuite" / "main.lua").read_bytes())
+        self.assertTrue((self.data / "mwsuite-metadata.toml").is_file())
         self.assertTrue((self.data / "mwmanagermenu-metadata.toml").is_file())
-        self.assertEqual(sorted(p.name for p in (self.mwse / "mods" / "mwfloatfix").iterdir()), ["main.lua"])
+        self.assertEqual(sorted(p.name for p in (self.mwse / "mods" / "mwsuite" / "mwfloatfix").iterdir()), ["main.lua"])
         backups = self.mwse / "backups" / "mods"
         self.assertTrue((backups / "MWManager" / "modules" / "mwquickfixes" / "main.lua").is_file())
         self.assertTrue((backups / "MWManager" / "off" / "legacy-standalone" / "mwinfoloop" / "main.lua").is_file())
         self.assertTrue((backups / "mwquickfixes" / "main.lua").is_file())
+        self.assertTrue((backups / "mwplainpaperfix" / "main.lua").is_file())
         self.assertTrue((backups / "mwfloatfix" / "old_module.lua").is_file())
+        self.assertTrue((backups / "mwfloatfix-2" / "stale.lua").is_file())
+        self.assertEqual((nested / "personalmod" / "main.lua").read_text("utf-8"), "-- private\n")
         self.assertEqual((self.mwse / "mods" / "mouseBleedFix" / "main.lua").read_text("utf-8"), "-- user's own\n")
         self.assertFalse((self.manager / "backups").exists())
         # a second run changes nothing and archives nothing more
@@ -499,6 +514,8 @@ class MwseCoreOriginalsStayInTheInstall(unittest.TestCase):
         self.assertEqual((self.mwse / "mods" / "mwfloatfix" / "main.lua").read_text("utf-8"), "-- old\n")
         self.assertTrue((self.mwse / "mods" / "mwfloatfix" / "old_module.lua").is_file())
         self.assertTrue((self.mwse / "mods" / "MWManager" / "main.lua").is_file())
+        self.assertTrue((self.mwse / "mods" / "mwplainpaperfix" / "main.lua").is_file())
+        self.assertTrue((nested / "mwfloatfix" / "stale.lua").is_file())
         self.assertFalse((self.data / "mwmanagermenu-metadata.toml").exists())
 
     def test_dry_run_writes_nothing(self):
@@ -508,6 +525,23 @@ class MwseCoreOriginalsStayInTheInstall(unittest.TestCase):
         self.assertIn("mwsaveguard", out)
         self.assertIn("MWManager", out)
         self.assertEqual(sorted(str(p.relative_to(self.data)) for p in self.data.rglob("*")), before)
+
+    def test_flat_vortex_package_blocks_upgrade_until_staging_is_moved(self):
+        staging = Path(self.tmp.name) / "vortex"
+        rel = Path("MWSE") / "mods" / "mwfloatfix" / "main.lua"
+        staged = staging / "suite" / rel
+        staged.parent.mkdir(parents=True)
+        staged.write_text("-- staged", encoding="utf-8")
+        (self.data / "vortex.deployment.json").write_text(json.dumps({
+            "stagingPath": str(staging),
+            "files": [{"source": "suite", "relPath": str(rel)}],
+        }), encoding="utf-8")
+        args = types.SimpleNamespace(data_dir=str(self.data), dry_run=False)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(self.m.install_mwse_lua_guards(args), 2)
+        self.assertIn("Vortex still stages", err.getvalue())
+        self.assertFalse((self.mwse / "mods" / "mwsuite").exists())
 
 
 class LuaSuiteIsTheUsersCopy(unittest.TestCase):
@@ -528,7 +562,7 @@ class LuaSuiteIsTheUsersCopy(unittest.TestCase):
 
     def test_mwguard_exempts_every_suite_mod(self):
         names = {p.name for p in (self.SUITE / "mods").iterdir() if (p / "main.lua").is_file()}
-        self.assertEqual(len(names), 21)
+        self.assertEqual(len(names), 20)
         main = (self.SUITE / "mods" / "mwguard" / "main.lua").read_text("utf-8")
         block = main[main.index("exemptMods"):]
         block = block[:block.index("}")]

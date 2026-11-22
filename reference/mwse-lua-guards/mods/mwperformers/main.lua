@@ -317,6 +317,7 @@ event.register(tes3.event.modConfigReady, function()
     })
     page:createOnOffButton({
         label = "Write decisions to MWSE\\logs\\mwperformers.log",
+        description = "Record which performers are hidden or restored in the log file.",
         variable = mwse.mcm.createTableVariable({ id = "log", table = config }),
     })
     template:register()

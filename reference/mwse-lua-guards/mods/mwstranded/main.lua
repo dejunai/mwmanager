@@ -387,15 +387,18 @@ event.register(tes3.event.modConfigReady, function()
     })
     page:createOnOffButton({
         label = "Bring people, creatures, containers and items into the rebuilt layout",
+        description = "Move listed stranded actors and objects into the rebuilt interior; disabling this does not undo prior moves.",
         variable = mwse.mcm.createTableVariable({ id = "move", table = config }),
     })
     page:createOnOffButton({
         label = "Hide cut-off scenery",
+        description = "Hide listed scenery stranded outside the rebuilt interior; turning this off restores it as places load.",
         variable = mwse.mcm.createTableVariable({ id = "hide", table = config }),
         callback = function() if tes3.player then settleActive() end end,
     })
     page:createButton({
         buttonText = "Re-read the list and apply it here now",
+        description = "Reload the conflict list and apply the current settings to the active interior.",
         callback = function()
             loadData()
             if tes3.player then
@@ -406,6 +409,7 @@ event.register(tes3.event.modConfigReady, function()
     })
     page:createOnOffButton({
         label = "Write what it does to MWSE\\logs\\mwstranded.log",
+        description = "Record stranded-object moves, hides and restorations in the log file.",
         variable = mwse.mcm.createTableVariable({ id = "log", table = config }),
     })
     template:register()

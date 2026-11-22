@@ -105,4 +105,4 @@ actionsCategory:createButton({
     end,
 })
 
-mwse.mcm.register(template)
+template:register()

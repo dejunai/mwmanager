@@ -145,6 +145,7 @@ event.register("modConfigReady", function()
         .. "a toggled light with its remembered shield. Works with vanilla quick keys and QuickKeys Hotbar Extended." })
     page:createYesNoButton({
         label = "Quick keys unequip equipped items",
+        description = "Press an equipped item's quick key again to unequip it and restore displaced equipment.",
         variable = mwse.mcm.createTableVariable({ id = "enabled", table = config }),
     })
     template:register()

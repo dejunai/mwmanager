@@ -25,7 +25,9 @@ yesNo(theft, "sneakToSteal", "Must sneak to steal",
 yesNo(theft, "readStanding", "Read owned books standing (Take is red)",
     "Owned books and scrolls open standing; the Take button is tinted red because taking it is theft. Replaces the mwpluginpatches book fix.")
 yesNo(theft, "plainPaper", "Plain paper skips the scroll window",
-    "Blank sheets go straight into the inventory; owned ones only while sneaking. Replaces mwplainpaperfix.")
+    "Blank sheets go straight into the inventory. Replaces mwplainpaperfix.")
+yesNo(theft, "plainPaperRequireSneak", "Require sneaking for owned plain paper",
+    "Owned blank sheets require sneaking. Must sneak to steal also enforces this when enabled.")
 
 local sneak = page:createCategory("Detection")
 yesNo(sneak, "companionDetection", "Companions and creatures don't detect you",
@@ -80,16 +82,17 @@ yesNo(locks, "eveningLocks", "Owned homes lock in the evening",
 yesNo(locks, "knocking", "Knock on locked doors",
     "Using a locked door standing knocks; someone inside who is willing opens and meets you at the door. Replaces abot Door Locks knocking.")
 for _, s in ipairs({
-    { "openHour", "Doors open at", 5, 10 },
-    { "closeHour", "Doors lock at", 16, 23 },
-    { "knockUntilHour", "Nobody answers knocks after", 18, 24 },
+    { "openHour", "Doors open at", 5, 10, "Hour when eligible homes open for the day." },
+    { "closeHour", "Doors lock at", 16, 23, "Hour when eligible homes begin locking for the night." },
+    { "knockUntilHour", "Nobody answers knocks after", 18, 24, "Latest hour at which occupants will answer a knock." },
 }) do
-    locks:createSlider({ label = s[2] .. " %s:00", min = s[3], max = s[4], step = 1, jump = 1,
+    locks:createSlider({ label = s[2] .. " %s:00", description = s[5], min = s[3], max = s[4], step = 1, jump = 1,
         variable = mwse.mcm.createTableVariable({ id = s[1], table = config }) })
 end
 
 -- built each time the page opens, so entries added in game show up
 local blacklist = template:createPage({ label = "Blacklist" })
+blacklist:createInfo({ text = "Remove stops ignoring that entry, so mwcriminal can handle it again." })
 blacklist:createCategory({
     label = "Objects mwcriminal ignores (Shift+activate adds one)",
     postCreate = function(self)

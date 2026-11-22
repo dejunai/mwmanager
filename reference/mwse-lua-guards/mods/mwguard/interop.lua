@@ -36,6 +36,8 @@ function this.isExempt(modKey, fn)
     if not modKey then return false end
     modKey = modKey:lower()
     if this.exemptMods[modKey] then return true end
+    local suiteMod = modKey:match("^mwsuite/([^/]+)")
+    if suiteMod and this.exemptMods[suiteMod] then return true end
     local top = modKey:match("^([^/]+)/")                   -- "abot/WBSR" is covered by "abot"
     return top ~= nil and this.exemptMods[top] == true
 end
@@ -50,6 +52,8 @@ function this.isLogExempt(modKey)
     if type(modKey) ~= "string" then return false end
     modKey = modKey:lower()
     if this.logExemptMods[modKey] then return true end
+    local suiteMod = modKey:match("^mwsuite/([^/]+)")
+    if suiteMod and this.logExemptMods[suiteMod] then return true end
     local top = modKey:match("^([^/]+)/")
     return top ~= nil and this.logExemptMods[top] == true
 end

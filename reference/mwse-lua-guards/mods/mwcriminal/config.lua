@@ -6,6 +6,7 @@ local defaults = {
     sneakToSteal = false,       -- owned things need sneaking (Accidental Theft Protection)
     readStanding = false,       -- owned books open standing, Take is red (NAT book fix)
     plainPaper = false,         -- blank sheets skip the scroll window (mwplainpaperfix)
+    plainPaperRequireSneak = true,
     companionDetection = false, -- companions, creatures and blacklisted actors never detect
     includeCreatures = true,
     includeEscorts = true,
@@ -50,6 +51,35 @@ config.blacklist = config.blacklist or {}
 config.inspectorKey = config.inspectorKey or defaults.inspectorKey
 
 local shouldSave = false
+if not config.plainPaperSettingsImported then
+    config.plainPaperSettingsImported = true
+    local paper = mwse.loadConfig("mwplainpaperfix")
+    if paper then
+        if not storedConfig or storedConfig.plainPaper == nil then
+            config.plainPaper = paper.enabled == true
+        end
+        if not storedConfig or storedConfig.plainPaperRequireSneak == nil then
+            config.plainPaperRequireSneak = paper.requireSneakForOwned ~= false
+        end
+        if not hasStoredConfig and paper.enabled == true then
+            config.enabled = paper.enabled == true
+        end
+    end
+    shouldSave = true
+end
+
+if not config.bookFixSettingsImported then
+    config.bookFixSettingsImported = true
+    local patches = mwse.loadConfig("mwpluginpatches")
+    if patches and patches.enabled == true and patches.noAccidentalTheftBookFixEnabled == true then
+        if not storedConfig or storedConfig.readStanding == nil then
+            config.readStanding = true
+        end
+        if not hasStoredConfig then config.enabled = patches.enabled == true end
+    end
+    shouldSave = true
+end
+
 if not config.imported then
     config.imported = true
     local atp = mwse.loadConfig("noAccidentalTheft")

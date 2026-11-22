@@ -33,7 +33,7 @@ local defaults = {
         "mwguard", "mwcriminal", "mwcompanions", "mwhangwatch", "mwfloatfix", "mwstranded", "mwcollide",
         "mwperformers", "mwinfoloop", "mwsoundguard", "mwsaveguard", "mwwarnsuppression",
         "mwpersonaleffects", "mwpluginpatches", "mweffectinspector", "mwmouseguard",
-        "mwteleportguard", "mwexitguard", "mwcustomclasspersistence", "mwplainpaperfix", "mwquicktoggle"
+        "mwteleportguard", "mwexitguard", "mwcustomclasspersistence", "mwquicktoggle"
     },
     perFrameHints = {
         "e%.delta", "camera", "velocity", "orientation", "position%s*=", "rotation", "animat",
@@ -120,7 +120,7 @@ local function modOfSource(source)
         if modDirHasMain[dir] == nil then
             modDirHasMain[dir] = lfs.fileexists(dir .. "\\main.lua") and true or false
         end
-        if not modDirHasMain[dir] then mod = mod .. "/" .. parts[2] end
+        if mod:lower() == "mwsuite" or not modDirHasMain[dir] then mod = mod .. "/" .. parts[2] end
     end
     local m = { mod = mod, low = mod:lower(), file = rel, path = src }
     sourceCache[source] = m
@@ -149,6 +149,8 @@ end
 local exemptList = {}
 for _, m in ipairs(config.exemptMods or {}) do exemptList[tostring(m):lower()] = true end
 local function exempt(w, fn)
+    local suiteMod = w.low:match("^mwsuite/([^/]+)")
+    if suiteMod and exemptList[suiteMod] then return true end
     if exemptList[w.low] or exemptList[w.low:match("^([^/]+)/") or ""] then return true end
     return interop.isExempt(w.mod, fn)
 end

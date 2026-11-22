@@ -5,22 +5,25 @@ byte-identical copy of the Steam file; `SOURCE_MANIFEST.json` lists each one wit
 (`tests/test_game_writes.py` checks the copies against it). Do not edit these files here: change them in the
 Steam install, then copy them again and refresh the manifest.
 
-- `mods/<name>/` - one folder per suite mod, installed by `--init` to `Data Files\MWSE\mods\<name>\`:
+- `mods/<name>/` - one folder per suite mod, installed by `--init` to `Data Files\MWSE\mods\mwsuite\<name>\`:
   mwguard, mwhangwatch, mwfloatfix, mwstranded, mwcollide, mwperformers, mwinfoloop, mwsoundguard,
   mwsaveguard, mwwarnsuppression, mwcriminal, mwpluginpatches, mweffectinspector, mwmouseguard,
-  mwteleportguard, mwexitguard, mwquicktoggle, mwplainpaperfix, mwcustomclasspersistence, mwpersonaleffects
-  (20 mods). `dejespreplacements` (formerly mwespreplacements) is the user's own replacement for plugins in one load order;
+  mwteleportguard, mwexitguard, mwquicktoggle, mwcustomclasspersistence, mwpersonaleffects
+  (20 mods). Plain Paper Fix is absorbed by `mwcriminal`. `dejespreplacements` (formerly mwespreplacements) is the user's own replacement for plugins in one load order;
   it is not part of the suite and MWManager does not ship it.
 - `metadata/<name>-metadata.toml` - the MWSE metadata files that go beside them in `Data Files\` (load priority).
 
 Each mod registers its own settings page and keeps its settings in `Data Files\MWSE\config\<name>.json`, which
 `--init` does not touch. `mwguard.json`'s `exemptMods` lists every suite mod. In the game the pages appear under
-one Mod Config Menu entry, "MWManager", one tab per mod: that is `reference/mwmanager-menu/` (MWManager's own
+one Mod Config Menu entry, "MW Conflict Tools", one tab per mod: that is `reference/mwmanager-menu/` (MWManager's own
 `mwmanagermenu` mod, installed with the suite), which collects the pages without changing the suite's files.
 
-`--init` also moves MWManager's earlier Lua packaging out of `MWSE\mods` to `Data Files\MWSE\backups\mods\`
+The suite bootstrap adds that folder to Lua's module search path before the other suite mods load.
+`--init` moves older flat suite folders and MWManager's earlier Lua packaging out of `MWSE\mods` to `Data Files\MWSE\backups\mods\`
 (where MWSE never loads Lua from): the consolidated `MWSE\mods\MWManager\` mod (with its `mwquickfixes` tab and
 `off\legacy-standalone\` archive) and a standalone `mwquickfixes` folder. The quick fixes now live in the suite:
 CorruptSaveGuard is mwsaveguard, SuppressBodyPartWarnings and SuppressShutdownWarnings are mwwarnsuppression,
 CompanionSneak is absorbed by mwcriminal, DeferredDialogueTeleport is mwteleportguard and MouseBleedFix is
 mwmouseguard. Standalone folders of those older names are the user's own and `--init` leaves them alone.
+If Vortex still stages a flat suite folder, move that package under `MWSE\mods\mwsuite` and redeploy first;
+otherwise a later Vortex deployment could reactivate the old copy.

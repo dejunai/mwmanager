@@ -110,6 +110,12 @@ function autoStartup.applyStartupConfig()
             autoStartup.applyMCACustomization()
             mwscript.stopScript({ script = "MCA_setup" })
             mwse.log("[mwpluginpatches] Silently initialized Morrowind Comes Alive (MCA) with configured settings.")
+        elseif mcaLoaded then
+            local partySize = tes3.findGlobal("MCA_MoreEnemies")
+            if partySize and partySize.value == 3 then
+                partySize.value = config.mcaPartySize
+                mwse.log("[mwpluginpatches] Repaired invalid MCA party size in this save.")
+            end
         end
     end
 

@@ -60,12 +60,6 @@ function config.isMabrDistActive()
         or tes3.getScript("mabDist") ~= nil
 end
 
-function config.isNoAccidentalTheftActive()
-    return tes3.getFileExists("MWSE/mods/mer/accidentalTheftProtection/main.lua")
-        or tes3.getFileExists("Data Files/MWSE/mods/mer/accidentalTheftProtection/main.lua")
-        or tes3.isModActive("accidentalTheftProtection")
-end
-
 function config.isCaveDripsActive()
     return tes3.isModActive("Cave Drips.ESP") or tes3.getScript("R0_Sound_Cave_Drip_scr") ~= nil
 end
@@ -108,7 +102,6 @@ local function getDynamicDefaults()
     local fnf = config.isFriendsAndFrensActive()
     local lostHeir = config.isLostHeirActive()
     local mabr = config.isMabrDistActive()
-    local nat = config.isNoAccidentalTheftActive()
     local drips = config.isCaveDripsActive()
     local swamp = config.isSwampSoundsActive()
     local expandedSounds = config.isExpandedSoundsActive()
@@ -173,10 +166,6 @@ local function getDynamicDefaults()
         -- Mabrigash Distribution Popup Suppression
         mabrDistSuppressionEnabled = mabr,
 
-        -- No Accidental Theft: Allow Reading Owned Books while Standing
-        noAccidentalTheftBookFixEnabled = nat,
-        ownedBookTakeMode = "hidden", -- "hidden" (no Take button) or "disabled" (Take button tinted red)
-
         -- Looping sound scripts the engine restarts every frame (mwsoundguard RUNAWAY entries)
         caveDripSoundEnabled = drips,
         swampSoundEnabled = swamp,
@@ -233,6 +222,12 @@ function config.save()
         end
     end
     mwse.saveConfig(CONFIG_NAME, toSave)
+end
+
+if config.mcaPartySize == 3 then
+    config.mcaPartySize = 2
+    mwse.log("[mwpluginpatches] MCA party size 3 was invalid; changed it to MCA's largest option (2-20).")
+    config.save()
 end
 
 return config

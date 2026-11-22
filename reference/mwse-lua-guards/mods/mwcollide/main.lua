@@ -176,6 +176,7 @@ event.register(tes3.event.modConfigReady, function()
     })
     page:createOnOffButton({
         label = "Write what it does to MWSE\\logs\\mwcollide.log",
+        description = "Record which doubled objects are hidden or restored in the log file.",
         variable = mwse.mcm.createTableVariable({ id = "log", table = config }),
     })
     template:register()
