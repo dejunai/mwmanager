@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-21 (America/Los_Angeles); Perplexity audit fixes H1 H2 M1 M3 M4 L1 L2 L4 L6",
+  "SyncedAt": "2026-11-21 (America/Los_Angeles); Reject report fixes below ERROR severity",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -515,10 +515,10 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 524980,
-      "SHA256": "4c40da2879ab222c542b97215138f1f907c315c305cae3d89b3c1a23a29f09a1",
+      "Bytes": 525076,
+      "SHA256": "7c2804566906e51a65d6461b8c8094f74937dce7e0828d6c6042b5ecc10fd275",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
-      "SourceModified": "2026-11-21T18:09:37"
+      "SourceModified": "2026-11-21T18:42:45"
     },
     {
       "RelativePath": "mwdialog_check.rules.txt",
@@ -940,10 +940,10 @@
     },
     {
       "RelativePath": "tests\\test_check.py",
-      "Bytes": 20352,
-      "SHA256": "c43068d489b9e7aab2dedddc7ead2dbfb06eec54de0a2ad477326225ad7c1310",
+      "Bytes": 20652,
+      "SHA256": "f71c9273b06e2744929f85ea1063ba128d11edafc86d43675ee2a237f82ac80f",
       "Source": "<Steam Morrowind>\\tests\\test_check.py",
-      "SourceModified": "2026-11-14T07:39:02"
+      "SourceModified": "2026-11-21T18:42:45"
     },
     {
       "RelativePath": "tests\\test_core_safety.py",
