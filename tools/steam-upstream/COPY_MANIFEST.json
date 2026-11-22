@@ -502,10 +502,10 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 545072,
-      "SHA256": "618bc5e7750ac8300f2161873dabc34dfd64a55b35fc4e0139c5220a289ed578",
+      "Bytes": 544984,
+      "SHA256": "83b57361a5abed704899f71ea8986696967926d88ba9d552e7003b956d9f942b",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
-      "SourceModified": "2026-11-22T14:32:33"
+      "SourceModified": "2026-11-22T15:37:48"
     },
     {
       "RelativePath": "mwdialog_check.rules.txt",
@@ -913,10 +913,10 @@
     },
     {
       "RelativePath": "tests\\test_automerge_objects.py",
-      "Bytes": 8789,
-      "SHA256": "ff9983133817747f2c3c7988a1d43e6d94facdfba899f41452f6092da9a216c1",
+      "Bytes": 9895,
+      "SHA256": "688468e8c52f5d710e7f17dfea0757c8d52d75817d8ce2899bf5b16d2ccce6eb",
       "Source": "<Steam Morrowind>\\tests\\test_automerge_objects.py",
-      "SourceModified": "2026-11-22T07:39:15"
+      "SourceModified": "2026-11-22T15:38:15"
     },
     {
       "RelativePath": "tests\\test_cache.py",
@@ -1124,9 +1124,9 @@
     {
       "RelativePath": "RESUME.md",
       "Source": "<Steam Morrowind>\\RESUME.md",
-      "Bytes": 30496,
-      "SHA256": "fc900cf740024bfcae013a764153aa5fc0e05b40ba614d603b62599a13819e83",
-      "SourceModified": "2026-11-22T09:10:50"
+      "Bytes": 30571,
+      "SHA256": "fd5e14489273db47b6d1f5b8e4eee27b59f6d2e4598f41ec6ed71d1d977bb6aa",
+      "SourceModified": "2026-11-22T15:29:14"
     },
     {
       "RelativePath": "mwdialog_ownership.py",
@@ -1641,9 +1641,9 @@
     {
       "RelativePath": "mwdialog_mergeplan.py",
       "Source": "<Steam Morrowind>\\mwdialog_mergeplan.py",
-      "Bytes": 13676,
-      "SHA256": "311dd62e3967cb79362fc72f7d259ee26c621a905028e25cd2f090766f99391e",
-      "SourceModified": "2026-11-22T14:08:15"
+      "Bytes": 13667,
+      "SHA256": "24053c3ab85813a0ab53df91cfdee580187883ab9c381998d4e254a73d2fadda",
+      "SourceModified": "2026-11-22T15:37:48"
     },
     {
       "RelativePath": "mwdialog_pathgrid.py",

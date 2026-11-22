@@ -1270,13 +1270,13 @@ def _main(argv=None):
                          "masters aren't active, or whose dialogue refers to things no installed mod defines, "
                          "are left out (their target mod isn't installed). Later inputs win conflicts")
     mg.add_argument("--auto-merge", action="store_true",
-                    help=f"find active .esp plugins with no scripts and no cell/land/pathgrid edits that can move "
+                    help=f"find active .esp plugins with no cell/land/pathgrid edits that can move "
                          f"together without changing what wins against any other plugin, merge them into one "
                          f"('{AUTO_MERGE_NAME}', or --merge-name), and deactivate them (recorded in {MERGE_RECORD}; "
                          f"--add-all-esp leaves them out). Use --dry-run first")
     mg.add_argument("--merge-name", metavar="NAME.esp", help="with --auto-merge: the merged plugin's name")
     mg.add_argument("--merge-plan", action="store_true",
-                    help="recommend merges --auto-merge doesn't make (plugins with scripts, cells, land or "
+                    help="recommend merges --auto-merge doesn't make (plugins with cells, land or "
                          "pathgrids), grouped by kind; read-only: writes outputs\\mwmanager_merge_plan.txt and "
                          ".json. Merges that place objects in cells need a new game")
     mg.add_argument("--plan-size", type=int, default=8, metavar="N",

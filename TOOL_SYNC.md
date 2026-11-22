@@ -318,3 +318,8 @@ Behaviour changes:
   GUI way). Tools → Auto-merge plugins… runs `--auto-merge --yes` with its follow-up `--fix --multipatch`.
 - `--fix` checks pathgrids, reusing `mwmanager_pathgrid_cache.json` for unchanged cells. The float list now also
   sees our own patches' deletions (a dock Cell Fixes deletes still lists the items left on it).
+## Steam sync to morrowind-conflict-tools dd6c46d — 2026-11-22 (Pacific)
+- Refreshed (root and `tools\steam-upstream\`): `mwdialog_check.py`, `mwdialog_mergeplan.py`; snapshot also gains the
+  updated `tests\test_automerge_objects.py` and `RESUME.md`. Backup: `_backup\pre-scriptmerge-sync-20261122-154139\`.
+- `--auto-merge` (and Tools → Auto-merge plugins…) now takes plugins with scripts; cells, land and pathgrids still
+  keep a plugin out. `--auto-merge` / `--merge-plan` help in `mwmanager_overrides.py` updated to match.
