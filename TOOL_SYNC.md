@@ -332,3 +332,11 @@ Behaviour changes:
 - `mwpersonaleffects` `config.lua` / `mcm.lua` (snapshot and `reference\mwse-lua-guards\`): the MCM saved a config table
   holding a function, so MWSE failed to encode `mwpersonaleffects.json`; it now saves a plain copy via `config.save()`.
   Snapshot gains `tests\test_suite_config_save.py`. Backup: `_backup\pre-pe-save-sync-*\`.
+
+## Steam sync to morrowind-conflict-tools f6efcb0 — 2026-11-22 (Pacific)
+- New (root and `tools\steam-upstream\`): `mwdialog_anthology_override.py` (Cell Fixes moves objects and door arrivals
+  of mods made for land another mod moved, e.g. Anthology Solstheim / Tomb of the Snow Prince +7,+6) and
+  `mwdialog_cellorder.py` (cell-filter load-order rules).
+- Refreshed: `mwdialog_check.py`, `mwdialog_footing.py` (moved-island rescue), `mwdialog_mastercheck.py` (INFO severities).
+- Snapshot tests: new `test_anthology_override.py`, `test_cell_filter_order.py`; updated `test_footing.py`,
+  `test_mastercheck.py`. `COPY_MANIFEST.json` and `UPSTREAM.json` refreshed. Backup: `_backup\pre-landmove-sync-*\`.

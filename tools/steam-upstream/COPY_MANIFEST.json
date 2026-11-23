@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-22 (America/Los_Angeles); merge plan, pathgrid module, floatfix history, Lua-name redundancy",
+  "SyncedAt": "2026-11-22T18:39:57",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -502,10 +502,10 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 545787,
-      "SHA256": "1d58dc2fe9a8592fbc0e7fa3876785ebd3d9591c0d14da768a2c6d6d9a50698d",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
-      "SourceModified": "2026-11-22T16:07:42"
+      "Bytes": 549773,
+      "SHA256": "3d52c64683ea2f3862c54379879b49473c49a7d32a509b9dd1c6d636c88d29af",
+      "SourceModified": "2026-11-22T18:30:42"
     },
     {
       "RelativePath": "mwdialog_check.rules.txt",
@@ -607,10 +607,10 @@
     },
     {
       "RelativePath": "mwdialog_mastercheck.py",
-      "Bytes": 43223,
-      "SHA256": "a1292268b6ad9a6659fe672dc0cb03cc3473bea47745d0686a25fd6991d3126b",
       "Source": "<Steam Morrowind>\\mwdialog_mastercheck.py",
-      "SourceModified": "2026-11-22T07:44:49"
+      "Bytes": 43420,
+      "SHA256": "989a4e1c5d462967eab188c7eabe5eb44e2d8a3d29e9e807a941a40ae1d1612a",
+      "SourceModified": "2026-11-22T16:59:04"
     },
     {
       "RelativePath": "mwdialog_masters.py",
@@ -969,10 +969,10 @@
     },
     {
       "RelativePath": "tests\\test_mastercheck.py",
-      "Bytes": 18423,
-      "SHA256": "a3f79bfb992819d7fdc155d195cd9312230ce04c2a0fdb25966881aefb15cd98",
       "Source": "<Steam Morrowind>\\tests\\test_mastercheck.py",
-      "SourceModified": "2026-11-22T07:44:49"
+      "Bytes": 18548,
+      "SHA256": "82781b2905ada1221147599f90d438019e9a80c72c88d442ec08f83200667eaa",
+      "SourceModified": "2026-11-22T16:59:36"
     },
     {
       "RelativePath": "tests\\test_mastercheck_cache.py",
@@ -1166,9 +1166,9 @@
     {
       "RelativePath": "mwdialog_footing.py",
       "Source": "<Steam Morrowind>\\mwdialog_footing.py",
-      "Bytes": 21525,
-      "SHA256": "1716d5f899078bf988fe6822034bbe5574978fc058c64feac45341c9d2900712",
-      "SourceModified": "2026-11-22T13:27:14"
+      "Bytes": 25035,
+      "SHA256": "36ee709a517b06005eb38c6bee7152a62ffb3674644db9e23508b7372bfc83bb",
+      "SourceModified": "2026-11-22T18:02:06"
     },
     {
       "RelativePath": "mwdialog_soundcache.py",
@@ -1410,9 +1410,9 @@
     {
       "RelativePath": "tests\\test_footing.py",
       "Source": "<Steam Morrowind>\\tests\\test_footing.py",
-      "Bytes": 5218,
-      "SHA256": "0cb11d87e9ce5726253be1856bb5a22a6ef214060eed16ae21c459923b5cede8",
-      "SourceModified": "2026-11-21T23:20:58"
+      "Bytes": 8381,
+      "SHA256": "61e6c9cae055e45aa68c936151ada9eb45aaf9d3b7262477a018cd4cf027246e",
+      "SourceModified": "2026-11-22T18:02:15"
     },
     {
       "RelativePath": "tests\\test_floatfix_rescue.py",
@@ -1693,6 +1693,34 @@
       "Bytes": 1296,
       "SHA256": "800d72b0db412238412cad872a105601be7423284f7f87d850b5aae11c7bd71c",
       "SourceModified": "2026-11-22T16:13:08"
+    },
+    {
+      "RelativePath": "mwdialog_anthology_override.py",
+      "Source": "<Steam Morrowind>\\mwdialog_anthology_override.py",
+      "Bytes": 10612,
+      "SHA256": "e12599d37662e1a658212cc81f251654fabd7fe09d0567953bcb82b3eb20c9bb",
+      "SourceModified": "2026-11-22T18:35:50"
+    },
+    {
+      "RelativePath": "mwdialog_cellorder.py",
+      "Source": "<Steam Morrowind>\\mwdialog_cellorder.py",
+      "Bytes": 4256,
+      "SHA256": "5bc9c6f4cbbfa1e6eae07c4de19662b2bce6ebd18203b1b212c983f3e9c25efa",
+      "SourceModified": "2026-11-22T17:07:05"
+    },
+    {
+      "RelativePath": "tests\\test_anthology_override.py",
+      "Source": "<Steam Morrowind>\\tests\\test_anthology_override.py",
+      "Bytes": 4017,
+      "SHA256": "bc63ef6e98a7949aa93fcf58e03092f7f8ccb9ef44ce039ea0210b0dea54b3de",
+      "SourceModified": "2026-11-22T18:35:44"
+    },
+    {
+      "RelativePath": "tests\\test_cell_filter_order.py",
+      "Source": "<Steam Morrowind>\\tests\\test_cell_filter_order.py",
+      "Bytes": 2569,
+      "SHA256": "d9debfb645aa556a2a61c55256ec2bad7acb3443b3efdce87a1bb452568678e2",
+      "SourceModified": "2026-11-22T17:07:05"
     }
   ]
 }
