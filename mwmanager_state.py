@@ -10,6 +10,7 @@ from mwdialog_check import *  # noqa: F401,F403  (names resolve in mwdialog_chec
 import codecs
 import copy
 import csv
+import errno
 import glob
 import hashlib
 import json
@@ -769,6 +770,43 @@ def find_disabled_plugin(data_dir, name):
     return None
 
 
+def move_disabled_plugin_file(source, target):
+    try:
+        os.replace(source, target)
+        return
+    except OSError as error:
+        if error.errno != errno.EXDEV and getattr(error, "winerror", None) != 17:
+            raise
+    created = complete = False
+    try:
+        with open(source, "rb") as src, open(target, "xb") as dst:
+            created = True
+            shutil.copyfileobj(src, dst)
+        shutil.copystat(source, target)
+        complete = True
+    finally:
+        if created and not complete:
+            os.unlink(target)
+    try:
+        os.unlink(source)
+    except OSError:
+        os.unlink(target)
+        raise
+
+
+def rollback_disabled_plugin_moves(moved):
+    errors = []
+    for source, target in reversed(moved):
+        try:
+            if os.path.exists(source):
+                raise FileExistsError(f"Cannot restore {source}: a file already exists")
+            move_disabled_plugin_file(target, source)
+        except OSError as error:
+            errors.append(f"{target} -> {source}: {error}")
+    if errors:
+        raise OSError("Could not roll back plugin moves: " + "; ".join(errors))
+
+
 def move_plugins_to_disabled(data_dir, names):
     """Move selected plugin files out of Data Files, refusing to overwrite an earlier disabled copy."""
     data_dir = os.path.abspath(data_dir)
@@ -784,15 +822,10 @@ def move_plugins_to_disabled(data_dir, names):
             if earlier:
                 raise FileExistsError(f"A disabled copy already exists: {earlier}")
             os.makedirs(os.path.dirname(target), exist_ok=True)
-            os.replace(source, target)
+            move_disabled_plugin_file(source, target)
             moved.append((source, target))
     except OSError:
-        for source, target in reversed(moved):
-            try:
-                if os.path.isfile(target) and not os.path.exists(source):
-                    os.replace(target, source)
-            except OSError:
-                pass
+        rollback_disabled_plugin_moves(moved)
         raise
     return moved
 
@@ -810,16 +843,10 @@ def restore_disabled_plugins(data_dir, names):
                 continue
             if os.path.exists(target):
                 raise FileExistsError(f"Cannot re-enable {filename}; a file already exists at {target}")
-            os.replace(source, target)
+            move_disabled_plugin_file(source, target)
             restored.append((source, target))
     except OSError:
-        for source, target in reversed(restored):
-            try:
-                if os.path.isfile(target) and not os.path.exists(source):
-                    os.makedirs(os.path.dirname(source), exist_ok=True)
-                    os.replace(target, source)
-            except OSError:
-                pass
+        rollback_disabled_plugin_moves(restored)
         raise
     return restored
 

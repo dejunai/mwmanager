@@ -1463,7 +1463,7 @@ class ManagerGUI(tk.Tk):
                 startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
                 startup.wShowWindow = subprocess.SW_HIDE
                 quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
-            env = dict(os.environ, MWMANAGER_GUI="1")
+            env = dict(os.environ, MWMANAGER_GUI="1", MWMANAGER_CONFLICT_GUI="1")
             process = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace",
                              bufsize=1, env=env, **quiet)
@@ -1885,6 +1885,7 @@ class ManagerGUI(tk.Tk):
                 quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
             env = os.environ.copy()
             env["MWMANAGER_GUI"] = "1"
+            env["MWMANAGER_CONFLICT_GUI"] = "1"
             log_path.parent.mkdir(parents=True, exist_ok=True)
             # a resume adds to the log of the steps already done; a fresh setup starts it over
             mode = "a" if len(commands) < 2 else "w"
@@ -2833,7 +2834,8 @@ class ManagerGUI(tk.Tk):
 
         def run_batch_check(progress):
             command = [str(py), "-u", str(manager_script), str(data_dir), "--sort", "--all", "--yes"]
-            run_logged(command, progress, "Plugin checks and patch generation")
+            conflict_env = dict(os.environ, MWMANAGER_GUI="1", MWMANAGER_CONFLICT_GUI="1")
+            run_logged(command, progress, "Plugin checks and patch generation", env=conflict_env)
             report_file = APP_DIR / "outputs" / "mwmanager_new_conflicts.txt"
             scan = [str(py), "-u", str(manager_script), str(data_dir), "--cell-conflicts", "--no-interactive"]
             run_logged(scan, progress, "Cell-conflict scan")
@@ -2854,7 +2856,7 @@ class ManagerGUI(tk.Tk):
                 if conflict.wait():
                     raise RuntimeError("The interactive cell-conflict review did not complete.")
                 run_logged([str(py), "-u", str(manager_script), str(data_dir), "--sort", "--all", "--yes"],
-                           progress, "Applying conflict choices and regenerating patches")
+                           progress, "Applying conflict choices and regenerating patches", env=conflict_env)
 
         altered_choices = []
 
@@ -3312,8 +3314,9 @@ class ManagerGUI(tk.Tk):
                 progress("Updating the plugin catalog and load order…")
                 command = [str(self._console_python()), "-u", str(APP_DIR / "mwmanager.py"),
                            str(data_dir), "--sort", "--all", "--yes"]
-                process = managed_processes.run(command, cwd=str(APP_DIR), text=True, encoding="utf-8",
-                                                errors="replace", timeout=7200, **quiet)
+                process = managed_processes.run(
+                    command, cwd=str(APP_DIR), text=True, encoding="utf-8", errors="replace", timeout=7200,
+                    env=dict(os.environ, MWMANAGER_GUI="1", MWMANAGER_CONFLICT_GUI="1"), **quiet)
                 if process.returncode:
                     raise RuntimeError((process.stderr or process.stdout or "MWManager checks failed")[-4000:])
                 return result
@@ -3407,6 +3410,7 @@ class ManagerGUI(tk.Tk):
                 quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
             env = os.environ.copy()
             env["MWMANAGER_GUI"] = "1"
+            env["MWMANAGER_CONFLICT_GUI"] = "1"
             recent = []
             summary = []            # the run's own end-of-run summary, shown when the job window has closed
 
@@ -3578,7 +3582,9 @@ class ManagerGUI(tk.Tk):
                     quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
                 process = _popen(command, cwd=str(APP_DIR), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                            stderr=subprocess.STDOUT, text=True, encoding="utf-8",
-                                           errors="replace", bufsize=1, **quiet)
+                                           errors="replace", bufsize=1,
+                                           env=dict(os.environ, MWMANAGER_GUI="1", MWMANAGER_CONFLICT_GUI="1"),
+                                           **quiet)
                 recent = []
                 for line in process.stdout:
                     message = " ".join(line.strip().split())

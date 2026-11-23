@@ -92,7 +92,12 @@ setup** after a pause; optional community masters can also be explicitly skipped
   core/prerequisite file metadata is unchanged. Changed files, unreadable metadata, or a new session
   require preflight again. This is a performance cache, not a content-integrity guarantee.
 - **Conflict decisions:** GUI patch generation uses a native picker instead of opening a console.
-  Skip leaves a pair unchanged; Finish review saves choices already made and returns to patch generation.
+  Detected moved-land incompatibilities require choosing one plugin family; the picker lists dependents to
+  set aside (even when the game and manager are on different drives) and explains when an active merge must
+  first be undone. Skip or Finish leaves an unresolved
+  incompatibility active and stops patch generation. Builds recheck after sorting, unreadable plugins stop
+  the check, and a failed build does not launch the game. Other conflicts can still be skipped. Detection is
+  not exhaustive: variable-driven scripts and Lua dependencies may need separate review.
 - **Archive trust checks:** scanned ZIP/7-Zip/RAR payloads are classified before extraction; unsafe paths,
   reparse/link entries, encryption, excessive expansion, high compression ratios and blocked payloads stop install.
 - **Recovery center:** interrupted regular and major-master deployment state, ready plugin stages and journal

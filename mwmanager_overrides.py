@@ -18,6 +18,72 @@ def doubled_turnoff_message(count, moved, backup):
             f"MWManager\\disabled_plugins and listed in {DISABLED_RECORD}.")
 
 
+def conflict_rule_backup_path(_rules_path):
+    return backup_file("state", f"mwmanager_rules-{time.strftime('%Y%m%d-%H%M%S')}.bak")
+
+
+def reenable_candidate_path(data_dir, name, lookup):
+    return lookup.get(name.lower()) or find_disabled_plugin(data_dir, name)
+
+
+def restore_reenabled_plugins(data_dir, names):
+    lookup = index_dir(data_dir)
+    return restore_disabled_plugins(data_dir, [n for n in names if n.lower() not in lookup])
+
+
+def rollback_conflict_moves(moved):
+    rollback_disabled_plugin_moves(moved)
+
+
+def rollback_reenabled_moves(restored):
+    rollback_disabled_plugin_moves(restored)
+
+
+def conflict_choice(index, total, kind, a, b, conflict, labels, options, default,
+                    off_plans, blockers, active_names, lua_named):
+    if os.environ.get("MWMANAGER_CONFLICT_GUI") != "1":
+        return input("  > ").strip().lower()
+    from mwmanager_workflow import conflict_answer
+
+    details = f"{a} vs {b}\n\n"
+    evidence = conflict.get("incompatible")
+    if evidence:
+        details += (f"Moved land leaves {', '.join(sorted(evidence['evidence']))} at the old location "
+                    f"in {len(evidence['cells'])} cell(s). Load order cannot fix this; one side must be "
+                    "turned off.\n\n")
+    else:
+        details += f"{b} loads later and currently wins where the plugins conflict.\n\n"
+    affected = list(dict.fromkeys(
+        str(labels.get(item[0], item[0][1]))
+        for field in ("place", "refs", "settings") for item in conflict[field]))
+    if affected:
+        details += ("Affected cells:\n" + "\n".join(affected[:20]) +
+                    (f"\n... and {len(affected) - 20} more" if len(affected) > 20 else "") + "\n\n")
+    if conflict.get("doubled"):
+        details += f"{conflict['dups']} identical objects are placed twice.\n\n"
+    rebuilt = [item[0] for item in conflict["place"] if item[6] and item[0][0] == "i"]
+    if rebuilt and not evidence:
+        details += ("Both rebuilt these interiors:\n" +
+                    "\n".join(str(labels.get(cell, cell[1])) for cell in rebuilt) + "\n\n")
+    if blockers:
+        details += "Unavailable choices:\n" + "\n".join(blockers.values()) + "\n\n"
+    for key, plan in off_plans.items():
+        names = [active_names.get(name, name) for name in plan]
+        details += f"If you {options[key][3]}:\n" + "\n".join(names) + "\n\n"
+        lua_affected = [active_names[name] for name in plan if name in lua_named and name in active_names]
+        if lua_affected:
+            details += ("MWSE Lua or metadata also names these plugins; review those mods separately:\n" +
+                        "\n".join(lua_affected) + "\n\n")
+    if not evidence:
+        details += ("Ordering changes who wins; interior choices rebuild the affected cells. "
+                    "Disabling a plugin removes it from the active load order.\n\n")
+    details += ("Choose Skip to leave this pair unchanged, or Finish review to keep decisions already made.")
+    return conflict_answer(
+        f"Cell conflict {index} of {total}: {kind}", details,
+        [(value[3], key) for key, value in options.items()] +
+        [("Skip this pair", "s"), ("Finish review", "q")], default or "s")
+
+
 def repair_sound_ffmpeg():
     bundled = os.path.join(TOOLS_DIR, "ffmpeg.exe")
     return bundled if os.path.isfile(bundled) else shutil.which("ffmpeg")
@@ -57,12 +123,14 @@ def cell_conflicts_interactive(args):
             and not args.dry_run and not getattr(args, "no_interactive", False))
 
 
+
+
 def save_pending_cell_conflicts(args, ranked):
     if not getattr(args, "no_interactive", False) or args.dry_run:
         return
     answered = read_conflict_answers(os.path.dirname(os.path.abspath(args.data_dir)))
-    pending = ["|".join(sorted(pair)) for pair, _conflict in ranked
-               if "|".join(sorted(pair)) not in answered]
+    pending = ["|".join(sorted(pair)) for pair, conflict in ranked
+               if conflict.get("incompatible") or "|".join(sorted(pair)) not in answered]
     try:
         with open(output_file(NEW_CONFLICTS_FILE), "w", encoding="utf-8") as candidate_file:
             candidate_file.write("\n".join(pending))
@@ -488,373 +556,14 @@ def resolve(args, report):
 
 
 
-def conflict_session(args, ranked, name_of, masters, total_new, plugins=(), labels=None):
-    """--cell-conflicts in a console: go through the conflicts, most serious first, and for each one
-    add an [Order] rule (either way) or turn one of the two plugins off. Offers --sort at the end."""
-    game_dir = os.path.dirname(os.path.abspath(args.data_dir))
-    rules_path = manager_file(RULES_FILE)
-    needed = {m for ms in masters.values() for m in ms}            # masters of something active
-    # what earlier runs of this session added is replaced, not added to: this run's answers are the ones that count
-    text = open(rules_path, encoding="cp1252", errors="replace").read() if os.path.exists(rules_path) else ""
-    own_text, earlier = split_conflict_rules(text)
-    existing = ordering_rules(parse_rules(rules_path, own_text)[0])
-    earlier_l = {(a.lower(), b.lower()) for a, b in earlier}
-    if earlier and not args.dry_run:
-        # wiped before anything is read or asked: this session starts from your own rules only
-        shutil.copy2(rules_path, backup_file("state", f"mwmanager_rules-{time.strftime('%Y%m%d-%H%M%S')}.bak"))
-        with open(rules_path, "w", encoding="cp1252", errors="replace", newline="\r\n") as f:
-            f.write(own_text)
-        print(f"\nRemoved the {len(earlier)} [Order] rule(s) earlier --cell-conflicts runs added to {RULES_FILE} "
-              f"(backed up first); a pair an earlier run decided shows what it chose.")
-
-    def has_rule(first, second):
-        return any(first in r and second in r and r.index(first) < r.index(second) for r in existing)
-
-    labels = labels or {}
-    winners = read_cell_winners(game_dir)
-    new_winners = {}
-
-    def rebuilt(c):
-        """The interiors both rebuilt (major: much of each built over the other)."""
-        return [p[0] for p in c["place"] if p[6] and p[0][0] == "i"]
-
-    def chosen(a, b, c):
-        cs = rebuilt(c)
-        return bool(cs) and all(k[1] in winners and {winners[k[1]][1].lower(), winners[k[1]][2].lower()} == {a, b}
-                                for k in cs)
-
-    new_rules, turned_off = [], []
-    answers = read_conflict_answers(game_dir)        # last time's answers: the defaults
-    answered = {}
-    use_all = bool(getattr(args, "use_answers", False))     # --use-answers: last time's answer for every pair
-    only_new = bool(getattr(args, "only_new", False))       # --only-new: replay answered pairs, ask the new ones
-    unanswered = []                                         # pairs with no answer yet (left for you)
-    # An .esm always loads before every .esp, so an [Order] rule can't change who wins between them:
-    # list those pairs as warnings and only ask about the rest.
-    # (one that both rebuilt an interior is still asked: whose version of the place wins doesn't depend on order)
-    mixed = lambda k: k[0].endswith(".esm") != k[1].endswith(".esm")
-    esm_vs_esp = [(k, c) for k, c in ranked if mixed(k) and not rebuilt(c)]
-    if esm_vs_esp:
-        print("\n" + "=" * 70 + f"\nWARNINGS: {len(esm_vs_esp)} conflict(s) between an .esm and an .esp"
-              "\n(an .esm always loads first, so the .esp always wins; no [Order] rule can change that)\n" + "=" * 70)
-        for (a, b), c in esm_vs_esp:
-            esm, esp = (name_of[a], name_of[b]) if a.endswith(".esm") else (name_of[b], name_of[a])
-            parts = []
-            if c["place"]:
-                parts.append(f"same spot in {len(c['place'])} cell(s)")
-            if c["refs"]:
-                parts.append(f"{len(c['refs'])} same objects")
-            if c["settings"]:
-                parts.append(f"{len(c['settings'])} cell setting(s)")
-            extra = f"; {c['dups']} objects placed twice" if c.get("doubled") else ""
-            print(f"  WARN {esp} overrides {esm}: {', '.join(parts)}{extra}")
-        ranked = [(k, c) for k, c in ranked if not mixed(k) or rebuilt(c)]
-    # interiors where you already chose whose version wins: decided
-    picked = [(k, c) for k, c in ranked if chosen(k[0], k[1], c)]
-    if picked:
-        print("\n" + "=" * 70 + f"\nREBUILT INTERIORS ALREADY CHOSEN: {len(picked)} conflict(s) (not asked; "
-              f"{CELL_WINNERS_FILE})\n" + "=" * 70)
-        for (a, b), c in picked:
-            for k in rebuilt(c):
-                cell, w, _l = winners[k[1]]
-                print(f"  WARN '{cell}': {w}'s version wins ({name_of[a]} vs {name_of[b]})")
-        picked_keys = {k for k, _c in picked}
-        ranked = [(k, c) for k, c in ranked if k not in picked_keys]
-    # pairs your own rules already order: decided, so only a warning
-    ruled = [(k, c) for k, c in ranked if has_rule(k[0], k[1]) or has_rule(k[1], k[0])]
-    if ruled:
-        print("\n" + "=" * 70 + f"\nALREADY DECIDED BY YOUR RULES: {len(ruled)} conflict(s) (not asked)\n" + "=" * 70)
-        for (a, b), c in ruled:
-            first, second = (a, b) if has_rule(a, b) else (b, a)
-            extra = f"; {c['dups']} objects placed twice" if c.get("doubled") else ""
-            print(f"  WARN {name_of[second]} wins over {name_of[first]} where they conflict (your [Order] rule){extra}")
-        ruled_keys = {k for k, _c in ruled}
-        ranked = [(k, c) for k, c in ranked if k not in ruled_keys]
-    if not ranked:
-        print("\nNo conflicts left to decide.")
-        return 0
-    print("\n" + "=" * 70 + "\nCHOOSE WHAT TO DO (most serious first; Enter takes last time's answer, or skips; "
-          "s skips, a takes last time's answers for the rest, q stops)\n" + "=" * 70)
-    for i, ((a, b), c) in enumerate(ranked, 1):
-        if a in {x.lower() for x, _w in turned_off} or b in {x.lower() for x, _w in turned_off}:
-            continue
-        A, B = name_of[a], name_of[b]
-        kind = "DOUBLED" if c.get("doubled") else "MAJOR" if (any(p[6] for p in c["place"]) or len(c["refs"]) >= 20) else "minor"
-        parts = []
-        if c["place"]:
-            parts.append(f"build in the same spot in {len(c['place'])} cell(s)")
-        if c["refs"]:
-            parts.append(f"change {len(c['refs'])} of the same objects")
-        if c["settings"]:
-            parts.append(f"change {len(c['settings'])} cell setting(s)")
-        print(f"\n[{i}/{len(ranked)}] {kind}: {A}  vs  {B}")
-        print(f"    they {', '.join(parts)}; {B} loads later, so its version wins now")
-        if c.get("patched_some"):
-            pl, k, t = c["patched_some"]
-            print(f"    ({name_of.get(pl, pl)} patches the two of them, but only in {k} of these {t} cell(s))")
-        if c.get("doubled"):
-            print(f"    {c['dups']} identical objects are placed twice: two versions of one mod, keep only one")
-        if (a, b) in earlier_l:
-            print(f"    (an earlier run chose: {B} after {A})")
-        elif (b, a) in earlier_l:
-            print(f"    (an earlier run chose: {A} after {B})")
-        if mixed((a, b)):
-            opts = {}
-            print("    (an .esm always loads before an .esp, so no [Order] rule changes who wins elsewhere)")
-        else:
-            opts = {"1": ("order", A, B, f"keep {B} winning"), "2": ("order", B, A, f"make {A} win")}
-            print(f"  [1] keep  {B} winning   (adds [Order] {A} > {B})")
-            print(f"  [2] make  {A} win   (adds [Order] {B} > {A})")
-        rb = rebuilt(c)
-        if rb:
-            names = ", ".join(f"'{labels.get(k, k[1])}'" for k in rb[:4]) + (f" and {len(rb) - 4} more" if len(rb) > 4 else "")
-            print(f"    both rebuilt {names}")
-            opts["5"] = ("cell", B, A, f"{B}'s version of the rebuilt interior(s)")
-            opts["6"] = ("cell", A, B, f"{A}'s version of the rebuilt interior(s)")
-            print(f"  [5] use {B}'s version of {'that place' if len(rb) == 1 else 'those places'}: {A}'s objects "
-                  f"there are removed and its doors in arrive in {B}'s layout")
-            print(f"  [6] use {A}'s version of {'that place' if len(rb) == 1 else 'those places'} (the same, the "
-                  f"other way round)")
-        for key, n in (("3", A), ("4", B)):
-            hit = relied_on(plugins, n, [x for x, _w in turned_off]) if plugins and n.lower() not in needed else {}
-            if n.lower() in needed:
-                print(f"  [{key}] (can't turn off {n}: another active plugin needs it as a master)")
-            elif hit:
-                print(f"  [{key}] (can't turn off {n}: {relied_on_text(hit, name_of)})")
-            else:
-                opts[key] = ("off", n, A if n == B else B, f"turn off {n}")
-                print(f"  [{key}] turn off {n}")
-        pair_key = "|".join(sorted((a, b)))
-        last = answers.get(pair_key) or {}
-        default = ""
-        if last.get("do") == "skip":
-            default = "s"
-        elif last.get("do") and last.get("plugin"):
-            want = last["plugin"].lower()
-            default = next((k for k, (w, x, _y, _l) in opts.items()
-                            if w == last["do"] and x.lower() == want), "")
-        if default:
-            shown = "skip" if default == "s" else f"[{default}] {opts[default][3]}"
-            print(f"  [Enter] last time: {shown}   [s] skip   [a] last time's answers for the rest   [q] stop")
-        else:
-            print("  [Enter] skip   [a] last time's answers for the rest   [q] stop"
-                  + ("   (last time's answer no longer fits)" if last else ""))
-        if (use_all or only_new) and not last:
-            unanswered.append(pair_key)
-            if use_all:
-                print("  > (new conflict: no answer yet; left for you)")
-                continue
-        if use_all or (only_new and last):
-            ans = default or "s"
-            print(f"  > {ans}  (last time's answer)")
-        else:
-            try:
-                if os.environ.get("MWMANAGER_CONFLICT_GUI") == "1":
-                    from mwmanager_workflow import conflict_answer
-                    details = (f"{A} vs {B}\n\nThey {', '.join(parts)}.\n"
-                               f"{B} loads later and currently wins.\n\n")
-                    affected = list(dict.fromkeys(
-                        str(labels.get(item[0], item[0][1]))
-                        for field in ("place", "refs", "settings") for item in c[field]))
-                    if affected:
-                        details += ("Affected cells:\n" + "\n".join(affected[:20]) +
-                                    (f"\n... and {len(affected) - 20} more" if len(affected) > 20 else "") + "\n\n")
-                    if c.get("doubled"):
-                        details += f"{c['dups']} identical objects are placed twice. Usually keep only one version.\n\n"
-                    if rb:
-                        details += ("Both rebuilt these interiors:\n" +
-                                    "\n".join(str(labels.get(k, k[1])) for k in rb) + "\n\n")
-                    details += ("Ordering changes who wins. Interior choices rebuild the affected cells. "
-                                "Disabling a plugin removes it from the active load order; required plugins "
-                                "cannot be disabled.\n\nChoose Skip to leave this pair unchanged, "
-                                "or Finish review to keep decisions already made.")
-                    ans = conflict_answer(
-                        f"Cell conflict {i} of {len(ranked)}: {kind}", details,
-                        [(value[3], key) for key, value in opts.items()] +
-                        [("Skip this pair", "s"), ("Finish review", "q")], default or "s")
-                else:
-                    ans = input("  > ").strip().lower()
-            except EOFError:
-                break
-            if ans == "q":
-                break
-            if ans == "a":
-                # last time's answers for every pair that has one; a new pair is still asked
-                if last:
-                    ans = default or "s"
-                    print("    (taking last time's answers from here on; new conflicts are still asked)")
-                else:
-                    print("    (taking last time's answers from here on; new conflicts like this one are still "
-                          "asked)")
-                    valid = set(opts) | {"", "s", "a", "q"}
-                    try:
-                        ans = input("  > ").strip().lower()
-                        while ans not in valid:
-                            print(f"    '{ans}' isn't one of the choices; try again")
-                            ans = input("  > ").strip().lower()
-                    except EOFError:
-                        break
-                    if ans == "q":
-                        break
-                    if ans in ("", "a"):
-                        ans = default or "s"
-            elif ans == "":
-                ans = default or "s"
-        if ans not in opts:
-            if ans == "s":
-                answered[pair_key] = {"do": "skip", "plugin": "", "pair": [A, B], "when": time.strftime("%Y-%m-%d %H:%M")}
-            continue
-        what, x, y, label = opts[ans]
-        answered[pair_key] = {"do": what, "plugin": x, "pair": [A, B], "when": time.strftime("%Y-%m-%d %H:%M")}
-        if what == "cell":
-            for k in rebuilt(c):
-                new_winners[k[1]] = (labels.get(k, k[1]), x, y)
-            print(f"    -> {label} ({x} wins, built by --fix as {CELL_WINNER_PATCH})")
-            continue
-        if what == "order":
-            new_rules.append((x, y, label))
-            existing.append([x.lower(), y.lower()])
-            print(f"    -> [Order] {x} > {y}")
-        else:
-            turned_off.append((x, f"turned off by --cell-conflicts (conflicts with {y})"))
-            print(f"    -> {x} will be turned off")
-    if not args.dry_run:                             # what is still unanswered, for --full's last question
-        try:
-            with open(output_file(NEW_CONFLICTS_FILE), "w", encoding="utf-8") as _nf:
-                _nf.write("\n".join(p_ for p_ in unanswered if p_ not in answered))
-        except OSError:
-            pass
-    if answered and not args.dry_run:
-        answers.update(answered)
-        write_conflict_answers(game_dir, answers)
-        print(f"\nRemembered {len(answered)} answer(s) in {CONFLICT_ANSWERS_FILE}: next time they're the default.")
-    if new_winners and not args.dry_run:
-        winners.update(new_winners)
-        write_cell_winners(game_dir, winners)
-        print(f"\nRecorded {len(new_winners)} rebuilt interior choice(s) in {CELL_WINNERS_FILE}.")
-    if not new_rules and not turned_off and not new_winners:
-        print("\nNo new rules and no plugins turned off." + (" (Earlier runs' conflict rules were removed; run --sort so the order follows your own rules.)" if earlier and not args.dry_run else ""))
-        return 0
-    stamp = time.strftime("%Y-%m-%d %H:%M")
-    if new_rules:
-        if os.path.exists(rules_path):
-            shutil.copy2(rules_path, backup_file("state", f"mwmanager_rules-{time.strftime('%Y%m%d-%H%M%S')}.bak"))
-        with open(rules_path, "w", encoding="cp1252", errors="replace", newline="\r\n") as f:
-            f.write(own_text.rstrip("\n") + "\n" if own_text.strip() else "")
-            f.write(f"\n{CONFLICT_RULES_HEADER} {stamp} ----\n")
-            for x, y, label in new_rules:
-                f.write(f"\n[Order]\n{x}\n{y}\n; {label} where they conflict\n")
-        print(f"\nWrote {len(new_rules)} [Order] rule(s) to {RULES_FILE}"
-              + (f", replacing the {len(earlier)} from earlier --cell-conflicts runs" if earlier else "")
-              + " (old file backed up).")
-    if turned_off:
-        gone = {n.lower() for n, _w in turned_off}
-        cur = read_load_order(args) or []
-        set_game_files(default_ini(args), [n for n in cur if n.lower() not in gone], "--cell-conflicts")
-        moved = move_plugins_to_disabled(args.data_dir, [n for n, _w in turned_off])
-        rec = read_disabled(game_dir)
-        for n, w in turned_off:
-            rec[n] = w
-        write_disabled(game_dir, rec)
-        print(f"Turned off {len(turned_off)} plugin(s): {', '.join(n for n, _w in turned_off)} "
-              f"({len(moved)} moved to MWManager\\disabled_plugins; listed in {DISABLED_RECORD}).")
-    if IN_FULL:
-        print("(--full sorts next, so the changes take effect.)")
-        return 0
-    if getattr(args, "defer_follow_up", False):
-        print("(follow-up deferred; the calling workflow will sort and rebuild patches.)")
-        return 0
-    what = "--sort --fix --multipatch" if (turned_off or new_winners) else "--sort"
-    if use_all and getattr(args, "use_answers", False):
-        ans = "y"
-        print(f"\nRunning {what} so the changes take effect (--use-answers).")
-    else:
-        try:
-            ans = input(f"\nRun {what} now so the changes take effect? [Y/n] ").strip().lower()
-        except EOFError:
-            ans = "n"
-    if ans in ("", "y", "yes"):
-        argv2 = [args.data_dir, "--sort", "--yes", "--fix-log", args.fix_log, "--encoding", args.encoding]
-        if turned_off or new_winners:
-            # a plugin gone leaves the others' order as it was, but the multipatch's merged lists and
-            # the fix patch were built with it: rebuild them, or they still name its objects
-            argv2 += ["--fix", "--multipatch"]
-        if args.ini:
-            argv2 += ["--ini", args.ini]
-        return main(argv2)
-    print(f"Run mwmanager.bat {what} when you're ready.")
-    return 0
 
 
 
 
 
 
-def release_lost_winners(args):
-    """Each plugin in mwmanager_disabled.txt was turned off in favour of another (the "winner": doubled with
-    it, or conflicting with it). When that winner is gone - not in Data Files, or no longer active (in the
-    load order or inside an active merge) - the plugin that lost is turned back on. Runs at the start of
-    every run that isn't a dry run."""
-    if getattr(args, "plugins", None) or getattr(args, "openmw_cfg", None) or args.dry_run:
-        return 0
-    data_dir = os.path.abspath(args.data_dir)
-    game_dir = os.path.dirname(data_dir)
-    rec = read_disabled(game_dir)
-    if not rec:
-        return 0
-    lookup = index_dir(data_dir)
-    disabled_lookup = {name.casefold(): find_disabled_plugin(data_dir, name)
-                       for name in rec if find_disabled_plugin(data_dir, name)}
-    active = {n.lower() for n in (read_load_order(args) or [])} | merged_away(game_dir, data_dir)
-    lost = []
-    for loser, why in rec.items():
-        m = WINNER_RE.search(why)
-        if not m:
-            continue
-        winner = m.group("w").strip()
-        if winner.lower() not in lookup:
-            lost.append((loser, winner, "is no longer in Data Files"))
-        elif winner.lower() not in active:
-            lost.append((loser, winner, "is no longer in the load order"))
-    lost = [x for x in lost if x[0].lower() in lookup or x[0].lower() in disabled_lookup]
-    if not lost:
-        return 0
-    print("\nPlugins turned off in favour of another that is gone:")
-    for loser, winner, how in lost:
-        print(f"  {loser}: turned off for {winner}, which {how}; turning {loser} back on")
-    a2 = copy.copy(args)
-    a2.reenable = [l for l, _w, _h in lost]
-    a2.dry_run = False
-    run_reenable(a2)
-    return len(lost)
 
 
-def run_reenable(args):
-    """--reenable [NAME...]: turn plugins --fix turned off (doubled) back on."""
-    data_dir = os.path.abspath(args.data_dir)
-    game_dir = os.path.dirname(data_dir)
-    rec = read_disabled(game_dir)
-    want = {x.lower() for x in args.reenable} if args.reenable else {n.lower() for n in rec}
-    todo = [n for n in rec if n.lower() in want]
-    if not todo:
-        print("--reenable: none of those were turned off by --fix. Turned off: " + (", ".join(rec) or "none"))
-        return 1
-    ini = args.ini or os.path.join(game_dir, "Morrowind.ini")
-    if not args.dry_run:
-        restore_disabled_plugins(data_dir, todo)
-    lookup = index_dir(data_dir)
-    cur = read_load_order(args) or []
-    paths = [lookup[n.lower()] for n in cur if n.lower() in lookup] + \
-            [lookup[n.lower()] for n in todo if n.lower() in lookup and n.lower() not in {c.lower() for c in cur}]
-    if args.dry_run:
-        print("--reenable would turn back on: " + ", ".join(todo))
-        return 0
-    backup = set_game_files(ini, [os.path.basename(p) for p in sort_vanilla(paths)], "reenable")
-    for n in todo:
-        del rec[n]
-    write_disabled(game_dir, rec)
-    print(f"  Turned back on: {', '.join(todo)} (old list saved as {backup}).")
-    return 0
 
 
 
@@ -1027,9 +736,10 @@ def run_full(args):
         common += ["--ini", args.ini]
     if args.vortex_dir:
         common += ["--vortex-dir", args.vortex_dir]
-    first = [("turn back on what earlier runs turned off", None)]
+    first = []
     if read_merge_record(game_dir):
         first.append(("undo the auto-merge", ["--unmerge", "--no-follow-up"]))
+    first.append(("turn back on what earlier runs turned off", None))
     if args.add_all_esp:
         first.append(("add every plugin in Data Files", ["--add-all-esp"]))
     if not getattr(args, "no_redundant", False):
@@ -1037,9 +747,7 @@ def run_full(args):
         # plugins - a plugin turned off here is not cleaned, fixed, merged, patched or asset-checked
         first.append(full_redundant_step(args, common))
     first += [
-        (("cell conflicts (your remembered answers)", ["--cell-conflicts", "--use-answers"])
-         if getattr(args, "use_answers", False) else
-         ("cell conflicts (report)", ["--cell-conflicts", "--no-interactive"])),
+        full_conflict_step(args, common),
         ("sort", ["--sort", "--no-follow-up"]),
         # The Multipatch is built once, after the auto-merge (which ignores this tool's patches): before it,
         # the old one is set aside and only clean + fix (+ the asset check) run on the unmerged order.
@@ -1075,7 +783,7 @@ def run_full(args):
                         rc = full_reset(args, game_dir)
                     elif extra == "multipatch_aside":
                         rc = multipatch_aside(args, game_dir)
-                    elif extra and extra[0] in ("--redundant", "--redundant-auto"):
+                    elif extra and extra[0] in ("--redundant", "--redundant-auto", "--cell-conflicts"):
                         rc = main([args.data_dir] + extra)       # carries its own copy of the common flags
                     else:
                         rc = main([args.data_dir] + extra + common)
@@ -1310,6 +1018,8 @@ def _main(argv=None):
     tc.add_argument("--only-new", action="store_true",
                     help="with --cell-conflicts: replay every remembered answer and ask only about the conflicts "
                          "that have none yet")
+    tc.add_argument("--only-incompatible", action="store_true",
+                    help="with --cell-conflicts: ask only about incompatible plugins that require a choice")
     tc.add_argument("--defer-follow-up", action="store_true",
                     help="with --cell-conflicts: save answers without launching a follow-up; the calling workflow "
                          "will sort and rebuild patches")
@@ -1542,11 +1252,17 @@ def _main(argv=None):
                 drop_vanished_added_masters(args)
             except (OSError, UnicodeError, ValueError) as e:
                 print(f"(could not check {ADDED_MASTERS_RECORD}: {e})", file=sys.stderr)
-        if getattr(args, "data_dir", None) and os.path.isdir(args.data_dir) and not args.reenable:
+        if (getattr(args, "data_dir", None) and os.path.isdir(args.data_dir)
+                and args.reenable is None and not args.full):
             try:
                 release_lost_winners(args)
             except (OSError, UnicodeError) as e:
                 print(f"(could not check {DISABLED_RECORD}: {e})", file=sys.stderr)
+            if not args.fix and not args.dry_run:
+                try:
+                    release_lost_doubles(args)
+                except (OSError, UnicodeError, FormatError) as e:
+                    print(f"(could not check {DOUBLED_DELETED_FILE}: {e})", file=sys.stderr)
         if getattr(args, "data_dir", None) and os.path.isdir(args.data_dir) and args.redundant_undo is None:
             try:
                 release_redundant(args)
@@ -1701,7 +1417,7 @@ def _main(argv=None):
         return 0
     if args.unmerge is not None:
         rc = run_unmerge(args, plugins)
-        if rc == 0 and not args.no_follow_fix:
+        if rc == 0 and not args.dry_run and not args.no_follow_fix:
             # the merged plugins are back: activate everything and put it in rule order
             print("\n" + "=" * 70 + "\nFOLLOW-UP: --add-all-esp --sort\n" + "=" * 70)
             argv2 = [args.data_dir, "--add-all-esp", "--sort", "--fix-log", args.fix_log, "--encoding", args.encoding]
@@ -1714,6 +1430,12 @@ def _main(argv=None):
                 argv2 += ["--ini", args.ini]
             return main(argv2)
         return rc
+    if not args.dry_run and not args.cell_conflicts and (
+            args.auto_merge or args.merge or args.fix or args.patch_esm or args.multipatch):
+        rc = build_compatibility_guard(args, plugins)
+        if rc:
+            return rc
+        plugins, bsas, data_dirs = resolve(args, report)
     if args.auto_merge:
         rc = run_auto_merge(args, plugins, bsas, data_dirs)
         if rc == 0 and getattr(args, "merged_now", False) and not args.no_follow_fix:
@@ -1737,21 +1459,27 @@ def _main(argv=None):
         if not args.sort and not IN_FULL:                    # their masters may load after them: sort
             print("\n" + "=" * 70 + "\nSORT: plugin headers now name different masters\n" + "=" * 70)
             run_sort(args, resolve(args, Report())[0])
+            if getattr(args, "sort_changed", False):
+                rc = build_compatibility_guard(args, resolve(args, Report())[0])
+                if rc:
+                    return rc
         plugins, bsas, data_dirs = resolve(args, report)     # those plugins now find their masters
     if args.fix:
         fix_ref_groups(args, plugins)
+        fix_cell_layouts(args, plugins)
     if args.fix and fix_long_names(args, plugins, bsas) and not args.dry_run:
         plugins, bsas, data_dirs = resolve(args, report)
     if args.fix and not args.no_doubled:
         gone = {n.lower() for n in fix_doubled(args, plugins)}
         if gone:
             plugins = [(n, p) for n, p in plugins if n.lower() not in gone]
+            args._cell_ctx = None
     if args.fix and args.performers_patch and not args.no_performers:
         fix_performers(args, plugins)
     elif args.fix and not args.dry_run:
         drop_performers_patch(args)       # the mwperformers MWSE mod decides in the game now
     if args.fix:
-        fix_cell_winners(args, plugins)
+        fix_cell_winners(args, plugins, report)
     loaded_patches = {n.lower() for n, _p in plugins} & {x.lower() for x in OUR_PATCHES}
     if args.fix or args.patch_esm or args.multipatch:   # rebuilt from scratch: leave them out of the scan
         names = [n.lower() for n, _p in plugins]
@@ -1760,7 +1488,7 @@ def _main(argv=None):
                                      if n not in [x.lower() for x in OUR_PATCHES])
         else:                                      # new: right after the masters
             args.esm_patch_pos = sum(1 for n in names if n.endswith(".esm"))
-        plugins = [(n, p) for n, p in plugins if n.lower() not in [x.lower() for x in OUR_PATCHES]]
+        plugins = fix_scan_plugins(args, plugins)
     if not plugins:
         print("No plugins found.", file=sys.stderr)
         return 2
@@ -1768,6 +1496,11 @@ def _main(argv=None):
     only = {o.lower() for o in args.only} if args.only else None
     if args.sort:
         run_sort(args, resolve(args, Report())[0])     # every active plugin, our patches included
+        if getattr(args, "sort_changed", False) and not args.dry_run and (
+                args.fix or args.patch_esm or args.multipatch or not args.no_follow_fix):
+            rc = build_compatibility_guard(args, resolve(args, Report())[0])
+            if rc:
+                return rc
         if getattr(args, "sort_changed", False) and not args.no_follow_fix and not (args.fix and args.multipatch):
             # a new order can undo what the patches fixed (a later plugin now blanking 'Caldera Priory',
             # leveled lists merged in the old order): rebuild them and fix what the new order exposes
@@ -1778,7 +1511,7 @@ def _main(argv=None):
         plugins, bsas, data_dirs = resolve(args, report)   # dates changed: read the new order
         if (args.fix or args.patch_esm or args.multipatch) and not hasattr(args, "esm_patch_pos"):
             args.esm_patch_pos = sum(1 for n, _p in plugins if n.lower().endswith(".esm"))
-        plugins = [(n, p) for n, p in plugins if n.lower() not in [x.lower() for x in OUR_PATCHES]] \
+        plugins = fix_scan_plugins(args, plugins) \
             if (args.fix or args.patch_esm or args.multipatch) else plugins
     if args.clean:
         run_clean(args, plugins, only)        # cleaned files are what the checks below see

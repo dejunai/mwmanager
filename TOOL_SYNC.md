@@ -340,3 +340,16 @@ Behaviour changes:
 - Refreshed: `mwdialog_check.py`, `mwdialog_footing.py` (moved-island rescue), `mwdialog_mastercheck.py` (INFO severities).
 - Snapshot tests: new `test_anthology_override.py`, `test_cell_filter_order.py`; updated `test_footing.py`,
   `test_mastercheck.py`. `COPY_MANIFEST.json` and `UPSTREAM.json` refreshed. Backup: `_backup\pre-landmove-sync-*\`.
+
+## Steam sync to morrowind-conflict-tools 8bc43c7 — 2026-11-23 (Pacific)
+- Supersedes the preceding whole-land relocation: terrain, winning pathgrids or matching literal script
+  coordinates can require choosing one incompatible plugin family; no scripts are recompiled or land relocated.
+- Refreshed seven shared `mwdialog_*.py` modules in the root and snapshot, plus upstream documentation and tests;
+  refreshed `COPY_MANIFEST.json`, `utility_source_manifest.json`, and `UPSTREAM.json`. Stale compiled-cache entries
+  were removed from the manifest. No live state was copied.
+- MWManager now reuses the upstream grouped-choice and safe re-enable logic, moving disabled plugins into its own
+  folder, including across drives with rollback on failure. Its native picker shows dependent plugins and blocked
+  choices; unresolved incompatibilities stop builds.
+  Builds recheck after sorting, including merged-plugin and unreadable-header safeguards; a failed build does not
+  launch the game. `--full` unmerges before re-enabling, and dry-run unmerge does not launch a mutating follow-up.
+- Backup of replaced files and hashes: `_backup\pre-incompatible-sync-20261123-022706\`.

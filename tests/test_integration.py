@@ -3,10 +3,12 @@ is a temporary folder: no real MWManager state, Data Files, Vortex or game folde
 import contextlib
 import io
 import json
+import errno
 import os
 import sys
 import shutil
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -64,6 +66,326 @@ class Composition(unittest.TestCase):
                 self.assertTrue(mc.CACHE_FILE.startswith(tmp))
                 self.assertTrue(t.PLAN.startswith(tmp))
         self.assertEqual((mc.CACHE_FILE, t.PLAN), before)
+
+
+class IncompatibleWorkflow(unittest.TestCase):
+    def setUp(self):
+        from test_core_master_order import plugin
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name)
+        self.manager = root / "manager"
+        (self.manager / "outputs").mkdir(parents=True)
+        self.data = root / "game" / "Data Files"
+        self.data.mkdir(parents=True)
+        self.ini = self.data.parent / "Morrowind.ini"
+        self.ini.write_text("[Game Files]\n", encoding="cp1252")
+        self.scope = mwmanager_upstream.use_manager_dir(str(self.manager))
+        self.scanner = self.scope.__enter__()
+        self.addCleanup(self.scope.__exit__, None, None, None)
+        self.plugin = plugin
+
+    def family(self):
+        m = self.scanner
+        names = ["A.esm", "B.esp", "A addon.esp", m.CELL_WINNER_PATCH]
+        for name, masters in (("A.esm", []), ("B.esp", []),
+                              ("A addon.esp", ["A.esm"]), (m.CELL_WINNER_PATCH, [])):
+            self.plugin(self.data / name, masters)
+        m.write_load_order(str(self.data.parent), names, "test")
+        args = types.SimpleNamespace(data_dir=str(self.data), ini=str(self.ini), dry_run=False,
+                                     use_answers=False, only_new=False, no_interactive=False,
+                                     defer_follow_up=True)
+        paths = [(name, str(self.data / name)) for name in names]
+        masters = {name.lower(): [] for name in names}
+        masters["a addon.esp"] = ["a.esm"]
+        conflict = {"place": [], "refs": [], "settings": [], "doubled": False, "dups": 0,
+                    "incompatible": {"cells": {(1, 2)}, "evidence": {"terrain", "pathgrid"}}}
+        return args, paths, masters, conflict
+
+    @contextlib.contextmanager
+    def different_volumes(self):
+        data, disabled = self.data, self.manager / "disabled_plugins"
+        replace, rename = os.replace, os.rename
+
+        def cross_volume(source, target):
+            parents = {Path(source).parent, Path(target).parent}
+            return parents == {data, disabled}
+
+        def checked(operation):
+            def move(source, target):
+                if cross_volume(source, target):
+                    raise OSError(errno.EXDEV, "different volumes")
+                return operation(source, target)
+            return move
+
+        with mock.patch.object(os, "replace", side_effect=checked(replace)), \
+                mock.patch.object(os, "rename", side_effect=checked(rename)):
+            yield
+
+    def test_gui_choice_disables_the_family_and_reenables_only_with_its_master(self):
+        m = self.scanner
+        args, plugins, masters, conflict = self.family()
+        names = {name.lower(): name for name, _path in plugins}
+        with mock.patch.dict(os.environ, {"MWMANAGER_CONFLICT_GUI": "1"}), \
+                mock.patch("mwmanager_workflow.conflict_answer", return_value="3") as picker, \
+                mock.patch.object(m, "IN_FULL", False):
+            self.assertEqual(m.conflict_session(
+                args, [(("a.esm", "b.esp"), conflict)], names, masters, 1, plugins), 0)
+        details, choices = picker.call_args.args[1:3]
+        self.assertIn("terrain", details)
+        self.assertIn("A addon.esp", details)
+        self.assertEqual({key for _label, key in choices}, {"3", "4", "s", "q"})
+        self.assertEqual(m.read_load_order(args), ["B.esp"])
+        self.assertTrue((self.manager / "disabled_plugins" / "A.esm").is_file())
+        self.assertTrue((self.manager / "disabled_plugins" / "A addon.esp").is_file())
+        self.assertTrue((self.data / m.CELL_WINNER_PATCH).is_file())
+        self.assertNotIn(m.CELL_WINNER_PATCH, m.read_disabled(str(self.data.parent)))
+
+        args.reenable = ["A addon.esp"]
+        self.assertEqual(m.run_reenable(args), 1)
+        self.assertTrue((self.manager / "disabled_plugins" / "A addon.esp").is_file())
+        args.reenable = ["A.esm", "A addon.esp"]
+        self.assertEqual(m.run_reenable(args), 0)
+        order = m.read_load_order(args)
+        self.assertLess(order.index("A.esm"), order.index("A addon.esp"))
+        self.assertTrue((self.data / "A.esm").is_file())
+        self.assertTrue((self.data / "A addon.esp").is_file())
+
+    def test_gui_shows_why_a_merge_blocks_both_choices(self):
+        m = self.scanner
+        args, plugins, masters, conflict = self.family()
+        self.plugin(self.data / m.AUTO_MERGE_NAME, [])
+        plugins.append((m.AUTO_MERGE_NAME, str(self.data / m.AUTO_MERGE_NAME)))
+        masters[m.AUTO_MERGE_NAME.lower()] = []
+        names = {name.lower(): name for name, _path in plugins}
+        with mock.patch.dict(os.environ, {"MWMANAGER_CONFLICT_GUI": "1"}), \
+                mock.patch("mwmanager_workflow.conflict_answer", return_value="s") as picker:
+            self.assertEqual(m.conflict_session(
+                args, [(("a.esm", "b.esp"), conflict)], names, masters, 1, plugins), 2)
+        self.assertIn("unmerge", picker.call_args.args[1].lower())
+        self.assertEqual({key for _label, key in picker.call_args.args[2]}, {"s", "q"})
+        self.assertTrue((self.data / "A.esm").is_file())
+        self.assertFalse((self.manager / "disabled_plugins").exists())
+
+    def test_conflict_family_moves_across_volumes_and_can_be_reenabled(self):
+        m = self.scanner
+        args, plugins, masters, conflict = self.family()
+        names = {name.lower(): name for name, _path in plugins}
+        with self.different_volumes(), mock.patch.dict(os.environ, {"MWMANAGER_CONFLICT_GUI": "1"}), \
+                mock.patch("mwmanager_workflow.conflict_answer", return_value="3"), \
+                mock.patch.object(m, "IN_FULL", False):
+            self.assertEqual(m.conflict_session(
+                args, [(("a.esm", "b.esp"), conflict)], names, masters, 1, plugins), 0)
+            args.reenable = ["A.esm", "A addon.esp"]
+            self.assertEqual(m.run_reenable(args), 0)
+        self.assertTrue((self.data / "A.esm").is_file())
+        self.assertTrue((self.data / "A addon.esp").is_file())
+
+    def test_failed_conflict_choice_rolls_back_cross_volume_moves(self):
+        m = self.scanner
+        args, plugins, masters, conflict = self.family()
+        names = {name.lower(): name for name, _path in plugins}
+        with self.different_volumes(), mock.patch.dict(os.environ, {"MWMANAGER_CONFLICT_GUI": "1"}), \
+                mock.patch("mwmanager_workflow.conflict_answer", return_value="3"), \
+                mock.patch.object(m, "set_game_files", side_effect=OSError("cannot write load order")):
+            with self.assertRaisesRegex(OSError, "cannot write load order"):
+                m.conflict_session(args, [(("a.esm", "b.esp"), conflict)], names, masters, 1, plugins)
+        self.assertEqual(m.read_load_order(args), [name for name, _path in plugins])
+        self.assertTrue((self.data / "A.esm").is_file())
+        self.assertTrue((self.data / "A addon.esp").is_file())
+
+    def test_cross_volume_copy_failure_preserves_the_original(self):
+        m = self.scanner
+        self.family()
+        source = self.data / "A.esm"
+        original = source.read_bytes()
+
+        def fail_copy(_source, target):
+            target.write(b"partial")
+            raise OSError("copy failed")
+
+        with self.different_volumes(), mock.patch.object(shutil, "copyfileobj", side_effect=fail_copy):
+            with self.assertRaisesRegex(OSError, "copy failed"):
+                m.move_plugins_to_disabled(str(self.data), ["A.esm"])
+        self.assertEqual(source.read_bytes(), original)
+        self.assertFalse((self.manager / "disabled_plugins" / "A.esm").exists())
+
+    def test_cross_volume_source_removal_failure_preserves_the_original(self):
+        m = self.scanner
+        self.family()
+        source = self.data / "A.esm"
+        original = source.read_bytes()
+        unlink = os.unlink
+
+        def fail_source(path, *args, **kwargs):
+            if Path(path) == source:
+                raise PermissionError("source is locked")
+            return unlink(path, *args, **kwargs)
+
+        with self.different_volumes(), mock.patch.object(os, "unlink", side_effect=fail_source):
+            with self.assertRaisesRegex(PermissionError, "source is locked"):
+                m.move_plugins_to_disabled(str(self.data), ["A.esm"])
+        self.assertEqual(source.read_bytes(), original)
+        self.assertFalse((self.manager / "disabled_plugins" / "A.esm").exists())
+
+    def test_direct_builds_refuse_unresolved_incompatibilities(self):
+        m = self.scanner
+        args, plugins, _masters, _conflict = self.family()
+        for in_full in (False, True):
+            for action in (["--fix"], ["--multipatch"], ["--auto-merge"], ["--merge", "Merged.esp", "B.esp"]):
+                with self.subTest(action=action, in_full=in_full), \
+                        mock.patch.object(m, "IN_FULL", in_full), \
+                        mock.patch.object(m, "run_cell_conflicts", return_value=2) as guard, \
+                        mock.patch.object(m, "run_auto_merge") as merge:
+                    rc = m.main([str(self.data), *action, "--no-vortex", "--no-interactive", "--yes"])
+                    self.assertEqual(rc, 2)
+                    self.assertTrue(guard.call_args.kwargs["incompatible_only"])
+                    merge.assert_not_called()
+        self.assertEqual(m.read_load_order(args), [name for name, _path in plugins])
+
+    def test_gui_build_guard_opens_only_mandatory_choices(self):
+        m = self.scanner
+        args, plugins, _masters, _conflict = self.family()
+        with mock.patch.dict(os.environ, {"MWMANAGER_CONFLICT_GUI": "1"}), \
+                mock.patch.object(m, "run_cell_conflicts", return_value=0) as scan:
+            self.assertEqual(m.build_compatibility_guard(args, plugins), 0)
+        checked = scan.call_args.args[0]
+        self.assertTrue(checked.only_incompatible)
+        self.assertTrue(checked.defer_follow_up)
+        self.assertTrue(scan.call_args.kwargs["incompatible_only"])
+
+    def test_full_build_guard_can_ask_new_gui_choices_after_sorting(self):
+        m = self.scanner
+        args, plugins, _masters, _conflict = self.family()
+        args.no_interactive = True
+        top_args = types.SimpleNamespace(dry_run=False, no_interactive=False)
+        with mock.patch.dict(os.environ, {"MWMANAGER_CONFLICT_GUI": "1"}), \
+                mock.patch.object(m, "IN_FULL", True), \
+                mock.patch.object(m, "TOP_ARGS", top_args), \
+                mock.patch.object(m, "run_cell_conflicts", return_value=0) as scan:
+            self.assertEqual(m.build_compatibility_guard(args, plugins), 0)
+        checked = scan.call_args.args[0]
+        self.assertFalse(checked.no_interactive)
+        self.assertTrue(checked.only_incompatible)
+
+    def test_sort_rechecks_before_a_combined_build(self):
+        m = self.scanner
+        self.family()
+        for extra in ([], ["--no-follow-up"]):
+            with self.subTest(extra=extra), contextlib.ExitStack() as stack:
+                guard = stack.enter_context(mock.patch.object(m, "build_compatibility_guard", side_effect=[0, 2]))
+                stack.enter_context(mock.patch.object(m, "run_sort",
+                    side_effect=lambda args, _plugins: setattr(args, "sort_changed", True)))
+                for name in ("fix_ref_groups", "fix_cell_layouts", "fix_cell_winners", "drop_performers_patch"):
+                    stack.enter_context(mock.patch.object(m, name))
+                for name in ("fix_omwaddon_masters", "fix_long_names"):
+                    stack.enter_context(mock.patch.object(m, name, return_value=False))
+                stack.enter_context(mock.patch.object(m, "scan", side_effect=AssertionError("built after sorting")))
+                self.assertEqual(m.main([str(self.data), "--sort", "--all", "--no-vortex", "--no-sounds",
+                                         "--no-doubled", "--no-interactive", "--yes", *extra]), 2)
+                self.assertEqual(guard.call_count, 2)
+
+    def test_master_repair_sort_rechecks_before_fixing(self):
+        m = self.scanner
+        self.family()
+        with mock.patch.object(m, "build_compatibility_guard", side_effect=[0, 2]) as guard, \
+                mock.patch.object(m, "fix_omwaddon_masters", return_value=True), \
+                mock.patch.object(m, "run_sort",
+                                  side_effect=lambda args, _plugins: setattr(args, "sort_changed", True)), \
+                mock.patch.object(m, "fix_ref_groups") as fix:
+            self.assertEqual(m.main([str(self.data), "--fix", "--no-vortex", "--no-sounds",
+                                     "--no-interactive", "--yes"]), 2)
+            self.assertEqual(guard.call_count, 2)
+        fix.assert_not_called()
+
+    def test_play_is_not_launched_after_an_incompatible_build_is_refused(self):
+        m = self.scanner
+        with mock.patch.object(m, "main", return_value=2), \
+                mock.patch.object(m, "PLAY_REQUEST", [object()]), \
+                mock.patch.object(m, "launch_game") as launch:
+            self.assertEqual(mwmanager_upstream.run_cli([]), 2)
+        launch.assert_not_called()
+
+    def test_failed_reenable_restores_files_to_the_disabled_folder(self):
+        m = self.scanner
+        args, plugins, masters, conflict = self.family()
+        names = {name.lower(): name for name, _path in plugins}
+        with mock.patch.dict(os.environ, {"MWMANAGER_CONFLICT_GUI": "1"}), \
+                mock.patch("mwmanager_workflow.conflict_answer", return_value="3"), \
+                mock.patch.object(m, "IN_FULL", False):
+            self.assertEqual(m.conflict_session(
+                args, [(("a.esm", "b.esp"), conflict)], names, masters, 1, plugins), 0)
+        args.reenable = ["A.esm", "A addon.esp"]
+        with self.different_volumes(), \
+                mock.patch.object(m, "set_game_files", side_effect=OSError("cannot write load order")):
+            with self.assertRaisesRegex(OSError, "cannot write load order"):
+                m.run_reenable(args)
+        self.assertEqual(m.read_load_order(args), ["B.esp"])
+        self.assertEqual(set(m.read_disabled(str(self.data.parent))), {"A.esm", "A addon.esp"})
+        for name in args.reenable:
+            self.assertTrue((self.manager / "disabled_plugins" / name).is_file())
+            self.assertFalse((self.data / name).exists())
+
+    def test_fix_scan_includes_cell_fixes_for_script_placeholders(self):
+        m = self.scanner
+        _args, _plugins, _masters, _conflict = self.family()
+        scanned = []
+
+        class ScanReached(Exception):
+            pass
+
+        def capture(_args, plugins, _bsas, _dirs, _report):
+            scanned.extend(name for name, _path in plugins)
+            raise ScanReached
+
+        with contextlib.ExitStack() as stack:
+            for name in ("fix_ref_groups", "fix_cell_layouts", "fix_cell_winners", "drop_performers_patch"):
+                stack.enter_context(mock.patch.object(m, name))
+            for name in ("fix_omwaddon_masters", "fix_long_names"):
+                stack.enter_context(mock.patch.object(m, name, return_value=False))
+            stack.enter_context(mock.patch.object(m, "build_compatibility_guard", return_value=0))
+            stack.enter_context(mock.patch.object(m, "scan", side_effect=capture))
+            with self.assertRaises(ScanReached):
+                m.main([str(self.data), "--fix", "--no-doubled", "--no-performers", "--no-vortex",
+                        "--no-sounds", "--no-interactive", "--yes"])
+        self.assertIn(m.CELL_WINNER_PATCH, scanned)
+
+    def test_full_unmerges_before_reset_and_stops_before_building(self):
+        m = self.scanner
+        args = types.SimpleNamespace(data_dir=str(self.data), init=True, dry_run=False, yes=True,
+                                     fix_log=str(self.manager / "fix.log"), encoding="cp1252",
+                                     vortex_dir=None, add_all_esp=False, no_redundant=True,
+                                     fresh_answers=True, use_answers=False, no_interactive=True,
+                                     ini=str(self.ini), collide_radius=m.COLLIDE_ANY_RADIUS, play=False)
+        phases = []
+
+        def fake_main(argv):
+            phases.append(argv[1])
+            return 2 if argv[1] == "--cell-conflicts" else 0
+
+        with mock.patch.object(m, "main", side_effect=fake_main), \
+                mock.patch.object(m, "full_missing_masters", return_value=[]), \
+                mock.patch.object(m, "read_merge_record", return_value={"Merged.esp": ["A.esp"]}), \
+                mock.patch.object(m, "read_load_order", return_value=[]), \
+                mock.patch.object(m, "full_reset", side_effect=lambda *_a: phases.append("--reset") or 0):
+            self.assertEqual(m.run_full(args), 2)
+        self.assertEqual(phases, ["--unmerge", "--reset", "--cell-conflicts"])
+
+    def test_unmerge_dry_run_does_not_change_files_or_start_a_follow_up(self):
+        m = self.scanner
+        names = ["Morrowind.esm", "Small.esp", "Other.esp", m.AUTO_MERGE_NAME]
+        for name in names:
+            self.plugin(self.data / name, [])
+        m.write_load_order(str(self.data.parent), [names[0], names[-1]], "test")
+        m.write_merge_record(str(self.data.parent), {names[-1]: names[1:3]})
+        paths = [self.ini, self.manager / "mwmanager_sort_order.txt",
+                 self.manager / "mwmanager_merged.txt", self.data / names[-1]]
+        before = {path: path.read_bytes() for path in paths}
+        before_names = {path.name for path in self.data.iterdir()}
+        with mock.patch.object(m, "run_add_all_esp", side_effect=AssertionError("unexpected follow-up")):
+            self.assertEqual(m.main([str(self.data), "--unmerge", "--dry-run", "--no-vortex"]), 0)
+        self.assertEqual({path: path.read_bytes() for path in paths}, before)
+        self.assertEqual({path.name for path in self.data.iterdir()}, before_names)
 
 
 class AssetRepairAlwaysOn(unittest.TestCase):

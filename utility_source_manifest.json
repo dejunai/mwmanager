@@ -1,6 +1,6 @@
 {
   "paths_note": "<Steam Morrowind> is the Steam Morrowind install root; snapshot and working paths are relative to the MWManager folder.",
-  "synced_at": "2026-11-15 (America/Los_Angeles); reviewed late Steam Python and Lua refresh",
+  "synced_at": "2026-11-23 (America/Los_Angeles); incompatible-plugin workflow sync",
   "tracked_tools": [
     {
       "name": "dialog scanner / manager core",
@@ -8,9 +8,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_check.py",
       "working": "mwdialog_check.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14); MWManager behaviour in mwmanager.py, mwmanager_upstream.py, mwmanager_state.py, mwmanager_overrides.py, mwmanager_init.py",
-      "source_sha256": "f8b8f64c38a72d4d375af464aae8efd0722dbdad0cd7b3e72cd0a7e2110f179f",
-      "snapshot_sha256": "f8b8f64c38a72d4d375af464aae8efd0722dbdad0cd7b3e72cd0a7e2110f179f",
-      "working_sha256": "f8b8f64c38a72d4d375af464aae8efd0722dbdad0cd7b3e72cd0a7e2110f179f",
+      "source_sha256": "add5436b0c575ded3ebfd4df00749b83bb7cc12d157a4bd3d14825b12ad00ffc",
+      "snapshot_sha256": "add5436b0c575ded3ebfd4df00749b83bb7cc12d157a4bd3d14825b12ad00ffc",
+      "working_sha256": "add5436b0c575ded3ebfd4df00749b83bb7cc12d157a4bd3d14825b12ad00ffc",
       "working_matches_upstream": true,
       "extension": [
         "mwmanager.py",
@@ -121,9 +121,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_mastercheck.py",
       "working": "mwdialog_mastercheck.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "87b85ad5b0e9e63d13fe082242bf90679cc7f149d4e26ff906b5854eff2ff4f3",
-      "snapshot_sha256": "87b85ad5b0e9e63d13fe082242bf90679cc7f149d4e26ff906b5854eff2ff4f3",
-      "working_sha256": "87b85ad5b0e9e63d13fe082242bf90679cc7f149d4e26ff906b5854eff2ff4f3",
+      "source_sha256": "d0eac2341e988efe20cbc1c2a2f32c15069a552682346ffd5cbdfd3de358d59d",
+      "snapshot_sha256": "d0eac2341e988efe20cbc1c2a2f32c15069a552682346ffd5cbdfd3de358d59d",
+      "working_sha256": "d0eac2341e988efe20cbc1c2a2f32c15069a552682346ffd5cbdfd3de358d59d",
       "working_matches_upstream": true
     },
     {
@@ -198,9 +198,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_loadorder.py",
       "working": "mwdialog_loadorder.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "89858c07a08f6d43351ba1c1d038062f79f2481b746d9ac43495545f552e57cc",
-      "snapshot_sha256": "89858c07a08f6d43351ba1c1d038062f79f2481b746d9ac43495545f552e57cc",
-      "working_sha256": "89858c07a08f6d43351ba1c1d038062f79f2481b746d9ac43495545f552e57cc",
+      "source_sha256": "0718662af962dca40e1a8d96ef31e4c76dcc08e6f17eca50f45ad2081c7d9a75",
+      "snapshot_sha256": "0718662af962dca40e1a8d96ef31e4c76dcc08e6f17eca50f45ad2081c7d9a75",
+      "working_sha256": "0718662af962dca40e1a8d96ef31e4c76dcc08e6f17eca50f45ad2081c7d9a75",
       "working_matches_upstream": true
     },
     {
@@ -253,9 +253,9 @@
       "snapshot": "tools\\steam-upstream\\mwdialog_redundant.py",
       "working": "mwdialog_redundant.py",
       "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "86e91443ae3c90bf5d6cbc5a1d23e6e7cbdc81b192934fa9bfd55766ea7787cf",
-      "snapshot_sha256": "86e91443ae3c90bf5d6cbc5a1d23e6e7cbdc81b192934fa9bfd55766ea7787cf",
-      "working_sha256": "86e91443ae3c90bf5d6cbc5a1d23e6e7cbdc81b192934fa9bfd55766ea7787cf",
+      "source_sha256": "6756ec7bc790abf3d393659a6d53065b9d978bcc2fa08ef3241e405a37c609f9",
+      "snapshot_sha256": "6756ec7bc790abf3d393659a6d53065b9d978bcc2fa08ef3241e405a37c609f9",
+      "working_sha256": "6756ec7bc790abf3d393659a6d53065b9d978bcc2fa08ef3241e405a37c609f9",
       "working_matches_upstream": true
     },
     {
@@ -354,5 +354,5 @@
   ],
   "snapshot_file_list": "tools\\steam-upstream\\COPY_MANIFEST.json",
   "upstream_repo": "github.com/dejunai/morrowind-conflict-tools",
-  "upstream_commit": "f094ef6"
+  "upstream_commit": "76053db"
 }

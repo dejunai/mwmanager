@@ -172,8 +172,4 @@ def run_tidy_cli(argv=None):
 def run_cli(argv=None):
     """python mwmanager.py ...: the scanner's main(), then --play's launch."""
     scanner = compose()
-    rc = scanner.main(argv)
-    if getattr(scanner, "PLAY_REQUEST", None):
-        play_rc = scanner.launch_game(scanner.PLAY_REQUEST[0])
-        rc = rc if play_rc == 0 else play_rc
-    return rc
+    return scanner.finish_requested_play(scanner.main(argv))
