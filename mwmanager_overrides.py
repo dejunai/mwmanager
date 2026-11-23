@@ -1273,7 +1273,8 @@ def _main(argv=None):
                     help=f"find active .esp plugins with no cell/land/pathgrid edits that can move "
                          f"together without changing what wins against any other plugin, merge them into one "
                          f"('{AUTO_MERGE_NAME}', or --merge-name), and deactivate them (recorded in {MERGE_RECORD}; "
-                         f"--add-all-esp leaves them out). Use --dry-run first")
+                         f"--add-all-esp leaves them out). Plugins listed one per line in "
+                         f"mwmanager_auto-merge.blacklist.txt are never merged. Use --dry-run first")
     mg.add_argument("--merge-name", metavar="NAME.esp", help="with --auto-merge: the merged plugin's name")
     mg.add_argument("--merge-plan", action="store_true",
                     help="recommend merges --auto-merge doesn't make (plugins with cells, land or "

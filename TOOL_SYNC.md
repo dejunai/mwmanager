@@ -323,3 +323,12 @@ Behaviour changes:
   updated `tests\test_automerge_objects.py` and `RESUME.md`. Backup: `_backup\pre-scriptmerge-sync-20261122-154139\`.
 - `--auto-merge` (and Tools → Auto-merge plugins…) now takes plugins with scripts; cells, land and pathgrids still
   keep a plugin out. `--auto-merge` / `--merge-plan` help in `mwmanager_overrides.py` updated to match.
+## Steam sync to morrowind-conflict-tools 6e19094 — 2026-11-22 (Pacific)
+- Refreshed (root and `tools\steam-upstream\`): `mwdialog_check.py`; snapshot gains the updated
+  `tests\test_automerge_objects.py`.
+- New user-edited record `AUTO_MERGE_BLACKLIST` → `mwmanager_auto-merge.blacklist.txt` (MWManager folder): one plugin
+  per line, `;`/`#` comments; `--auto-merge` never merges what it lists. Help in `mwmanager_overrides.py` updated.
+## Steam sync to morrowind-conflict-tools 51c00a8 — 2026-11-22 (Pacific)
+- `mwpersonaleffects` `config.lua` / `mcm.lua` (snapshot and `reference\mwse-lua-guards\`): the MCM saved a config table
+  holding a function, so MWSE failed to encode `mwpersonaleffects.json`; it now saves a plain copy via `config.save()`.
+  Snapshot gains `tests\test_suite_config_save.py`. Backup: `_backup\pre-pe-save-sync-*\`.

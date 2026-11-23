@@ -488,9 +488,9 @@
     {
       "Path": "mods/mwpersonaleffects/config.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpersonaleffects\\config.lua",
-      "SHA256": "b1132cda3bf5d996396e652455bc11affbb1dd1e6bd90a038fe6c35ffc62d79b",
-      "Length": 584,
-      "SourceModified": "2026-11-21T19:32:32"
+      "SHA256": "24a1e338947b6f722aa39967be9f20e47521ddde9a641af3173af63e46c06055",
+      "Length": 840,
+      "SourceModified": "2026-11-22T16:12:54"
     },
     {
       "Path": "mods/mwpersonaleffects/main.lua",
@@ -502,9 +502,9 @@
     {
       "Path": "mods/mwpersonaleffects/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpersonaleffects\\mcm.lua",
-      "SHA256": "3e4ea908dc32d36ed3f900f7902f69d9b1c49fbf27de3e3adc80596aa7795d94",
-      "Length": 913,
-      "SourceModified": "2026-11-21T19:32:32"
+      "SHA256": "228eef205340bc7f8a2a5c4956a6f3103720f5689d3dc0bfe90d5af36637277d",
+      "Length": 956,
+      "SourceModified": "2026-11-22T16:12:54"
     }
   ]
 }

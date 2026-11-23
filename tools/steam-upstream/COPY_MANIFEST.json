@@ -502,10 +502,10 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Bytes": 544984,
-      "SHA256": "83b57361a5abed704899f71ea8986696967926d88ba9d552e7003b956d9f942b",
+      "Bytes": 545787,
+      "SHA256": "1d58dc2fe9a8592fbc0e7fa3876785ebd3d9591c0d14da768a2c6d6d9a50698d",
       "Source": "<Steam Morrowind>\\mwdialog_check.py",
-      "SourceModified": "2026-11-22T15:37:48"
+      "SourceModified": "2026-11-22T16:07:42"
     },
     {
       "RelativePath": "mwdialog_check.rules.txt",
@@ -913,10 +913,10 @@
     },
     {
       "RelativePath": "tests\\test_automerge_objects.py",
-      "Bytes": 9895,
-      "SHA256": "688468e8c52f5d710e7f17dfea0757c8d52d75817d8ce2899bf5b16d2ccce6eb",
+      "Bytes": 10293,
+      "SHA256": "debb9eb77a333373f741a5f3f6cd30bdb2f01e59c59d16dc718aedbc4511299e",
       "Source": "<Steam Morrowind>\\tests\\test_automerge_objects.py",
-      "SourceModified": "2026-11-22T15:38:15"
+      "SourceModified": "2026-11-22T16:07:48"
     },
     {
       "RelativePath": "tests\\test_cache.py",
@@ -1592,9 +1592,9 @@
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwsuite\\mwpersonaleffects\\config.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpersonaleffects\\config.lua",
-      "Bytes": 584,
-      "SHA256": "b1132cda3bf5d996396e652455bc11affbb1dd1e6bd90a038fe6c35ffc62d79b",
-      "SourceModified": "2026-11-21T19:32:32"
+      "Bytes": 840,
+      "SHA256": "24a1e338947b6f722aa39967be9f20e47521ddde9a641af3173af63e46c06055",
+      "SourceModified": "2026-11-22T16:12:54"
     },
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwsuite\\mwpersonaleffects\\main.lua",
@@ -1606,9 +1606,9 @@
     {
       "RelativePath": "Data Files\\MWSE\\mods\\mwsuite\\mwpersonaleffects\\mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpersonaleffects\\mcm.lua",
-      "Bytes": 913,
-      "SHA256": "3e4ea908dc32d36ed3f900f7902f69d9b1c49fbf27de3e3adc80596aa7795d94",
-      "SourceModified": "2026-11-21T19:32:32"
+      "Bytes": 956,
+      "SHA256": "228eef205340bc7f8a2a5c4956a6f3103720f5689d3dc0bfe90d5af36637277d",
+      "SourceModified": "2026-11-22T16:12:54"
     },
     {
       "RelativePath": "mwdialog_backup\\sync\\guards_off.py",
@@ -1686,6 +1686,13 @@
       "Bytes": 1648,
       "SHA256": "10b6d10e095353e0fa4cdb0e5451ae4ccf7911cacfc1402e0f60e8a29c3fafb9",
       "SourceModified": "2026-11-20T09:17:07"
+    },
+    {
+      "RelativePath": "tests\\test_suite_config_save.py",
+      "Source": "<Steam Morrowind>\\tests\\test_suite_config_save.py",
+      "Bytes": 1296,
+      "SHA256": "800d72b0db412238412cad872a105601be7423284f7f87d850b5aae11c7bd71c",
+      "SourceModified": "2026-11-22T16:13:08"
     }
   ]
 }

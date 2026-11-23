@@ -46,6 +46,7 @@
  ],
  "mwmanager_state.py": [
   "ADDED_MASTERS_RECORD",
+  "AUTO_MERGE_BLACKLIST",
   "AUTO_MERGE_NAME",
   "BACKUP_DIR",
   "CELL_FIXES_REPORT",

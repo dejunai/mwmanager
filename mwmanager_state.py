@@ -80,6 +80,7 @@ def state_names(manager_dir):
         "LOAD_ORDER_FILE": own("mwmanager_sort_order.txt"), "RULES_FILE": own("mwmanager_rules.txt"),
         "DATES_UNDO_FILE": own("mwmanager_loadorder_undo.txt"), "MERGE_RECORD": own("mwmanager_merged.txt"),
         "MERGE_REBUILD_RECORD": own("mwmanager_merge_rebuild.txt"), "DISABLED_RECORD": own("mwmanager_disabled.txt"),
+        "AUTO_MERGE_BLACKLIST": own("mwmanager_auto-merge.blacklist.txt"),
         "CONFLICT_BLACKLIST_FILE": own("mwmanager_conflict_blacklist.txt"),
         "CONFLICT_ANSWERS_FILE": own("mwmanager_conflict_answers.json"),
         "CELL_WINNERS_FILE": own("mwmanager_cell_winners.txt"),
