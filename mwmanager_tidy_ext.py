@@ -1353,14 +1353,8 @@ def lua_apply(args, lres):
                             **getattr(args, "_journal_extra", {})), done=lres["done"])
         lines, _counts = lf.format_report(report, indent="  ", done=lres["done"], refused=dict(rejected))
         ah = _scanner.asset_health_module()
-        plugin_file = next((name for name in sorted(os.listdir(package), key=str.casefold)
-                            if os.path.splitext(name)[1].casefold() in (".esp", ".esm")), None)
-        report_name = plugin_file or owner
+        report_name, header = ah.package_bug_report_subject(package, _scanner, owner, "MWManager Tidy")
         bugreport = ah.package_bug_report_path(package, report_name, "mwse")
-        header = (ah.bug_report_header(os.path.join(package, plugin_file), _scanner, mod_folder=package)
-                  if plugin_file else [f"Bug report for {owner}", f"Mod: {owner} (no plugin)",
-                                       f"Generated {time.strftime('%Y-%m-%d %H:%M')} by MWManager Tidy.",
-                                       "Paths are relative to this staged package."])
         ah.update_bug_report(bugreport, "vortex_tidy (MWSE Lua)", header, lines)
         ah.update_bug_report(ah.package_bug_report_path(package, report_name),
                              "vortex_tidy (MWSE Lua)", header, [])
@@ -1401,17 +1395,12 @@ def _write_package_asset_bug_reports(ares):
         issues, root = entry["issues"], entry["root"]
         if not issues:
             continue
-        plugin_file = next((name for name in sorted(os.listdir(root), key=str.casefold)
-                            if os.path.splitext(name)[1].casefold() in (".esp", ".esm")), None)
         owner = package_name(root)
-        header = (ah.bug_report_header(os.path.join(root, plugin_file), m, mod_folder=root) if plugin_file else
-                  [f"Bug report for {owner}", f"Mod: {owner} (no plugin)",
-                   f"Generated {time.strftime('%Y-%m-%d %H:%M')} by MWManager Tidy.",
-                   "Paths are relative to this staged package."])
-        lines = [f"Problems in the mod's files: {len(issues)}"]
-        lines += [f"  - {severity} {relative}: {message}" for severity, relative, message in issues]
-        lines += ["", "Repairable files were fixed locally; their originals are retained in this package's Off tree."]
-        report_path = ah.package_bug_report_path(root, plugin_file or owner)
+        subject, header = ah.package_bug_report_subject(root, m, owner, "MWManager Tidy")
+        lines = ah.package_asset_bug_lines(issues)
+        if lines:
+            lines += ["", "Repairable files were fixed locally; their originals are retained in this package's Off tree."]
+        report_path = ah.package_bug_report_path(root, subject)
         ah.update_bug_report(report_path, "vortex_tidy (files)", header, lines)
 
 
@@ -1855,17 +1844,12 @@ def _write_packing_reports(staging, packing):
     for package_dir_name, items in packing.items():
         package = os.path.join(staging, package_dir_name)
         owner = package_name(package)
-        plugin_file = next((name for name in sorted(os.listdir(package), key=str.casefold)
-                            if os.path.splitext(name)[1].casefold() in (".esp", ".esm")), None)
-        header = (ah.bug_report_header(os.path.join(package, plugin_file), _scanner, mod_folder=package)
-                  if plugin_file else [f"Bug report for {owner}", f"Mod: {owner} (no plugin)",
-                                       f"Generated {time.strftime('%Y-%m-%d %H:%M')} by MWManager Tidy.",
-                                       "Paths are relative to this staged package."])
+        subject, header = ah.package_bug_report_subject(package, _scanner, owner, "MWManager Tidy")
         problems = sorted({why[why.index(PACKING_MARK) + len(PACKING_MARK):] for _s, _d, why in items})
         lines = [f"Packing errors: {len(problems)}"] + [f"  - ERROR {p}" for p in problems]
         lines += ["", f"Files moved by the rename ({len(items)}):"]
         lines += [f"  {os.path.relpath(src, package)} -> {os.path.relpath(dst, package)}" for src, dst, _w in items]
-        ah.update_bug_report(ah.package_bug_report_path(package, plugin_file or owner),
+        ah.update_bug_report(ah.package_bug_report_path(package, subject),
                              "vortex_tidy (packing)", header, lines)
 
 

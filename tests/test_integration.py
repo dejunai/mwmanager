@@ -254,6 +254,26 @@ class IncompatibleWorkflow(unittest.TestCase):
         self.assertTrue(checked.defer_follow_up)
         self.assertTrue(scan.call_args.kwargs["incompatible_only"])
 
+    def test_bug_reports_exclude_interactions_and_keep_own_repairs_in_manager_outputs(self):
+        m = self.scanner
+        args, plugins, masters, _conflict = self.family()
+        world = m.World(m.Report())
+        world.masters = masters
+        world.r.add("ERROR", "A addon.esp", "", "", "B.esp deleted the last placed copy",
+                    fix=(0, ("drop_ref", 1), "dropped the reference after the deletion"))
+        world.r.add("ERROR", "A addon.esp", "", "", "requires master 'A.esm', which is not loaded before it")
+        with mock.patch.object(m, "OWN_FIXES", {"A addon.esp": [(True, "own misplaced CELL reference repaired")]}):
+            m.write_bug_reports(args, plugins, world.r, world)
+        bugreports = list((self.manager / "outputs" / "bugreports").glob("*.bugreport.txt"))
+        self.assertEqual(len(bugreports), 1)
+        text = bugreports[0].read_text(encoding="utf-8")
+        self.assertIn("======== mwmanager ========", text)
+        self.assertIn("own misplaced CELL reference repaired", text)
+        self.assertIn("requires master 'A.esm'", text)
+        self.assertNotIn("B.esp", text)
+        self.assertNotIn("dropped the reference", text)
+        self.assertFalse((self.data.parent / "bugreports").exists())
+
     def test_full_build_guard_can_ask_new_gui_choices_after_sorting(self):
         m = self.scanner
         args, plugins, _masters, _conflict = self.family()
@@ -604,7 +624,7 @@ class TidySteps(unittest.TestCase):
         """The game shows only TGA splashes (a DDS beside one was never used): at most 2048 wide, RLE when smaller,
         rewritten in place and journaled, the original kept in the mod's Off."""
         import struct
-        texconv = Path(r"G:\Program Files\Steam\steamapps\common\Morrowind\texconv.exe")
+        texconv = Path(__file__).resolve().parents[1] / "tools" / "texconv.exe"
         if not texconv.is_file():
             self.skipTest("texconv.exe not available")
         root = self.staging / "ModA-1-1-0"
@@ -676,6 +696,8 @@ class TidySteps(unittest.TestCase):
         assets = mock.Mock()
         assets.nexus_id.return_value = None
         assets.bug_report_header.return_value = ["header"]
+        assets.package_bug_report_subject.return_value = ("ModA", ["header"])
+        assets.package_asset_bug_lines.side_effect = self.t._scanner.asset_health_module().package_asset_bug_lines
         assets.package_bug_report_path.return_value = str(root / "bugreports" / "ModA.bugreport.txt")
         ares = {"ah": assets, "m": self.t._scanner,
                 "mods": {root.name: {"root": str(root),

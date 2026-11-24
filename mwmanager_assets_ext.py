@@ -23,6 +23,8 @@ TOOLS_DIR = _scanner.TOOLS_DIR
 FEATURE_OF = {"snd": "Reprocessed sounds", "tex": "Reprocessed textures",
               "keys": "Reprocessed Unix line joins", "abs": "Reprocessed texture paths",
               "broken": "Damaged assets", "orphan": "Unused assets", "unused": "Unused assets"}
+if not _scanner.asset_limit("reduce_splash_2048"):
+    SPLASH_MAX_WIDTH = None             # splashes keep their width; alpha and non-TGA repairs still apply
 
 
 def broken_dest(root_or_mod, rel, sub="broken", plugin="Found at Setup"):
@@ -266,9 +268,9 @@ def _kept_in_mod(off, owner, rel):
 
 
 def find_ffmpeg():
-    """ffmpeg on PATH, or in MWManager's tools folder."""
+    """ffmpeg in MWManager's tools folder, else on PATH."""
     bundled = os.path.join(TOOLS_DIR, "ffmpeg.exe")
-    return shutil.which("ffmpeg") or (bundled if os.path.isfile(bundled) else None)
+    return bundled if os.path.isfile(bundled) else shutil.which("ffmpeg")
 
 
 def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
@@ -524,7 +526,7 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                 elif kind == "tex":
                     details = "repaired or converted DDS texture (including requested size/format/mipmap changes)"
                 elif kind == "splash":
-                    details = f"splash screen made an RLE TGA at most {SPLASH_MAX_WIDTH} wide"
+                    details = f"splash screen made an {splash_target()}"
                 elif kind == "snd":
                     details = ("converted WAV to same-stem MP3" if job.get("mp3") else
                                "converted sound to Morrowind-compatible encoding" if not job.get("strip") else
@@ -638,7 +640,7 @@ def bug_report_header(plugin_path, m, mod_folder=None):
         lines.append(f"Mod page: {page}")
     lines += ["Masters: " + (", ".join(masters) if masters else "none"),
               f"Generated {time.strftime('%Y-%m-%d %H:%M')} by mwmanager / vortex_tidy (Morrowind + MWSE + MGE XE).",
-              "Only problems the plugin has on its own are listed (not conflicts with other mods).",
+              "Only this plugin's own defects and declared-master compatibility issues are listed, not unrelated mod interactions.",
               "Paths are relative to Data Files."]
     return lines
 

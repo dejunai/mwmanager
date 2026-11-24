@@ -51,6 +51,17 @@ yourself: LuaJIT in `tools/luajit/` (used by the Lua check), `texconv.exe` (Dire
 `mwmanager_core_hashes.json` is shipped as immutable verification data; first-run code reads it but never
 regenerates or clears it.
 
+## Author-facing bugreports
+
+Plugin bugreports under `outputs/bugreports/` contain only the plugin's own defects and compatibility issues
+with its declared master chain. Unrelated mod interactions and their repairs stay in the main diagnostic
+report. A master mismatch and its stale-reference details become one compatibility summary line per plugin;
+independent defects remain detailed. Regeneration removes stale scanner findings without removing other
+tools' sections. Package-wide Lua, packing and asset reports stay with their staged package; when it contains
+multiple plugins, they are not attributed to the first plugin. Asset repairs are reported, except size-only
+optimisations (textures or splash screens over 2048 shrunk, splashes re-encoded smaller); missing mipmaps
+and splash alpha channels are bugs.
+
 ## GUI setup and staging
 
 First-run setup keeps one progress window through prerequisite checks, sort/Tidy, patch generation, the
@@ -60,6 +71,9 @@ setup** after a pause; optional community masters can also be explicitly skipped
 - **Automatic Tidy:** installer choices remain interactive, but the GUI builds and applies the plan with
   `--apply --yes` without asking for approval of individual moves or repairs. Output scrolls in the shared log.
   Existing asset-repair settings still apply. A changed/refused plan or partial apply stops deployment.
+- **2048 limits:** the setup and Options windows offer *Reduce textures larger than 2048 to 2048* and *Reduce
+  splash screens wider than 2048 to 2048* (`mwmanager.ini` `[Staging]` `reduce_textures_2048` / `reduce_splash_2048`,
+  default true). Off keeps full size; mipmap, alpha and non-TGA splash repairs still apply.
 - **Readable progress:** the window is resizable; explicit stage/archive counts use determinate progress.
   Scrolling up pauses automatic following. The Follow output checkbox jumps back to the latest output.
 - **Safe stopping:** Stop after current operation requests a cooperative stop. File operations and running

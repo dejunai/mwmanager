@@ -108,6 +108,7 @@ def module_state_names(manager_dir):
     """The same for upstream modules outside the scanner namespace: {module: {name: path}}."""
     own = lambda name: os.path.join(manager_dir, name)               # noqa: E731
     return {
+        "mwdialog_backup": {"ROOT": own("backups")},
         "mwdialog_mastercheck": {"CACHE_FILE": own("mwmanager_mastercheck_cache.json"),
                                  "SIZES_RECORD": own("mwmanager_master_sizes.json"),
                                  "FACTS_FILE": own("mwmanager_mastercheck_facts.json")},
@@ -161,6 +162,21 @@ globals().update(state_names(MANAGER_DIR))
 
 def manager_file(name):
     return os.path.join(MANAGER_DIR, name)
+
+
+def asset_limit(key):
+    """mwmanager.ini [Staging] reduce_textures_2048 / reduce_splash_2048 (set in Options; default true)."""
+    import configparser
+    ini = configparser.ConfigParser(interpolation=None)
+    try:
+        ini.read(manager_file("mwmanager.ini"), encoding="utf-8")
+        return ini.getboolean("Staging", key, fallback=True)
+    except (OSError, ValueError, configparser.Error):
+        return True
+
+
+if not asset_limit("reduce_textures_2048"):
+    TEXTURE_MAX_EDGE = 1 << 30          # no texture is reduced; spread to the upstream modules by the layer loader
 
 
 def output_file(name):

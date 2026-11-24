@@ -408,7 +408,7 @@ class World(World):
 
         shared = len(set(t.defined_by.get((info.id or "").lower(), []))) > 1
 
-        def add(sev, msg, op=None, desc=None):
+        def add(sev, msg, op=None, desc=None, *, related_plugins=()):
             if op is not None and op[0] == "delete" and op != ("delete", "local") and shared and not IN_FULL:
                 # A direct edit could break the response chain shared with another plugin. During --full,
                 # the fix is emitted as a later patch record with a DELE marker, preserving the chain.
@@ -416,22 +416,28 @@ class World(World):
                     sev = "INFO"                 # nothing to do about it: it never plays, and stays harmless
                 msg += " (left in place outside --full: other plugins have this response too)"
                 op = desc = None
-            r.add(sev, info.source, t.name, info.id, msg, fix=(info.off, op, desc) if op else None)
+            r.add(sev, info.source, t.name, info.id, msg, fix=(info.off, op, desc) if op else None,
+                  related_plugins=related_plugins)
 
         DELETE = ("delete",)
         never = "deleted response: its filter names something that doesn't exist, so it can never play"
 
         # speaker filters
         if info.actor and not self._exists(ACTOR_TAGS, info.actor):
-            add("ERROR", f"speaker ID (ONAM) '{info.actor}' is not an NPC or creature", DELETE, never)
+            add("ERROR", f"speaker ID (ONAM) '{info.actor}' is not an NPC or creature", DELETE, never,
+                related_plugins=self._bug_sources(info.actor))
         if info.race and not self._exists({"RACE"}, info.race):
-            add("ERROR", f"race filter '{info.race}' does not exist", DELETE, never)
+            add("ERROR", f"race filter '{info.race}' does not exist", DELETE, never,
+                related_plugins=self._bug_sources(info.race))
         if info.cls and not self._exists({"CLAS"}, info.cls):
-            add("ERROR", f"class filter '{info.cls}' does not exist", DELETE, never)
+            add("ERROR", f"class filter '{info.cls}' does not exist", DELETE, never,
+                related_plugins=self._bug_sources(info.cls))
         if info.faction and info.faction.upper() != "FFFF" and not self._exists({"FACT"}, info.faction):
-            add("ERROR", f"faction filter '{info.faction}' does not exist", DELETE, never)
+            add("ERROR", f"faction filter '{info.faction}' does not exist", DELETE, never,
+                related_plugins=self._bug_sources(info.faction))
         if info.pcfaction and info.pcfaction.upper() != "FFFF" and not self._exists({"FACT"}, info.pcfaction):
-            add("ERROR", f"PC faction filter '{info.pcfaction}' does not exist", DELETE, never)
+            add("ERROR", f"PC faction filter '{info.pcfaction}' does not exist", DELETE, never,
+                related_plugins=self._bug_sources(info.pcfaction))
         if info.cell and info.cell.lower() not in self.cell_names:
             if info.cell.lower() in self.region_names:
                 add("INFO", f"cell filter '{info.cell}' is a region name, not a cell; "
@@ -1596,53 +1602,11 @@ def _main(argv=None):
     return 1 if counts["ERROR"] else 0
 
 
+_upstream_write_bug_reports = write_bug_reports
+
+
 def write_bug_reports(args, plugins, report, world):
-    """<plugin>.bugreport.txt for every plugin with problems of its own (section "mwmanager"): its
-    errors and warnings, files it needs that no mod has, and what --fix repairs for it."""
-    ah = asset_health_module()
-    data_dir = os.path.abspath(args.data_dir)
-    names = {n.lower(): (n, p) for n, p in plugins}
-    per = defaultdict(lambda: {"ERROR": [], "WARN": [], "repaired": [], "missing": []})
-    for sev, plugin, topic, info, msg in report.issues:
-        if sev not in ("ERROR", "WARN") or is_our_patch(plugin) or plugin.lower() not in names \
-                or NOT_OWN_BUG.search(msg):
-            continue
-        where = " / ".join(x for x in (f"[{topic}]" if topic else "", info) if x)
-        per[plugin.lower()][sev].append(f"  - {where + ': ' if where else ''}{msg}")
-    for plugin, off, op, desc, label, topic, info in report.fixes:
-        if plugin and plugin.lower() in names and not is_our_patch(plugin):
-            per[plugin.lower()]["repaired"].append(f"  - {label}: {desc}")
-    for item in getattr(world, "generated", []):
-        rel, why = item[0], item[1]
-        pl = item[3] if len(item) > 3 else ""
-        if pl and pl.lower() in names and not is_our_patch(pl) and not (len(item) > 2 and item[2]):
-            per[pl.lower()]["missing"].append(f"  - {rel} (needed by {why}); a stand-in was put in its place")
-    # the scan saw every plugin: one that is clean now loses an old section
-    written = cleared = 0
-    for low, (name, path) in names.items():
-        if is_our_patch(name) or low in NOT_A_MOD:
-            continue
-        d = per.get(low)
-        lines = []
-        if d:
-            for title, key in (("Errors (the game reports these, or the content breaks)", "ERROR"),
-                               ("Warnings", "WARN"),
-                               ("Files the plugin needs that no mod provides", "missing"),
-                               ("Repaired by mwmanager --fix (the author may want to fix these in the plugin)",
-                                "repaired")):
-                if d[key]:
-                    lines.append(f"{title}: {len(d[key])}")
-                    lines += sorted(set(d[key]))[:300]
-                    lines.append("")
-        out = output_file(os.path.join("bugreports", ah.bug_report_name(data_dir, name, sys.modules[__name__])))
-        if not lines and not os.path.exists(out):
-            continue
-        ah.update_bug_report(out, "mwmanager", ah.bug_report_header(path, sys.modules[__name__]), lines)
-        written += bool(lines)
-        cleared += not lines
-    if written or cleared:
-        print(f"\nBug reports: {written} plugin(s) have <plugin>.bugreport.txt in their mod folder (or in "
-              f"bugreports\\)" + (f"; {cleared} cleared" if cleared else "") + ".")
+    return _upstream_write_bug_reports(args, plugins, report, world, section="mwmanager")
 
 
 def main(argv=None):

@@ -173,6 +173,19 @@ class ArchiveSettingsTests(unittest.TestCase):
         self.assertIn("always_build_bsa = true", self.g.MWMANAGER_INI.read_text())
         self.assertTrue(self.g.read_settings()["always_build_bsa"])
 
+    def test_2048_reductions_are_on_by_default_and_kept_in_ini(self):
+        self.g.MWMANAGER_INI.write_text("[Staging]\noffer_bsa_when_assets_found = 10000\n")
+        settings = self.g.read_settings()
+        self.assertTrue(settings["reduce_textures_2048"] and settings["reduce_splash_2048"])
+        self.g.write_settings({"game_dir": str(self.game), "reduce_textures_2048": False,
+                               "reduce_splash_2048": True})
+        text = self.g.MWMANAGER_INI.read_text()
+        self.assertIn("reduce_textures_2048 = false", text)
+        self.assertIn("reduce_splash_2048 = true", text)
+        settings = self.g.read_settings()
+        self.assertFalse(settings["reduce_textures_2048"])
+        self.assertTrue(settings["reduce_splash_2048"])
+
     def test_new_key_wins_over_old(self):
         other = Path(self.tmp.name) / "old"
         self.g.MWMANAGER_INI.write_text(f"[Paths]\ndownloads_dir = {other}\narchive_downloads_dir = "
@@ -625,6 +638,36 @@ class GuiSmokeTests(unittest.TestCase):
             self.pump(0.2)
         error.assert_not_called()
         self.assertIs(self.app.settings[self.g.ALWAYS_BSA_SETTING], True)
+        self.assertEqual(self.errors, [])
+
+    def test_options_window_has_2048_reduction_checkboxes_on_by_default(self):
+        for key in self.g.ASSET_LIMIT_SETTINGS:
+            self.app.settings.pop(key, None)
+        before = set(self.app.winfo_children())
+        self.app.open_options(first_run=False)
+        self.pump(0.2)
+        dialog = next(w for w in self.app.winfo_children() if w not in before and w.winfo_class() == "Toplevel")
+        found = []
+
+        def walk(widget):
+            for child in widget.winfo_children():
+                found.append(child)
+                walk(child)
+        walk(dialog)
+        boxes = {w.cget("text"): w for w in found if w.winfo_class() == "TCheckbutton"}
+        texture = boxes[self.g.ASSET_LIMIT_SETTINGS["reduce_textures_2048"]]
+        splash = boxes[self.g.ASSET_LIMIT_SETTINGS["reduce_splash_2048"]]
+        self.assertIn("selected", texture.state())
+        self.assertIn("selected", splash.state())
+        splash.invoke()
+        mb = self.g.messagebox
+        with mock.patch.object(self.g, "write_settings"), mock.patch.object(mb, "_prompt", return_value=True), \
+                mock.patch.object(mb, "showerror") as error:
+            next(w for w in found if w.winfo_class() == "TButton" and w.cget("text") == "Save").invoke()
+            self.pump(0.2)
+        error.assert_not_called()
+        self.assertIs(self.app.settings["reduce_textures_2048"], True)
+        self.assertIs(self.app.settings["reduce_splash_2048"], False)
         self.assertEqual(self.errors, [])
 
     def test_first_path_approval_skips_the_second_options_window(self):

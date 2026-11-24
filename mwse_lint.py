@@ -402,7 +402,7 @@ def process(staging: Path, *, apply: bool, report_path: Path, only: list[str] | 
                            if p.is_file() and p.suffix.casefold() in {".esp", ".esm"}] \
                     if package.is_dir() else []
                 plugins.sort(key=lambda p: (p.suffix.casefold() != ".esm", p.stem.casefold()))
-                label = plugins[0].stem if plugins else package.name
+                label = plugins[0].stem if len(plugins) == 1 else package.name
                 try:
                     from mwdialog_assets import nexus_id, vortex_mod_metadata
                     metadata = vortex_mod_metadata(str(package))

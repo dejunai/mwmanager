@@ -24,6 +24,9 @@ from mwmanager_workflow import JobCancelled, JobControl, JobView, checkpoint, pr
 from mwmanager_theme import COLORS, FONTS, SPACE, apply_theme, center, master_status_legend, master_status_tags, tree_tags
 from bsa_pack import BSA_OFFER_SETTING, DEFAULT_THRESHOLD as DEFAULT_BSA_OFFER, MIN_THRESHOLD as MIN_BSA_OFFER
 ALWAYS_BSA_SETTING = "always_build_bsa"      # mwmanager.ini [Staging]; default off: ask per package
+# mwmanager.ini [Staging], default on: Tidy/--asset-check reduce textures / splash screens wider than 2048
+ASSET_LIMIT_SETTINGS = {"reduce_textures_2048": "Reduce textures larger than 2048 to 2048",
+                        "reduce_splash_2048": "Reduce splash screens wider than 2048 to 2048"}
 
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_FILE = APP_DIR / "mwmanager_gui_settings.json"
@@ -719,6 +722,11 @@ def read_settings() -> dict:
         data[ALWAYS_BSA_SETTING] = ini.getboolean("Staging", ALWAYS_BSA_SETTING, fallback=False)
     except ValueError:
         data[ALWAYS_BSA_SETTING] = False
+    for key in ASSET_LIMIT_SETTINGS:
+        try:
+            data[key] = ini.getboolean("Staging", key, fallback=True)
+        except ValueError:
+            data[key] = True
     # REMOVE BEFORE SHIPPING: developer machine only, set by hand: diff staged mod Lua against the Steam copies
     try:
         data["compare_steam_lua"] = ini.getboolean("Dev", "compare_steam_lua", fallback=False)
@@ -769,12 +777,16 @@ def write_settings(settings: dict) -> None:
     ini.set("Staging", BSA_OFFER_SETTING, str(threshold))
     if ALWAYS_BSA_SETTING in settings:
         ini.set("Staging", ALWAYS_BSA_SETTING, "true" if settings[ALWAYS_BSA_SETTING] else "false")
+    for key in ASSET_LIMIT_SETTINGS:
+        if key in settings:
+            ini.set("Staging", key, "true" if settings[key] else "false")
     stream = io.StringIO()
     ini.write(stream)
     _atomic_write(MWMANAGER_INI, stream.getvalue().encode("utf-8"))   # a crash mid-write never empties it
 
     preferences = {key: value for key, value in settings.items()
                    if key not in PATH_SETTING_KEYS and key not in (BSA_OFFER_SETTING, ALWAYS_BSA_SETTING)
+                   and key not in ASSET_LIMIT_SETTINGS
                    and key not in RUNTIME_KEYS and key not in LEGACY_PREFERENCE_KEYS}
     _atomic_write(SETTINGS_FILE, (json.dumps(preferences, indent=2) + "\n").encode("utf-8"))
 
@@ -2117,7 +2129,16 @@ class ManagerGUI(tk.Tk):
         always_bsa_var = tk.BooleanVar(value=bool(self.settings.get(ALWAYS_BSA_SETTING)))
         if first_run:
             ttk.Checkbutton(form, text="Always Pack BSA", variable=always_bsa_var).grid(
-                row=row, column=0, columnspan=2, sticky="w", pady=(0, 12))
+                row=row, column=0, columnspan=2, sticky="w", pady=(0, 4))
+            row += 1
+        limit_vars = {key: tk.BooleanVar(value=self.settings.get(key, True) is not False)
+                      for key in ASSET_LIMIT_SETTINGS}
+        if first_run:
+            for key, text in ASSET_LIMIT_SETTINGS.items():
+                ttk.Checkbutton(form, text=text, variable=limit_vars[key]).grid(
+                    row=row, column=0, columnspan=2, sticky="w")
+                row += 1
+            ttk.Frame(form, height=12).grid(row=row, column=0)
             row += 1
 
         def approve():
@@ -2155,6 +2176,7 @@ class ManagerGUI(tk.Tk):
             self.settings.update({"game_dir": str(game), "archive_downloads_dir": folder,
                                   "archive_source": source, BSA_OFFER_SETTING: bsa_offer,
                                   ALWAYS_BSA_SETTING: always_bsa_var.get(),
+                                  **{key: var.get() for key, var in limit_vars.items()},
                                   "first_run": 1, "init_complete": 0})
             write_settings(self.settings)
             self._setup_start()
@@ -6164,7 +6186,13 @@ class ManagerGUI(tk.Tk):
         ttk.Entry(form, textvariable=bsa_offer_var, width=12).grid(row=6, column=0, sticky="w", pady=(3, 4))
         always_bsa_var = tk.BooleanVar(value=bool(self.settings.get(ALWAYS_BSA_SETTING)))
         ttk.Checkbutton(form, text="Always Pack BSA", variable=always_bsa_var).grid(
-            row=7, column=0, columnspan=2, sticky="w", pady=(0, 12))
+            row=7, column=0, columnspan=2, sticky="w", pady=(0, 4))
+        limit_vars = {key: tk.BooleanVar(value=self.settings.get(key, True) is not False)
+                      for key in ASSET_LIMIT_SETTINGS}
+        for offset, (key, text) in enumerate(ASSET_LIMIT_SETTINGS.items()):
+            ttk.Checkbutton(form, text=text, variable=limit_vars[key]).grid(
+                row=8 + offset, column=0, columnspan=2, sticky="w",
+                pady=(0, 12 if offset == len(ASSET_LIMIT_SETTINGS) - 1 else 0))
 
         def save_close():
             game, downloads = Path(game_var.get()).expanduser(), Path(downloads_var.get()).expanduser()
@@ -6206,6 +6234,7 @@ class ManagerGUI(tk.Tk):
             self.settings["archive_downloads_dir"] = str(downloads) if downloads_var.get().strip() else ""
             self.settings[BSA_OFFER_SETTING] = bsa_offer
             self.settings[ALWAYS_BSA_SETTING] = always_bsa_var.get()
+            self.settings.update({key: var.get() for key, var in limit_vars.items()})
             if archive_source is not None:
                 self.settings["archive_source"] = archive_source
             if first_run:
@@ -6255,7 +6284,7 @@ class ManagerGUI(tk.Tk):
                 self.status.set("Options saved.")
 
         buttons = ttk.Frame(form)
-        buttons.grid(row=8, column=0, columnspan=2, sticky="e")
+        buttons.grid(row=8 + len(ASSET_LIMIT_SETTINGS), column=0, columnspan=2, sticky="e")
         def cancel_options():
             dialog.destroy()
             if first_run:
