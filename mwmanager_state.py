@@ -233,13 +233,14 @@ PLACEHOLDER_CELL = "mwmanager placeholders"
 EARLY_CELL = "mwmanager early placeholders"
 FIX_TAG = "; [mwmanager] "
 PROMOTED_START = ";; ==== MWManager content rules promoted to masters (written by mwmanager --sort; don't edit) ===="
-# Stand-ins shipped in the MWManager folder
+# Stand-ins: the game's own files, never shipped. Upstream's dummy_path copies each out of the player's
+# Morrowind.bsa into "dummy assets" the first time it is needed (icons and textures are made in code)
 DUMMY_NIF = "mwmanager_dummy.nif"
 DUMMY_KF = "mwmanager_dummy.kf"
 DUMMY_MARKER_NIF = "mwmanager_dummy_marker.nif"
 DUMMY_ANIM_NIF = "mwmanager_dummy_anim.nif"
-DUMMY_ICON_DDS = "mwmanager_dummy_icon.dds"
-DUMMY_BIK = "mwmanager_dummy.bik"
+DUMMY_SOURCES = {DUMMY_NIF: "meshes\\m\\misc_dwrv_coin00.nif", DUMMY_KF: "meshes\\i\\xin_dagoth_bridge00.kf",
+                 DUMMY_MARKER_NIF: "meshes\\editormarker.nif", DUMMY_ANIM_NIF: "meshes\\base_anim.nif"}
 
 _upstream_compute_order = compute_order
 
@@ -493,26 +494,6 @@ def reduce_textures(data_dir, game_dir, items, log):
             for rel, kind, keep in done:
                 f.write(f"{rel}\t{kind}\t{MP.store_path(keep, bases)}\n")
     return len(done), saved
-
-
-def stand_in_bytes(rel):
-    ext = os.path.splitext(rel)[1].lower()
-    if ext == ".kf":                        # an animation: the game's smallest one (a few frames, harmless)
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), DUMMY_KF), "rb") as f:
-            return f.read()
-    if ext == ".nif":                       # a missing model: a small coin, not the engine's huge "!" marker
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), DUMMY_NIF), "rb") as f:
-            return f.read()
-    rel_windows = rel.replace("/", "\\")
-    if ext == ".bik":
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), DUMMY_BIK), "rb") as f:
-            return f.read()
-    if ext == ".dds" and rel_windows.lower().startswith("icons\\"):
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), DUMMY_ICON_DDS), "rb") as f:
-            return f.read()
-    if ext == ".dds":
-        return placeholder_dds(rel)
-    return silent_audio(ext or ".wav")
 
 
 def silent_audio(ext):

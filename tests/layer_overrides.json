@@ -110,7 +110,6 @@
   "restore_all",
   "run_clean_up",
   "silent_audio",
-  "stand_in_bytes",
   "write_generated",
   "write_load_order"
  ],

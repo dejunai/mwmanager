@@ -336,22 +336,7 @@
       "working_sha256": "181ada2e4214520444661f0fcd3b6ab639333b0e7cee63e4131494f63983a1d4"
     }
   ],
-  "tracked_assets": [
-    {
-      "name": "missing icon stand-in",
-      "source": "<Steam Morrowind>\\mwdialog_dummy_icon.dds",
-      "working": "mwmanager_dummy_icon.dds",
-      "source_sha256": "cee95a10612feb47d43964a9569ee908a00d93dd8a7f7f499380ceb643c1b288",
-      "working_sha256": "cee95a10612feb47d43964a9569ee908a00d93dd8a7f7f499380ceb643c1b288"
-    },
-    {
-      "name": "missing Bink video stand-in",
-      "source": "<Steam Morrowind>\\mwdialog_dummy.bik",
-      "working": "mwmanager_dummy.bik",
-      "source_sha256": "7684eae205097ded5fffc65c1bf597f7565014aefd3ff136d370b4bcaea54054",
-      "working_sha256": "7684eae205097ded5fffc65c1bf597f7565014aefd3ff136d370b4bcaea54054"
-    }
-  ],
+  "tracked_assets": [],
   "snapshot_file_list": "tools\\steam-upstream\\COPY_MANIFEST.json",
   "upstream_repo": "github.com/dejunai/morrowind-conflict-tools",
   "upstream_commit": "76053db"

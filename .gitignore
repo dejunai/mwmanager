@@ -74,3 +74,6 @@ mwdialog.lock
 
 # Tamriel Data's rename map: kept locally, not redistributed
 tools/Translation.txt
+
+# Stand-ins copied out of the player's own Morrowind.bsa (game files: never committed)
+dummy assets/

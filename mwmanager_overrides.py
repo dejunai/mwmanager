@@ -231,8 +231,8 @@ def write_plugin_bytes(path, data, keep_times=None):
 
 
 class World(World):
-    """Upstream World with MWManager's changes: placeholder Bink videos for missing ones, missing voice files
-    and shared responses handled through patch records during --full."""
+    """Upstream World with MWManager's changes: missing voice files and shared responses handled through patch
+    records during --full."""
 
     def _stand_in(self, tag, rid, win, msg):
         """A winning record names a file the game can't load: point it at a working one of the same
@@ -278,7 +278,6 @@ class World(World):
             if real and kind in ("mesh", "icon"):
                 # 2. a stand-in FILE at the exact path the record names; the plugin is not changed, so the
                 # real file (a mod installed later) simply replaces it
-                here = os.path.dirname(os.path.abspath(__file__))
                 if kind == "icon":
                     rel = os.path.join("Icons", os.path.splitext(A.rel(v, "icons"))[0] + ".dds")
                     src, what = None, "a placeholder icon"
@@ -286,7 +285,10 @@ class World(World):
                     rel = os.path.join("Meshes", A.rel(v, "meshes"))
                     dummy = (DUMMY_MARKER_NIF if tag in ("STAT", "ACTI", "LIGH") else
                              DUMMY_ANIM_NIF if tag in ("NPC_", "CREA") and sub == "MODL" and tag == "NPC_" else DUMMY_NIF)
-                    src = os.path.join(here, dummy)
+                    try:
+                        src = dummy_path(dummy)          # copied out of Morrowind.bsa when first needed
+                    except OSError:
+                        src = os.path.join(DUMMY_DIR, dummy)     # not there: no stand-in (checked below)
                     what = {DUMMY_MARKER_NIF: "the invisible editor marker", DUMMY_ANIM_NIF: "the default skeleton",
                             DUMMY_NIF: "a small coin"}[dummy]
                 else:
@@ -311,11 +313,6 @@ class World(World):
             if tag == "SOUN" and kind == "sound" and not A.placeholder(v):
                 self.generated.append((os.path.join("Sound", A.rel(v, "sound")), f"sound record '{win[4]}'", None, win[1]))
                 notes.append(f"create a silent '{v}'")
-                continue
-            if kind == "video" and real:
-                self.generated.append((os.path.join("Video", A.rel(v, "video")),
-                                       f"video reference in {tag} '{win[4]}'", None, win[1]))
-                notes.append(f"create a placeholder Bink video at '{v}'")
                 continue
             if sub == "MODL" and tag in ("LIGH", "NPC_"):
                 new[sub] = None
@@ -394,11 +391,11 @@ class World(World):
                             self.r.add("WARN", plugin, f"script {sname}", "",
                                        f"{m.group(1)}: {prob} (--fix copies it from Vortex mod '{hit[1]}')")
                         else:
-                            rel = os.path.join("Video", self.assets.rel(path, "video"))
-                            self.generated.append((rel, f"script {sname} ({plugin})", None, plugin))
+                            self.missing_files.append((os.path.join("Video", self.assets.rel(path, "video")),
+                                                       f"script {sname}", plugin))
                             self.missing_by_plugin[plugin] += 1
-                            self.r.add("WARN", plugin, f"script {sname}", "",
-                                       f"{m.group(1)}: {prob} (--fix creates a placeholder Bink video)")
+                            self.r.add("INFO", plugin, f"script {sname}", "",
+                                       f"{m.group(1)}: {prob} (the game skips the video)")
                     else:
                         self.r.add("WARN", plugin, f"script {sname}", "",
                                    f"{m.group(1)}: {prob} (the game skips it when this line runs)")
