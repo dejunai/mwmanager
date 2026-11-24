@@ -168,3 +168,52 @@ def test_check_folder_survives_a_non_ascii_name_that_is_not_utf8_in_cp1252(tmp_p
     (tmp_path / "Textures" / "x" / "café.tga").write_bytes(b"\0" * 12 + struct.pack("<HH", 64, 64) + b"\x20\0px")
     issues, _fixes = ah.check_folder(str(tmp_path), m, str(tmp_path / "Data Files"))
     assert any("non-ASCII" in i[2] for i in issues)
+
+
+# ---------------------------------------------------------------- broken models: a link past the header's count
+def _nif(count, child):
+    """A header claiming `count` blocks, then one NiNode with one child link and one NiTriShape."""
+    def s(b):
+        return struct.pack("<I", len(b)) + b
+    node = s(b"NiNode") + s(b"Root") + b"\0" * 8 + b"\0" * (2 + 52 + 12) + struct.pack("<II", 0, 0) + struct.pack("<Ii", 1, child)
+    shape = s(b"NiTriShape") + s(b"Mesh") + b"\0" * 8 + b"\0" * (2 + 52 + 12) + struct.pack("<II", 0, 0) + struct.pack("<i", -1)
+    return ah.NIF_HEAD + b"\n" + struct.pack("<II", 0x04000002, count) + node + shape
+
+
+def test_nif_links_past_end():
+    assert ah.nif_links_past_end(_nif(2, 1)) is None                 # the child is block 1 of 2: fine
+    assert ah.nif_links_past_end(_nif(2, 7)) == [2, 7]                # the child is past the end: the game crashes
+    assert ah.nif_links_past_end(_nif(2, -5)) is None                 # a mislaid block's bytes: not a link
+    assert ah.nif_links_past_end(b"not a model") is None
+
+
+def test_tidy_moves_a_broken_model_out_and_announces_it(tmp_path, capsys):
+    mod = tmp_path / "mod"
+    (mod / "Meshes" / "x").mkdir(parents=True)
+    (mod / "Meshes" / "x" / "bad.nif").write_bytes(_nif(2, 7))
+    (mod / "Meshes" / "x" / "good.nif").write_bytes(_nif(2, 1))
+    ah.BROKEN_MODELS.clear()
+    issues, fixes = ah.check_folder(str(mod), m, str(tmp_path / "Data Files"))
+    assert [(f[0], f[2]) for f in fixes] == [("brokenout", "Meshes\\x\\bad.nif")]
+    ah.apply_folder(str(mod), fixes, m, str(tmp_path), "mod")
+    assert not (mod / "Meshes" / "x" / "bad.nif").exists()                  # no stand-in: the next mod's copy wins
+    assert (mod / "Off" / "broken" / "mod" / "Meshes" / "x" / "bad.nif").read_bytes() == _nif(2, 7)
+    ah.broken_models_notice()
+    err = capsys.readouterr().err
+    assert "1 broken model(s)" in err and "Meshes\\x\\bad.nif" in err and not ah.BROKEN_MODELS
+
+
+def test_tidy_removes_the_stand_in_fix_put_over_a_broken_model(tmp_path, monkeypatch):
+    # --full puts a stand-in in place (through Vortex's hard link, so it lands in the mod); tidy then takes it
+    # out so that the next mod's copy of the model wins
+    monkeypatch.setattr(m, "stand_in_bytes", lambda rel: _nif(2, 1))      # the real one is a game file
+    mod = tmp_path / "mod"
+    rel = os.path.join("Meshes", "x", "bad.nif")
+    (mod / "Meshes" / "x").mkdir(parents=True)
+    (mod / rel).write_bytes(m.stand_in_bytes(rel))
+    (mod / "Off" / "broken" / "mod" / "Meshes" / "x").mkdir(parents=True)
+    (mod / "Off" / "broken" / "mod" / rel).write_bytes(_nif(2, 7))
+    issues, fixes = ah.check_folder(str(mod), m, str(tmp_path / "Data Files"))
+    assert [(f[0], f[3]) for f in fixes] == [("brokenout", "stand-in")]
+    ah.apply_folder(str(mod), fixes, m, str(tmp_path), "mod")
+    assert not (mod / rel).exists() and (mod / "Off" / "broken" / "mod" / rel).read_bytes() == _nif(2, 7)

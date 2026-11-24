@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-24T03:57:11",
+  "SyncedAt": "2026-11-24T05:46:02",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -7,8 +7,8 @@
   "Files": [
     {
       "RelativePath": ".gitignore",
-      "Bytes": 2198,
-      "SHA256": "b8add9f88f67ca70b857b8a285278717fb346592a6a0abb573549130edea4c56",
+      "Bytes": 2311,
+      "SHA256": "eb0a4726380d50d8674bfe650a82de3a560c6c6bfae52eed09a80d6be4d615d2",
       "Source": "<Steam Morrowind>\\.gitignore"
     },
     {
@@ -440,10 +440,10 @@
     },
     {
       "RelativePath": "mwdialog_assets.py",
-      "Bytes": 118328,
-      "SHA256": "b0a0de5575099299338ea0d6d7de4438128bb88d1d451965df8db002d0ab21df",
+      "Bytes": 123011,
+      "SHA256": "06ab9d0fd7f776714eab97c4bf758347ad3ba9c98f30eb8e1ba161a35e3458e8",
       "Source": "<morrowind-conflict-tools>\\mwdialog_assets.py",
-      "SourceModified": "2026-11-23T23:30:23"
+      "SourceModified": "2026-11-24T05:34:24"
     },
     {
       "RelativePath": "mwdialog_backup.py",
@@ -490,9 +490,9 @@
     {
       "RelativePath": "mwdialog_check.py",
       "Source": "<morrowind-conflict-tools>\\mwdialog_check.py",
-      "Bytes": 593052,
-      "SHA256": "c7940c0c312b3b2e5f2f0343ddbdcd26c455805e9ffd359a797ddf094881dbe3",
-      "SourceModified": "2026-11-24T02:31:41"
+      "Bytes": 593346,
+      "SHA256": "ce497258da9c53d54b69c2f60f91fef610a1395743b7c73afde9b1bf5c21f4f0",
+      "SourceModified": "2026-11-24T05:40:00"
     },
     {
       "RelativePath": "mwdialog_console.py",
@@ -559,10 +559,10 @@
     },
     {
       "RelativePath": "mwdialog_media.py",
-      "Bytes": 15270,
-      "SHA256": "da8c084ff31f7a385c5dd2e6e13e67adea5df92fee6da98c5db8de6dcff69e94",
+      "Bytes": 16634,
+      "SHA256": "d9f4a45ab3fe77d87a1a2133d047164b441301aa065d1648fec320b457a4d591",
       "Source": "<Steam Morrowind>\\mwdialog_media.py",
-      "SourceModified": "2026-11-13T08:04:05"
+      "SourceModified": "2026-11-24T05:40:00"
     },
     {
       "RelativePath": "mwdialog_mgeghosts.py",
@@ -678,10 +678,10 @@
     },
     {
       "RelativePath": "tests\\test_assets.py",
-      "Bytes": 8023,
-      "SHA256": "ee0782192c99731b94b946baaaa18034ac553cc427b99ea2d23f33e47d68b362",
+      "Bytes": 10813,
+      "SHA256": "9823a367591787140b0260b0c12713eccedcc7b6733c71995d18b77bbe282c63",
       "Source": "<Steam Morrowind>\\tests\\test_assets.py",
-      "SourceModified": "2026-11-22T03:07:58"
+      "SourceModified": "2026-11-24T05:34:36"
     },
     {
       "RelativePath": "tests\\test_automerge_objects.py",
@@ -692,17 +692,17 @@
     },
     {
       "RelativePath": "tests\\test_cache.py",
-      "Bytes": 18031,
-      "SHA256": "51c78c65a633737e8fd2b82327d382cc71eb8638a68ecc323e748150054f0e72",
+      "Bytes": 17662,
+      "SHA256": "c4b11dd25fe58b917698d71f2dc7a7ceef035a9f473ec86a957db36626330f62",
       "Source": "<Steam Morrowind>\\tests\\test_cache.py",
-      "SourceModified": "2026-11-14T06:30:34"
+      "SourceModified": "2026-11-24T05:21:02"
     },
     {
       "RelativePath": "tests\\test_check.py",
-      "Bytes": 21983,
-      "SHA256": "6cad328d178e5855c6ca3ae496842feb0c4bcf241a7a676d2036b44c0e1b5aa7",
+      "Bytes": 22924,
+      "SHA256": "f6cc3b45f56827d3f5f10efc45315b77f47d37314bf21ff66ca6cca72a41dd99",
       "Source": "<Steam Morrowind>\\tests\\test_check.py",
-      "SourceModified": "2026-11-22T12:03:59"
+      "SourceModified": "2026-11-24T05:43:02"
     },
     {
       "RelativePath": "tests\\test_core_safety.py",
@@ -874,10 +874,10 @@
     },
     {
       "RelativePath": "vortex_tidy.py",
-      "Bytes": 62839,
-      "SHA256": "56407813057c3a463bbc53d2c6ef0fc5764620bd5ddc0aa46a1e9fe9e377e875",
+      "Bytes": 63045,
+      "SHA256": "3fead546221ae7cf80c64b31523523bf592687b0a1d0f539b7cad6ba9f4babd1",
       "Source": "<morrowind-conflict-tools>\\vortex_tidy.py",
-      "SourceModified": "2026-11-23T23:30:23"
+      "SourceModified": "2026-11-24T05:33:51"
     },
     {
       "RelativePath": "vortex_tidy_blacklist.txt",
