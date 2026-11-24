@@ -1677,16 +1677,16 @@ def _nexus_page_text(mod_dir: Path, *, refresh=False) -> str:
         request = urllib.request.Request(page, headers={"User-Agent": "MWManager mod option helper"})
         with urllib.request.urlopen(request, timeout=15) as response:
             content = response.read(600_000).decode("utf-8", "replace")
-        challenge = CHALLENGE_RE.search(content)
-        if challenge:
+        text = Text()
+        text.feed(content)
+        body_text = "\n".join(text.parts)
+        # Only what the page shows: a normal mod page's scripts name Cloudflare and reCAPTCHA too.
+        if CHALLENGE_RE.search(body_text):
             _NEXUS_FETCH_ERRORS[cache_key] = (
                 "Nexus returned a bot-protection/CAPTCHA page. Open page on Nexus, complete the "
                 "challenge in the MWManager browser, then click Read page from browser."
             )
             return ""
-        text = Text()
-        text.feed(content)
-        body_text = "\n".join(text.parts)
         result = (text.description + "\n" + body_text if text.description else body_text)
         result = re.sub(r"[ \t]+", " ", result)
         result = re.sub(r"\n\s*\n+", "\n", result).strip()[:30000]
