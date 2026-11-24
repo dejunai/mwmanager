@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-24T10:17:17",
+  "SyncedAt": "2026-11-24T11:11:36",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -419,10 +419,10 @@
     },
     {
       "RelativePath": "mwdialog_assets.py",
-      "Bytes": 123011,
-      "SHA256": "06ab9d0fd7f776714eab97c4bf758347ad3ba9c98f30eb8e1ba161a35e3458e8",
+      "Bytes": 123539,
+      "SHA256": "2bac5c77dbac4a16f534f7208d2403a1b64aca19daaeedc52d29e373f76d75ed",
       "Source": "<morrowind-conflict-tools>\\mwdialog_assets.py",
-      "SourceModified": "2026-11-24T05:34:24"
+      "SourceModified": "2026-11-24T11:06:56"
     },
     {
       "RelativePath": "mwdialog_backup.py",
@@ -462,16 +462,16 @@
     {
       "RelativePath": "mwdialog_bugreports.py",
       "Source": "<morrowind-conflict-tools>\\mwdialog_bugreports.py",
-      "Bytes": 5290,
-      "SHA256": "651cbdbe9806be52327b42852185103f28eccec8c5803d54d8ff990090ee347d",
-      "SourceModified": "2026-11-24T05:58:00"
+      "Bytes": 7550,
+      "SHA256": "a5e134403aeb4b6ca8686a474b5b07eba024f5774b8a8732b919ccd7d27a0e8f",
+      "SourceModified": "2026-11-24T11:06:56"
     },
     {
       "RelativePath": "mwdialog_check.py",
       "Source": "<morrowind-conflict-tools>\\mwdialog_check.py",
-      "Bytes": 598846,
-      "SHA256": "77412a26179b8c75cc4a5d5e7505783cfd5d208eaebf8dab8629ea741b659376",
-      "SourceModified": "2026-11-24T10:00:40"
+      "Bytes": 592644,
+      "SHA256": "0cffd7a8eaf5ee9f66cfb1476f004f9ae72d8371c7bc6b6effd4b46ad8b9a11c",
+      "SourceModified": "2026-11-24T11:06:56"
     },
     {
       "RelativePath": "mwdialog_console.py",
@@ -615,10 +615,10 @@
     },
     {
       "RelativePath": "mwdialog_state.py",
-      "Bytes": 18811,
-      "SHA256": "6acdaff81291d714166aec3fffd2bde7d86921170e412b93ca0822b9cac5eb01",
+      "Bytes": 18392,
+      "SHA256": "17355919109ea193ce417cc3166e3bcddd21333e85b35e09dc8d3d0146893429",
       "Source": "<Steam Morrowind>\\mwdialog_state.py",
-      "SourceModified": "2026-11-23T23:30:23"
+      "SourceModified": "2026-11-24T11:06:56"
     },
     {
       "RelativePath": "mwdialog_tes3.py",
