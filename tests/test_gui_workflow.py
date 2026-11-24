@@ -262,7 +262,10 @@ class WorkflowGuiTests(unittest.TestCase):
 
         self.app.settings["init_complete"] = 0
         self.app._run_progress_job("Initial setup", "Working", worker, lambda r, e: done.append(r))
-        self.pump(0.1)
+        for _ in range(100):                         # the worker thread can start late on a loaded machine
+            self.pump(0.05)
+            if started.is_set():
+                break
         self.assertTrue(started.is_set())
         self.assertTrue(self.app.generate_button.instate(["disabled"]))
         self.app._job_view.request_cancel()
