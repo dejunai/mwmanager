@@ -94,6 +94,18 @@ class OptionsInstallCheckTests(unittest.TestCase):
 
 
 class PluginPathSafetyTests(unittest.TestCase):
+    def test_deployments_store_paths_relative_to_their_trusted_roots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package, data = root / "package", root / "Data Files"
+            source = package / "Test.esp"
+            source.parent.mkdir(parents=True)
+            data.mkdir()
+            source.write_bytes(b"plugin")
+            _linked, _skipped, operations = plugin_install.deploy_package(package, data, "Test.esp")
+            self.assertEqual(operations[0]["source_relative"], "Test.esp")
+            self.assertEqual(operations[0]["target_relative"], "Test.esp")
+            self.assertIsNone(operations[0]["backup_relative"])
     def test_archive_analysis_reports_zip_risks_without_extracting(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -396,6 +408,42 @@ class PluginPathSafetyTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "symbolic link or junction"):
                     plugin_install.remove_deployments(manager, data, {"unsafe"})
             self.assertTrue(target.exists())
+
+    def test_legacy_removal_accepts_an_equivalent_trusted_root_spelling(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manager, data, package = root / "manager", root / "game" / "Data Files", root / "staging"
+            manager.mkdir()
+            data.mkdir(parents=True)
+            package.mkdir()
+            source, target = package / "Test.esp", data / "Test.esp"
+            source.write_bytes(b"plugin")
+            os.link(source, target)
+            alias_root = root / "RUNNER~1" / "game" / "Data Files"
+            state = {"version": 1, "deployments": [{
+                "id": "legacy", "plugins": [], "archives": [], "registered_archives": [],
+                "staging_package": str(package), "operations": [{
+                    "source": str(source), "target": str(alias_root / target.name), "backup": None,
+                    "size": 6, "sha256": None,
+                }],
+            }]}
+            (manager / "plugin_deployments.json").write_text(json.dumps(state), encoding="utf-8")
+            real_samefile = os.path.samefile
+
+            def samefile(first, second):
+                first, second = Path(first), Path(second)
+                if {first, second} == {alias_root, data.resolve()}:
+                    return True
+                return real_samefile(first, second)
+
+            with mock.patch.object(plugin_install.os.path, "samefile", side_effect=samefile):
+                result = plugin_install.remove_deployments(manager, data, {"legacy"})
+            self.assertEqual(result["removed"], 1)
+            self.assertFalse(target.exists())
+            with self.assertRaisesRegex(ValueError, "outside its trusted root"):
+                plugin_install._relative_to_root_identity(
+                    root / "other-game" / "Data Files" / target.name, data.resolve(),
+                    label="Deployment removal target")
 
     def test_removal_rolls_back_when_a_later_step_fails(self):
         with tempfile.TemporaryDirectory() as tmp:

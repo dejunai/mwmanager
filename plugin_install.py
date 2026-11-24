@@ -367,6 +367,37 @@ def _safe_child(root: Path, relative: Path, *, label: str) -> Path:
     return target
 
 
+def _relative_to_root_identity(path: Path, root: Path, *, label: str) -> Path:
+    """Resolve an absolute legacy path under a trusted root, including equivalent Windows path spellings."""
+    path, root = Path(path), Path(root)
+    if not path.is_absolute():
+        raise ValueError(f"{label} is not an absolute path: {path}")
+    try:
+        relative = path.relative_to(root)
+    except ValueError:
+        relative = None
+    if relative is not None:
+        return relative
+
+    parts = []
+    current = path
+    while True:
+        try:
+            if os.path.samefile(current, root):
+                relative = Path(*reversed(parts))
+                if relative.parts:
+                    return relative
+                break
+        except OSError:
+            pass
+        parent = current.parent
+        if parent == current:
+            break
+        parts.append(current.name)
+        current = parent
+    raise ValueError(f"{label} is outside its trusted root: {path}")
+
+
 def _assert_no_links(root: Path) -> None:
     for base, dirs, files in os.walk(root):
         here = Path(base)
@@ -996,6 +1027,10 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
             deployed = target.stat()        # as deployed: a later change shows as another size or time
             operations.append({"source": str(source.resolve()), "target": str(target.resolve()),
                                "backup": str(backup.resolve()) if backup is not None else None,
+                               "source_relative": str(source.resolve().relative_to(package.resolve())),
+                               "target_relative": str(target.resolve().relative_to(data_dir.resolve())),
+                               "backup_relative": (str(backup.resolve().relative_to(package.resolve()))
+                                                   if backup is not None else None),
                                "size": deployed.st_size, "mtime_ns": deployed.st_mtime_ns, "sha256": None})
     if protect_this_package:
         protected.update(texture_paths)
@@ -1295,28 +1330,25 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
                 source_raw = Path(operation.get("source", ""))
                 target_raw = Path(operation.get("target", ""))
                 backup_raw = Path(operation["backup"]) if operation.get("backup") else None
-                if not target_raw.is_absolute():
-                    raise ValueError(f"Deployment state contains a non-absolute target path: {target_raw}")
-                try:
-                    target_rel = target_raw.relative_to(data_dir)
-                except ValueError as exc:
-                    raise ValueError(f"Deployment state contains an unsafe target path: {target_raw}") from exc
+                if operation.get("target_relative") is not None:
+                    target_rel = Path(operation["target_relative"])
+                else:
+                    target_rel = _relative_to_root_identity(
+                        target_raw, data_dir, label="Deployment removal target")
                 target = _safe_child(data_dir, target_rel, label="Deployment removal target")
-                if not source_raw.is_absolute():
-                    raise ValueError(f"Deployment state contains a non-absolute source path: {source_raw}")
-                try:
-                    source_rel = source_raw.relative_to(package)
-                except ValueError as exc:
-                    raise ValueError(f"Deployment state contains an unsafe source path: {source_raw}") from exc
+                if operation.get("source_relative") is not None:
+                    source_rel = Path(operation["source_relative"])
+                else:
+                    source_rel = _relative_to_root_identity(
+                        source_raw, package, label="Deployment source")
                 source = _safe_child(package, source_rel, label="Deployment source")
                 backup = None
-                if backup_raw:
-                    if not backup_raw.is_absolute():
-                        raise ValueError(f"Deployment state contains a non-absolute backup path: {backup_raw}")
-                    try:
-                        backup_rel = backup_raw.relative_to(package)
-                    except ValueError as exc:
-                        raise ValueError(f"Deployment state contains an unsafe backup path: {backup_raw}") from exc
+                if operation.get("backup_relative") is not None:
+                    backup_rel = Path(operation["backup_relative"])
+                    backup = _safe_child(package, backup_rel, label="Deployment backup")
+                elif backup_raw:
+                    backup_rel = _relative_to_root_identity(
+                        backup_raw, package, label="Deployment backup")
                     backup = _safe_child(package, backup_rel, label="Deployment backup")
                 if target.is_file():
                     if not _as_deployed(target, source, operation, expected, data_dir.parent):

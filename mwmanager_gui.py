@@ -1152,6 +1152,7 @@ class ManagerGUI(tk.Tk):
                                                if name.casefold() in self.active_names}
                                               | self._staged_major_master_names()))
         self.pending_order_rules = []
+        self.load_order_dirty = False
         if self.settings.get("paths_confirmed"):
             self._setup_reconcile()
         first_run = self.settings.get("first_run", 0) == 1
@@ -1451,7 +1452,8 @@ class ManagerGUI(tk.Tk):
                 "This changes the load order; start a new game if merged plugins place objects in cells.",
                 parent=self):
             return
-        self.save()
+        if not self.save():
+            return
         data_dir = Path(self.settings["game_dir"]) / "Data Files"
         command = [str(self._console_python()), "-u", str(APP_DIR / "mwmanager.py"), str(data_dir),
                    "--auto-merge", "--yes"]
@@ -1859,7 +1861,10 @@ class ManagerGUI(tk.Tk):
         if (data_dir / XE_SKY_PLUGIN).is_file():
             self.active_names.add(XE_SKY_PLUGIN.casefold())
         self.refresh()
-        self.save()
+        self.load_order_dirty = True
+        if not self.save():
+            self._setup_fail("preflight_complete", "Could not save the initial load order.")
+            return
         python = str(self._console_python())
         commands = []
         if not self._setup_done("sort_complete"):
@@ -2508,7 +2513,9 @@ class ManagerGUI(tk.Tk):
         if not new_plugins:
             return
         self.active_names.update(name.casefold() for name in new_plugins)
-        self.save()
+        self.load_order_dirty = True
+        if not self.save():
+            return
         self.status.set(f"Enabled {len(new_plugins)} newly detected plugin(s). Generate Patches to run the checks.")
 
     def _show_blocked_archive_warning(self, items):
@@ -3386,7 +3393,8 @@ class ManagerGUI(tk.Tk):
             if (not self.new_plugins()
                     and signature == self.gui_state.get("generated_signature")):
                 return
-        self.save()
+        if not self.save():
+            return
         self.generate_button.state(["disabled"])
         self.enable_new_button.state(["disabled"])
         self.play_button.state(["disabled"])
@@ -3560,6 +3568,8 @@ class ManagerGUI(tk.Tk):
         messagebox.showinfo("Generate Patches finished", text, parent=self)
 
     def play_game(self):
+        if not self._resolve_pending_load_order("playing"):
+            return
         self._update_action_buttons()
         if self.play_button.instate(["disabled"]):
             return
@@ -3692,6 +3702,7 @@ class ManagerGUI(tk.Tk):
             toggled.append(name)
         if not toggled:
             return "break"
+        self.load_order_dirty = True
         self.refresh()
         self.tree.selection_set(names)
         self.status.set("Plugin checkbox change is pending. Save load order to apply it.")
@@ -3713,6 +3724,7 @@ class ManagerGUI(tk.Tk):
             # Moving up: the moved plugin must load before the plugin now below it.
             pair = (name, self.order[new + 1])
         self.pending_order_rules.append(pair)
+        self.load_order_dirty = True
         self.refresh()
         self.tree.selection_set(name)
         self.tree.see(name)
@@ -3738,7 +3750,7 @@ class ManagerGUI(tk.Tk):
             previous_state = {path: path.read_bytes() if path.is_file() else None for path in state_paths}
         except OSError as exc:
             messagebox.showerror("Could not save load order", str(exc), parent=self)
-            return
+            return False
         moved = []
         journal = run = None
         if disabled_now:
@@ -3764,14 +3776,18 @@ class ManagerGUI(tk.Tk):
         except OSError as exc:
             if run:
                 journal.finish_run(run)
+            rollback_errors = []
             for source, target in reversed(moved):
                 try:
                     if target.is_file() and not source.exists():
                         os.replace(target, source)
-                except OSError:
-                    pass
-            messagebox.showerror("Could not disable plugin", str(exc), parent=self)
-            return
+                except OSError as rollback_error:
+                    rollback_errors.append(f"{target} -> {source}: {rollback_error}")
+            message = str(exc)
+            if rollback_errors:
+                message += "\n\nRollback incomplete:\n" + "\n".join(rollback_errors)
+            messagebox.showerror("Could not disable plugin", message, parent=self)
+            return False
         if run:
             journal.finish_run(run)
         disabled = read_disabled_plugins()
@@ -3782,28 +3798,34 @@ class ManagerGUI(tk.Tk):
             write_order(names)
             self._write_manual_order_rules()
         except OSError as exc:
+            rollback_errors = []
             for source, target in reversed(moved):
                 try:
                     if target.is_file() and not source.exists():
                         os.replace(target, source)
-                except OSError:
-                    pass
+                except OSError as rollback_error:
+                    rollback_errors.append(f"{target} -> {source}: {rollback_error}")
             for path, content in previous_state.items():
                 try:
                     if content is None:
                         path.unlink(missing_ok=True)
                     else:
                         _atomic_write(path, content)
-                except OSError:
-                    pass
-            messagebox.showerror("Could not save load order", str(exc), parent=self)
-            return
+                except OSError as rollback_error:
+                    rollback_errors.append(f"{path}: {rollback_error}")
+            message = str(exc)
+            if rollback_errors:
+                message += "\n\nRollback incomplete:\n" + "\n".join(rollback_errors)
+            messagebox.showerror("Could not save load order", message, parent=self)
+            return False
         self.order = names
         self.active_names = {n.casefold() for n in names}
+        self.load_order_dirty = False
         self.refresh()
         total_disabled = len(read_disabled_plugins())
         self.status.set(f"Saved {len(names)} active plugins; {total_disabled} plugin(s) disabled"
                         + (" (Show Disabled lists them)." if total_disabled else "."))
+        return True
 
     def show_disabled_plugins(self):
         """List disabled plugin records and restore selected files into the active load order."""
@@ -4304,7 +4326,9 @@ class ManagerGUI(tk.Tk):
             installed_active = [name for name in masters if (data_dir / name).is_file()
                                and name.casefold() in self.selected_major_masters]
             self.order = list(CORE) + installed_active + other
-            self.save()
+            self.load_order_dirty = True
+            if not self.save():
+                return False
             saved_state[0] = master_state()
             if close and not getattr(self, "_initializing_manager", False):
                 dialog.destroy()
@@ -4656,7 +4680,10 @@ class ManagerGUI(tk.Tk):
             self.gui_state["selected_major_masters"] = [n for n in self.major_masters
                                                         if n.casefold() in self.selected_major_masters]
             write_gui_state(self.gui_state)
-            self.save()
+            self.load_order_dirty = True
+            if not self.save():
+                self.status.set("Major masters are deployed, but the load order was not saved. Retry Save load order.")
+                return
             if hasattr(self, "_major_master_refresh"):
                 self._major_master_refresh()
             self.refresh()
@@ -5403,8 +5430,30 @@ class ManagerGUI(tk.Tk):
                 f"\u201c{running}\u201d is still running. Quitting now can leave it half-finished.\n\nQuit anyway?",
                 icon="warning", default="no", parent=self):
             return
+        if not self._resolve_pending_load_order("closing"):
+            return
         _end_children()
         self.destroy()
+
+    def _resolve_pending_load_order(self, action):
+        if not getattr(self, "load_order_dirty", False) and not self.pending_order_rules:
+            return True
+        answer = messagebox.askyesnocancel(
+            "Unsaved load-order changes",
+            f"Save the pending load-order changes before {action}?\n\n"
+            "Choose No to discard them" + (" and play with the saved load order." if action == "playing" else "."),
+            parent=self,
+        )
+        if answer is None:
+            return False
+        if answer:
+            return bool(self.save())
+        self.order = read_order()
+        self.active_names = {name.casefold() for name in self.order}
+        self.pending_order_rules.clear()
+        self.load_order_dirty = False
+        self.refresh()
+        return True
 
     def _archive_downloads_folder(self):
         """The Archive Downloads folder, or None. If the value held in memory is empty or gone, the saved one

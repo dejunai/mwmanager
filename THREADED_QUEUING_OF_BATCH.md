@@ -286,6 +286,11 @@ The GUI polls a `queue.Queue` and:
 3. calls `submit_answers`;
 4. moves immediately to the highest-priority queued `OptionsReady` item.
 
+Persist the answer and the package's `OPTIONS_ANSWERED` phase together. For a newly published post-Tidy discovery,
+the apply worker must wait even if the answer arrives before its waiter is registered; only an already-answered
+discovery from an earlier pass may take the resume shortcut. Compare fingerprints after the waiter is released
+before deciding whether Tidy must run again.
+
 The option dialog is serialized because:
 
 - it reduces cognitive overload;

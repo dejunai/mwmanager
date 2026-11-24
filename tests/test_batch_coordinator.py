@@ -155,6 +155,49 @@ class BatchCoordinatorTests(unittest.TestCase):
         self.assertTrue(all(coordinator == "READY_FOR_DEPLOYMENT" for coordinator in
                             (entry["phase"] for entry in self.coordinator.manifest["packages"].values())))
 
+    def test_immediate_post_apply_answer_is_not_mistaken_for_a_reused_answer(self):
+        package_path = self.root / "A"
+        package_path.mkdir()
+        answer_submitted = threading.Event()
+        fingerprint = {"A": "before"}
+        applies = []
+        discover = self.coordinator.discover_fomod_status
+        submit_answers = self.coordinator.submit_answers
+
+        def delayed_discovery(*args, **kwargs):
+            result = discover(*args, **kwargs)
+            if kwargs.get("source") == "post_apply_rescan":
+                self.assertTrue(answer_submitted.wait(2), "the option loop did not answer the new discovery")
+            return result
+
+        def submit(discovery_id, answer_payload):
+            submit_answers(discovery_id, answer_payload)
+            if self.coordinator.manifest["discoveries"][discovery_id]["source"] == "post_apply_rescan":
+                answer_submitted.set()
+
+        self.coordinator.discover_fomod_status = delayed_discovery
+        self.coordinator.submit_answers = submit
+
+        def prepare(_unit, reopen):
+            if reopen:
+                fingerprint["A"] = "after-choice"
+
+        batch.run_threaded_batch(
+            self.coordinator,
+            [{"id": "A"}],
+            extract=lambda item, _index: batch.BatchUnit(item["id"], package_path, {}),
+            prepare_options=prepare,
+            apply=lambda _unit: applies.append(fingerprint["A"]),
+            fingerprint=lambda _unit: fingerprint["A"],
+            config_fingerprint=lambda _unit: "config",
+            reset_after_option_change=lambda _unit: None,
+            on_ready=lambda _unit: None,
+            progress=lambda _message: None,
+        )
+
+        self.assertEqual(applies, ["before", "after-choice"])
+        self.assertEqual(self.coordinator.package("A")["phase"], "READY_FOR_DEPLOYMENT")
+
     def test_answered_rescan_with_no_answer_file_does_not_wait_forever(self):
         package_path = self.root / "A"
         package_path.mkdir()

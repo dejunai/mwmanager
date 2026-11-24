@@ -315,11 +315,27 @@ class WorkflowGuiTests(unittest.TestCase):
         before = self.g.read_disabled_plugins()
         with mock.patch.object(self.g, "write_order", side_effect=OSError("disk full")), \
                 mock.patch.object(self.g.messagebox, "showerror") as error:
-            self.app.save()
+            self.assertFalse(self.app.save())
         error.assert_called_once()
         self.assertTrue((data / "Extra.esp").is_file())
         self.assertFalse((self.g.disabled_plugins_dir() / "Extra.esp").exists())
         self.assertEqual(self.g.read_disabled_plugins(), before)
+
+    def test_patch_generation_stops_when_load_order_save_fails(self):
+        with mock.patch.object(self.app, "save", return_value=False), \
+                mock.patch.object(self.app, "_run_progress_job") as job:
+            self.app.generate_patches(force=True)
+        job.assert_not_called()
+
+    def test_pending_load_order_changes_must_be_saved_or_discarded_explicitly(self):
+        self.app.load_order_dirty = True
+        with mock.patch.object(self.g.messagebox, "askyesnocancel", return_value=True), \
+                mock.patch.object(self.app, "save", return_value=False):
+            self.assertFalse(self.app._resolve_pending_load_order("playing"))
+
+        with mock.patch.object(self.g.messagebox, "askyesnocancel", return_value=False):
+            self.assertTrue(self.app._resolve_pending_load_order("closing"))
+        self.assertFalse(self.app.load_order_dirty)
 
     def test_turning_a_plugin_off_is_journaled(self):
         data = Path(self.app.settings["game_dir"]) / "Data Files"

@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-23T02:56:35",
+  "SyncedAt": "2026-11-23T16:54:48",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -13,9 +13,10 @@
     },
     {
       "RelativePath": "AGENTS.md",
-      "Bytes": 522,
-      "SHA256": "57a1934d15be396cda9254ced540ae2ba89394c5a5da562fe78d105092540b8f",
-      "Source": "<Steam Morrowind>\\AGENTS.md"
+      "Bytes": 828,
+      "SHA256": "5bd881289c9776af2104ea9b9f7adcde98b781e571eede55c1c3d2ca21e4036c",
+      "Source": "<morrowind-conflict-tools>\\AGENTS.md",
+      "SourceModified": "2026-11-23T16:47:00"
     },
     {
       "RelativePath": "CHANGES.md",
@@ -502,10 +503,10 @@
     },
     {
       "RelativePath": "mwdialog_check.py",
-      "Source": "<Steam Morrowind>\\mwdialog_check.py",
-      "Bytes": 574639,
-      "SHA256": "add5436b0c575ded3ebfd4df00749b83bb7cc12d157a4bd3d14825b12ad00ffc",
-      "SourceModified": "2026-11-23T02:53:04"
+      "Source": "<morrowind-conflict-tools>\\mwdialog_check.py",
+      "Bytes": 574831,
+      "SHA256": "13dd76ab7e235582e607f41060c718e3ec5411f3c0772a0c9ac226f96c959856",
+      "SourceModified": "2026-11-23T16:52:32"
     },
     {
       "RelativePath": "mwdialog_check.rules.txt",
@@ -684,10 +685,10 @@
     },
     {
       "RelativePath": "mwdialog_redundant.py",
-      "Bytes": 27562,
-      "SHA256": "6756ec7bc790abf3d393659a6d53065b9d978bcc2fa08ef3241e405a37c609f9",
-      "Source": "<Steam Morrowind>\\mwdialog_redundant.py",
-      "SourceModified": "2026-11-23T01:55:24"
+      "Bytes": 27635,
+      "SHA256": "deab81761f732361621a60680d165b343bfb2677e91153ea63046d0a5e9612cb",
+      "Source": "<morrowind-conflict-tools>\\mwdialog_redundant.py",
+      "SourceModified": "2026-11-23T16:47:19"
     },
     {
       "RelativePath": "mwdialog_redundant.txt",

@@ -276,14 +276,43 @@ class IncompatibleWorkflow(unittest.TestCase):
                 guard = stack.enter_context(mock.patch.object(m, "build_compatibility_guard", side_effect=[0, 2]))
                 stack.enter_context(mock.patch.object(m, "run_sort",
                     side_effect=lambda args, _plugins: setattr(args, "sort_changed", True)))
+                repairs = []
                 for name in ("fix_ref_groups", "fix_cell_layouts", "fix_cell_winners", "drop_performers_patch"):
-                    stack.enter_context(mock.patch.object(m, name))
+                    repairs.append(stack.enter_context(mock.patch.object(m, name)))
                 for name in ("fix_omwaddon_masters", "fix_long_names"):
                     stack.enter_context(mock.patch.object(m, name, return_value=False))
                 stack.enter_context(mock.patch.object(m, "scan", side_effect=AssertionError("built after sorting")))
                 self.assertEqual(m.main([str(self.data), "--sort", "--all", "--no-vortex", "--no-sounds",
                                          "--no-doubled", "--no-interactive", "--yes", *extra]), 2)
                 self.assertEqual(guard.call_count, 2)
+                self.assertTrue(all(not repair.called for repair in repairs))
+
+    def test_sort_revalidates_after_repairs_change_plugin_state(self):
+        m = self.scanner
+        self.family()
+        events = []
+
+        def guard(_args, _plugins):
+            events.append("guard")
+            return 2 if events.count("guard") == 3 else 0
+
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(m, "build_compatibility_guard", side_effect=guard))
+            stack.enter_context(mock.patch.object(m, "run_sort",
+                side_effect=lambda args, _plugins: (events.append("sort"), setattr(args, "sort_changed", True))))
+            for name in ("fix_ref_groups", "fix_cell_layouts", "drop_performers_patch"):
+                stack.enter_context(mock.patch.object(m, name, side_effect=lambda *args, _name=name: events.append(_name)))
+            for name in ("fix_omwaddon_masters", "fix_long_names"):
+                stack.enter_context(mock.patch.object(m, name, return_value=False))
+            stack.enter_context(mock.patch.object(m, "fix_cell_winners",
+                                                   side_effect=AssertionError("patch built after post-repair conflict")))
+            stack.enter_context(mock.patch.object(m, "scan",
+                                                   side_effect=AssertionError("report built after post-repair conflict")))
+            rc = m.main([str(self.data), "--sort", "--fix", "--no-vortex", "--no-sounds", "--no-doubled",
+                         "--no-follow-up", "--no-interactive", "--yes"])
+        self.assertEqual(rc, 2)
+        self.assertEqual(events, ["guard", "sort", "guard", "fix_ref_groups", "fix_cell_layouts",
+                                  "drop_performers_patch", "guard"])
 
     def test_master_repair_sort_rechecks_before_fixing(self):
         m = self.scanner

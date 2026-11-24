@@ -60,7 +60,7 @@ TRANSITIONS = {
                       "FAILED_RETRYABLE", "BLOCKED_USER_ACTION", "CANCELLED"},
     "TIDY_APPLYING": {"TIDY_COMPLETE", "PREPARING_OPTIONS", "FAILED_RETRYABLE",
                       "BLOCKED_USER_ACTION", "CANCELLED"},
-    "TIDY_COMPLETE": {"DEPENDENCY_DISCOVERY", "PREPARING_OPTIONS", "READY_FOR_DEPLOYMENT",
+    "TIDY_COMPLETE": {"DEPENDENCY_DISCOVERY", "PREPARING_OPTIONS", "OPTIONS_ANSWERED", "READY_FOR_DEPLOYMENT",
                       "WAITING_ON_DEPENDENCIES", "FAILED_RETRYABLE", "BLOCKED_USER_ACTION"},
     "DEPENDENCY_DISCOVERY": {"WAITING_ON_DEPENDENCIES", "READY_FOR_DEPLOYMENT",
                              "FAILED_RETRYABLE", "BLOCKED_USER_ACTION"},
@@ -256,6 +256,12 @@ class BatchCoordinator:
             self._emit("PackageTransition", package_id=package_id, phase=phase, previous=previous)
             return package
 
+    def prepare_dynamic_options(self, package_id: str) -> dict:
+        with self._lock:
+            if self.package(package_id)["phase"] == "OPTIONS_ANSWERED":
+                return self.package(package_id)
+            return self.transition(package_id, "PREPARING_OPTIONS", worker_slot="tk-options")
+
     @staticmethod
     def discovery_key(package_id: str, installer_path: str, config_hash: str,
                       payload_fingerprint: str = "") -> str:
@@ -263,17 +269,18 @@ class BatchCoordinator:
                          config_hash, payload_fingerprint))
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-    def discover_fomod(self, package_id: str, *, installer_path: str, config_hash: str,
-                       option_records: dict, source: str, priority: int = 50,
-                       depth: int = 0, payload_fingerprint: str = "") -> str | None:
+    def _discover_fomod(self, package_id: str, *, installer_path: str, config_hash: str,
+                        option_records: dict, source: str, priority: int = 50,
+                        depth: int = 0, payload_fingerprint: str = "") -> tuple[str | None, bool, str | None]:
         if depth > MAX_DISCOVERY_DEPTH:
             self.transition(package_id, "BLOCKED_USER_ACTION",
                             error=f"Nested FOMOD depth exceeded {MAX_DISCOVERY_DEPTH}.")
-            return None
+            return None, False, None
         discovery_id = self.discovery_key(package_id, installer_path, config_hash, payload_fingerprint)
         with self._lock:
             if discovery_id in self.manifest["discoveries"]:
-                return discovery_id
+                state = self.manifest["discoveries"][discovery_id]["state"]
+                return discovery_id, False, state
             discovery = {
                 "id": discovery_id,
                 "package_id": package_id,
@@ -294,7 +301,26 @@ class BatchCoordinator:
             self._emit("FOMOD_DISCOVERED", discovery_id=discovery_id, package_id=package_id,
                        priority=int(priority), source=source)
             self.publish_options(discovery_id)
-            return discovery_id
+            state = discovery["state"]
+            return discovery_id, True, state
+
+    def discover_fomod(self, package_id: str, *, installer_path: str, config_hash: str,
+                       option_records: dict, source: str, priority: int = 50,
+                       depth: int = 0, payload_fingerprint: str = "") -> str | None:
+        discovery_id, _created, _state = self._discover_fomod(
+            package_id, installer_path=installer_path, config_hash=config_hash,
+            option_records=option_records, source=source, priority=priority,
+            depth=depth, payload_fingerprint=payload_fingerprint)
+        return discovery_id
+
+    def discover_fomod_status(self, package_id: str, *, installer_path: str, config_hash: str,
+                              option_records: dict, source: str, priority: int = 50,
+                              depth: int = 0, payload_fingerprint: str = ""
+                              ) -> tuple[str | None, bool, str | None]:
+        return self._discover_fomod(
+            package_id, installer_path=installer_path, config_hash=config_hash,
+            option_records=option_records, source=source, priority=priority,
+            depth=depth, payload_fingerprint=payload_fingerprint)
 
     def publish_options(self, discovery_id: str) -> None:
         with self._lock:
@@ -345,7 +371,7 @@ class BatchCoordinator:
             for item in self.manifest["ready_queue"]:
                 if item.get("discovery_id") == discovery_id:
                     item["state"] = "answered"
-            self._save()
+            self.transition(discovery["package_id"], "OPTIONS_ANSWERED", worker_slot="tk-options")
             self._emit("OptionsAnswered", discovery_id=discovery_id,
                        package_id=discovery["package_id"], answer_sha256=answer_hash)
 
@@ -543,7 +569,7 @@ def run_threaded_batch(
                 blocked = False
                 for depth in range(max_discovery_depth + 1):
                     before = fingerprint(unit)
-                    discovery_id = coordinator.discover_fomod(
+                    discovery_id, is_new_discovery, discovered_state = coordinator.discover_fomod_status(
                         unit.package_id,
                         installer_path=str(unit.path),
                         config_hash=config_fingerprint(unit),
@@ -556,11 +582,10 @@ def run_threaded_batch(
                     )
                     if discovery_id is None:
                         break
-                    if coordinator.discovery_state(discovery_id) == "answered":
+                    if not is_new_discovery and discovered_state == "answered":
                         coordinator.transition(unit.package_id, "TIDY_COMPLETE", worker_slot="tidy")
                         break
-                    coordinator.transition(unit.package_id, "PREPARING_OPTIONS",
-                                           worker_slot="tk-options")
+                    coordinator.prepare_dynamic_options(unit.package_id)
                     waiter = threading.Event()
                     notifications.put(("dynamic_ready", discovery_id, waiter))
                     while not waiter.wait(0.2):
@@ -653,7 +678,6 @@ def run_threaded_batch(
                 option.discovery_id,
                 {"fingerprint": fingerprint(unit), "depth": int(records.get("depth") or 0)},
             )
-            coordinator.transition(option.package_id, "OPTIONS_ANSWERED", worker_slot="tk-options")
             if records.get("kind") == "post_apply_rescan":
                 waiter = dynamic_waiters.pop(option.discovery_id, None)
                 if waiter is None:
