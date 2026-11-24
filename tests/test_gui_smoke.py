@@ -5,6 +5,7 @@ these tests never touch the real MWManager state, Data Files, Vortex or the game
 when Tk cannot open a display.
 """
 import ast
+import gc
 import json
 import sys
 import tempfile
@@ -215,6 +216,7 @@ class GuiSmokeTests(unittest.TestCase):
     def setUp(self):
         import mwmanager_gui as g
         self.g = g
+        self._threads_before = set(threading.enumerate())
         self.tmp = tempfile.TemporaryDirectory()
         base = Path(self.tmp.name)
         game = base / "game"
@@ -249,13 +251,36 @@ class GuiSmokeTests(unittest.TestCase):
         self.app.report_callback_exception = lambda *exc: self.errors.append(exc)
 
     def tearDown(self):
+        self._settle_worker_threads()
         try:
             self.app.destroy()
         except Exception:
             pass
+        # Tk objects must be freed on this thread: a worker that dropped the last reference to one would make
+        # Tcl free it from the wrong thread (an access violation on Windows, in whichever test runs next).
+        gc.collect()
         for attr, value in self._saved.items():
             setattr(self.g, attr, value)
         self.tmp.cleanup()
+
+    def _settle_worker_threads(self, seconds=5.0):
+        """Cancel a job the test left running and let the threads it started end while Tk still runs."""
+        control = getattr(self.app, "_job_control", None)
+        if control is not None:
+            control.cancelled.set()
+        before = getattr(self, "_threads_before", set())
+        end = threading.Event()
+        try:
+            self.app.after(int(seconds * 1000), end.set)
+        except Exception:
+            return
+        while not end.is_set():
+            if not [t for t in threading.enumerate() if t not in before and t.is_alive() and t is not threading.current_thread()]:
+                break
+            try:
+                self.app.update()
+            except Exception:
+                return
 
     def pump(self, seconds=0.4):
         end = threading.Event()
