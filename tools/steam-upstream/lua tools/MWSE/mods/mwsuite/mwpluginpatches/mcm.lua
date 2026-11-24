@@ -32,11 +32,9 @@ Active Plugin Status:
   • Friends & Frens: %s
   • The Lost Heir: %s
   • Mabrigash Distribution: %s
-  • Cave Drips: %s
-  • Yet Another Better Sounds Patch: %s
-  • Expanded Sounds: %s
   • Clean Tales of Seyda Neen: %s
-  • Trainer Log: %s]],
+  • Trainer Log: %s
+  • Personal Effects: %s]],
     config.isMcaActive() and "Active" or "Not Active",
     config.isEbonheartUnderworksActive() and "Active" or "Not Active",
     config.isPAndSActive() and "Active" or "Not Active",
@@ -44,11 +42,9 @@ Active Plugin Status:
     config.isFriendsAndFrensActive() and "Active" or "Not Active",
     config.isLostHeirActive() and "Active" or "Not Active",
     config.isMabrDistActive() and "Active" or "Not Active",
-    config.isCaveDripsActive() and "Active" or "Not Active",
-    config.isSwampSoundsActive() and "Active" or "Not Active",
-    config.isExpandedSoundsActive() and "Active" or "Not Active",
     config.isTalesOfSeydaNeenActive() and "Active" or "Not Active",
-    config.isTrainerLogActive() and "Active" or "Not Active"),
+    config.isTrainerLogActive() and "Active" or "Not Active",
+    config.isPersonalEffectsActive() and "Active" or "Not Active"),
 })
 
 -- SECTION 1: FRIENDS & FRENS (JIUB COMPANION DELAY)
@@ -224,42 +220,6 @@ mabrCategory:createYesNoButton({
     variable = mwse.mcm.createTableVariable({ id = "mabrDistSuppressionEnabled", table = config }),
 })
 
--- SECTION 10: LOOPING SOUND SCRIPTS
-local dripCategory = page:createCategory(string.format("Cave Drips: Drip Sound%s",
-    getStatusText(config.isCaveDripsActive())))
-
-dripCategory:createYesNoButton({
-    label = "Start Each Drip Loop Once",
-    description = "Runs Cave Drips' R0_Sound_Cave_Drip_scr in Lua. The engine can report the drip loop as not playing "
-        .. "while it plays, so the original script restarts it every frame (mwsoundguard RUNAWAY entries). With this "
-        .. "on, each drip starts its loop once while it is loaded; the drip visuals are placed as before. "
-        .. "Takes effect after a restart.",
-    variable = mwse.mcm.createTableVariable({ id = "caveDripSoundEnabled", table = config }),
-})
-
-local swampCategory = page:createCategory(string.format("Yet Another Better Sounds Patch: Swamp Sounds%s",
-    getStatusText(config.isSwampSoundsActive())))
-
-swampCategory:createYesNoButton({
-    label = "One Swamp Loop Per Sound Source",
-    description = "Runs SwampSoundScript in Lua with the same day, night and weather choices. The original starts "
-        .. "a new random swamp loop every frame because the engine reports the playing one as stopped. With this "
-        .. "on, each swamp sound source keeps one loop until day turns to night (or back) or the weather turns bad. "
-        .. "Takes effect after a restart.",
-    variable = mwse.mcm.createTableVariable({ id = "swampSoundEnabled", table = config }),
-})
-
-local expandedCategory = page:createCategory(string.format("Expanded Sounds: Water and Boat Loops%s",
-    getStatusText(config.isExpandedSoundsActive())))
-
-expandedCategory:createYesNoButton({
-    label = "Start Expanded Sounds Loops Once",
-    description = "Runs Float, Sound_Boat_Creak, Sound_Boat_Hull and Sound_Water_Spout in Lua, preserving Float's boat "
-        .. "rocking while starting each boat-hull, waterfall and boat-creak loop only once per loaded source. "
-        .. "Takes effect after a restart.",
-    variable = mwse.mcm.createTableVariable({ id = "expandedSoundsEnabled", table = config }),
-})
-
 -- SECTION 11: CLEAN TALES OF SEYDA NEEN
 local talesCategory = page:createCategory(string.format("Clean Tales of Seyda Neen: Dialogue Fix%s",
     getStatusText(config.isTalesOfSeydaNeenActive())))
@@ -372,6 +332,17 @@ topicsCategory:createYesNoButton({
         .. "menu out early (ImmersiveTravel, with travel NPCs), that is too soon and every topic stays amber. This makes "
         .. "the colouring wait for the list. Neither mod is edited. Takes effect after a restart.",
     variable = mwse.mcm.createTableVariable({ id = "uiExpansionTopicsEnabled", table = config }),
+})
+
+local personalEffectsCategory = page:createCategory(string.format("Personal Effects: Census and Excise%s",
+    getStatusText(config.isPersonalEffectsActive())))
+
+personalEffectsCategory:createYesNoButton({
+    label = "Run Its Census Scripts in Lua",
+    description = "Replaces Personal Effects' Census and Excise scripts (its ESP stays required): the class effects "
+        .. "chest is unlocked and filled once, the legacy scripts are stopped, Sellus Gravius and the door guard keep "
+        .. "their facing, and duplicate chests and player clones are cleaned up. Takes effect after a restart.",
+    variable = mwse.mcm.createTableVariable({ id = "personalEffectsEnabled", table = config }),
 })
 
 local voicesCategory = page:createCategory(string.format("Voices of Vvardenfell: Console%s",

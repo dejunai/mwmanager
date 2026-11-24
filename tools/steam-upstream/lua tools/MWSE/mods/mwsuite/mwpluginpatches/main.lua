@@ -7,9 +7,6 @@ local jiubDelay = require("mwpluginpatches.patches.jiubDelay")
 local friendsAndFrensLore = require("mwpluginpatches.patches.friendsAndFrensLore")
 local lostHeirDelay = require("mwpluginpatches.patches.lostHeirDelay")
 local mabrDist = require("mwpluginpatches.patches.mabrDist")
-local caveDripSound = require("mwpluginpatches.patches.caveDripSound")
-local swampSound = require("mwpluginpatches.patches.swampSound")
-local expandedSounds = require("mwpluginpatches.patches.expandedSounds")
 local talesHandwritingFix = require("mwpluginpatches.patches.talesHandwritingFix")
 local trainerLogUnlock = require("mwpluginpatches.patches.trainerLogUnlock")
 local coastGuardContraband = require("mwpluginpatches.patches.coastGuardContraband")
@@ -17,6 +14,7 @@ local graphicHerbalismRespawn = require("mwpluginpatches.patches.graphicHerbalis
 local bardicInstruments = require("mwpluginpatches.patches.bardicInstruments")
 local aiVoicesConsole = require("mwpluginpatches.patches.aiVoicesConsole")
 local uiExpansionTopics = require("mwpluginpatches.patches.uiExpansionTopics")
+local personalEffects = require("mwpluginpatches.patches.personalEffects")
 
 local function onInitialized()
     if not config.enabled then
@@ -58,20 +56,8 @@ local function onInitialized()
         mabrDist.init()
     end
 
-    -- 8. Cave Drips: one drip loop per activator instead of a restart every frame
-    if config.caveDripSoundEnabled and config.isCaveDripsActive() then
-        caveDripSound.init()
-    end
-
-    -- 9. Yet Another Better Sounds Patch: one swamp loop per activator instead of a restart every frame
-    if config.swampSoundEnabled and config.isSwampSoundsActive() then
-        swampSound.init()
-    end
-
-    -- Expanded Sounds: keep the Float rocking and boat creak, but start each loop once
-    if config.expandedSoundsEnabled and config.isExpandedSoundsActive() then
-        expandedSounds.init()
-    end
+    -- Looping sound scripts (Cave Drips, Yet Another Better Sounds Patch, Expanded Sounds) are left to
+    -- conflict-tools --soundfix, which rewrites every GetSoundPlaying-guarded loop at its root.
 
     -- 10. Clean Tales of Seyda Neen: Illegible Handwriting Dialogue Filter
     if config.talesHandwritingFixEnabled and config.isTalesOfSeydaNeenActive() then
@@ -97,6 +83,9 @@ local function onInitialized()
     end
     if config.uiExpansionTopicsEnabled and config.isUIExpansionActive() then
         uiExpansionTopics.init()
+    end
+    if config.personalEffectsEnabled and config.isPersonalEffectsActive() then
+        personalEffects.init()
     end
 
     mwse.log("[mwpluginpatches] Unified plugin compatibility patches initialized.")

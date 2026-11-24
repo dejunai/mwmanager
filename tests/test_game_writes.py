@@ -573,11 +573,12 @@ class LuaSuiteIsTheUsersCopy(unittest.TestCase):
 
     def test_mwguard_exempts_every_suite_mod(self):
         names = {p.name for p in (self.SUITE / "mods").iterdir() if (p / "main.lua").is_file()}
-        self.assertEqual(len(names), 21)
+        self.assertEqual(len(names), 20)
         main = (self.SUITE / "mods" / "mwguard" / "main.lua").read_text("utf-8")
         block = main[main.index("exemptMods"):]
         block = block[:block.index("}")]
-        self.assertEqual(set(re.findall(r'"([^"]+)"', block)), names)
+        # mwpersonaleffects is now a mwpluginpatches patch; mwguard keeps the old name for installs that still carry it
+        self.assertEqual(set(re.findall(r'"([^"]+)"', block)) - {"mwpersonaleffects"}, names)
 
     def test_no_quickfixes_or_consolidated_package_left(self):
         self.assertFalse((self.SUITE / "mods" / "MWManager").exists())
