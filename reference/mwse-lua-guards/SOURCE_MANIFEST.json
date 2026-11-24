@@ -152,9 +152,9 @@
     {
       "Path": "mods/mwguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwguard\\main.lua",
-      "SHA256": "0b69ccc949a25ddda637d75f16d9763d8bfba2fa33c26d49a69cd21abec46e3b",
-      "Length": 16315,
-      "SourceModified": "2026-11-21T21:15:37"
+      "SHA256": "0b5847b43f7352978fe25d9720ac8d29fa34b782b9cbb512f254f015676970ba",
+      "Length": 16329,
+      "SourceModified": "2026-11-24T03:56:27"
     },
     {
       "Path": "mods/mwhangwatch/main.lua",
@@ -418,9 +418,9 @@
     {
       "Path": "mods/mwcriminal/config.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcriminal\\config.lua",
-      "SHA256": "a34d3dbc68afee609091ad31a084d27004f651bb9352fef0d7324234a8da60c6",
-      "Length": 5233,
-      "SourceModified": "2026-11-21T21:15:37"
+      "SHA256": "6d3069d2131053c35d2e46028ebe6d63b127f1da0777ed5d7a8b0aeb8d4311fd",
+      "Length": 5342,
+      "SourceModified": "2026-11-24T03:49:31"
     },
     {
       "Path": "mods/mwcriminal/core.lua",
@@ -432,16 +432,16 @@
     {
       "Path": "mods/mwcriminal/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcriminal\\main.lua",
-      "SHA256": "e1bbc51cbaa5c320c84892c8020987d5c50d433ee4e82d8b1f304d693fe7b712",
-      "Length": 11930,
-      "SourceModified": "2026-11-22T07:52:07"
+      "SHA256": "75f966d003446c00032af3fa2fbca3a27bdcbd80e45f488a3d43abf18ded9d55",
+      "Length": 12757,
+      "SourceModified": "2026-11-24T03:49:31"
     },
     {
       "Path": "mods/mwcriminal/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcriminal\\mcm.lua",
-      "SHA256": "20072a5d6c5d8c3ad2358a9b83db8014f9e99526dec9fe865ec616e107408410",
-      "Length": 6955,
-      "SourceModified": "2026-11-22T00:31:09"
+      "SHA256": "4f67abbd64fc35f4b368bf1037090bef475731aa54f2ade266e35245a51fdb19",
+      "Length": 7255,
+      "SourceModified": "2026-11-24T03:49:31"
     },
     {
       "Path": "mods/mwcriminal/interop.lua",
@@ -505,6 +505,13 @@
       "SHA256": "228eef205340bc7f8a2a5c4956a6f3103720f5689d3dc0bfe90d5af36637277d",
       "Length": 956,
       "SourceModified": "2026-11-22T16:12:54"
+    },
+    {
+      "Path": "mods/mwsoundfix/main.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwsoundfix\\main.lua",
+      "SHA256": "aef1ad8b7bf534701a77555d69423aa7272be32b2651dd22004f3d050ade11f9",
+      "Length": 5104,
+      "SourceModified": "2026-11-24T03:03:22"
     }
   ]
 }

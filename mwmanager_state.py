@@ -188,6 +188,21 @@ def cell_fixes_report_path(_game_dir):
     return output_file("mwmanager_cell_fixes.txt")
 
 
+# Newer upstream files go through mwdialog_paths.state_path, which (outside conflict-tools\) means the game
+# folder. MWManager keeps them out of the game install, with its own records and reports. The older upstream
+# records already go through MWManager's own readers and writers, so only these names are routed.
+_STATE_ROUTES = {"mwdialog_soundfix_report.txt": output_file, "mwdialog_patch_inputs.json": manager_file}
+if not getattr(MP.state_path, "mwmanager_routed", False):
+    _upstream_state_path = MP.state_path
+
+    def _routed_state_path(base, name):
+        route = None if os.path.isabs(name) else _STATE_ROUTES.get(name.lower())
+        return route(name) if route else _upstream_state_path(base, name)
+
+    _routed_state_path.mwmanager_routed = True
+    MP.state_path = _routed_state_path
+
+
 def doubled_rules_path(_game_dir):
     return manager_file(RULES_FILE)
 

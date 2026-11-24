@@ -55,6 +55,7 @@ mwdialog_backup/
 mlox/
 tools/*
 !tools/steam-upstream/
+!tools/MWRecompile/
 !tools/archive_corpus.py
 tools/steam-upstream/previous-*/
 tools/steam-upstream/not-related/
