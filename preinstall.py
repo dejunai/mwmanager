@@ -568,7 +568,8 @@ def _set_values(path: Path, values: dict, sep: str, encoding: str) -> list[str]:
     """Set keys inside [section]s of an INI/TOML file, keeping every other line, comment and line ending."""
     if not path.is_file():
         return []
-    text = path.read_text(encoding=encoding, errors="surrogateescape", newline="")
+    with open(path, encoding=encoding, errors="surrogateescape", newline="") as stream:   # read_text(newline=) is 3.13+
+        text = stream.read()
     eol = "\r\n" if "\r\n" in text else "\n"
     lines = text.splitlines(keepends=True)
     if lines and not lines[-1].endswith("\n"):

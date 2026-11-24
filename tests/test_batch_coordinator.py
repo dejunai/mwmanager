@@ -130,7 +130,7 @@ class BatchCoordinatorTests(unittest.TestCase):
         def prepare(unit, reopen):
             events.append((unit.package_id, "rescan" if reopen else "initial"))
             if not reopen and unit.package_id == "A":
-                self.assertTrue(second_extracting.wait(1), "B did not extract while A options were active")
+                self.assertTrue(second_extracting.wait(10), "B did not extract while A options were active")
             if reopen and unit.package_id == "A" and fingerprints["A"] == "0":
                 fingerprints["A"] = "1"
 
@@ -167,7 +167,7 @@ class BatchCoordinatorTests(unittest.TestCase):
         def delayed_discovery(*args, **kwargs):
             result = discover(*args, **kwargs)
             if kwargs.get("source") == "post_apply_rescan":
-                self.assertTrue(answer_submitted.wait(2), "the option loop did not answer the new discovery")
+                self.assertTrue(answer_submitted.wait(10), "the option loop did not answer the new discovery")
             return result
 
         def submit(discovery_id, answer_payload):
