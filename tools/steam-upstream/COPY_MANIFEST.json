@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-24T11:11:36",
+  "SyncedAt": "2026-11-24T11:52:51",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -132,10 +132,10 @@
     },
     {
       "RelativePath": "lua tools\\MWSE\\mods\\mwsuite\\mwguard\\main.lua",
-      "Bytes": 17977,
-      "SHA256": "256827abde063473147f5c92c974a7c78f2b17c529d073eac77c6bf118d63f91",
+      "Bytes": 19329,
+      "SHA256": "fd69858865db2f2a6a2eba231630ef8645cea0889fd43ec63ac97b5c51ae9911",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwguard\\main.lua",
-      "SourceModified": "2026-11-24T08:02:13"
+      "SourceModified": "2026-11-24T11:51:16"
     },
     {
       "RelativePath": "lua tools\\MWSE\\mods\\mwsuite\\mwhangwatch\\main.lua",
@@ -517,10 +517,10 @@
     },
     {
       "RelativePath": "mwdialog_luafix.py",
-      "Bytes": 172948,
-      "SHA256": "86c6404929302c8884c6da7fb14b993788849760b21babb134b6bd448b7a4e69",
+      "Bytes": 179463,
+      "SHA256": "181cec06de122ef8f8419ea5ddf9c59b15807259cf38425650bc2febd811619c",
       "Source": "<Steam Morrowind>\\mwdialog_luafix.py",
-      "SourceModified": "2026-11-24T08:35:33"
+      "SourceModified": "2026-11-24T11:46:28"
     },
     {
       "RelativePath": "mwdialog_mastercheck.py",
@@ -713,10 +713,10 @@
     },
     {
       "RelativePath": "tests\\test_luafix.py",
-      "Bytes": 77237,
-      "SHA256": "58e24e48e7b84258215fa43697003c0ff3671a6d1c76668b8a650cfa4dc62137",
+      "Bytes": 90193,
+      "SHA256": "5d36cff08161270cc109020b3f8215f19df0b8bc83b3a81aa42092f649b11b9e",
       "Source": "<Steam Morrowind>\\tests\\test_luafix.py",
-      "SourceModified": "2026-11-24T08:49:38"
+      "SourceModified": "2026-11-24T11:47:58"
     },
     {
       "RelativePath": "tests\\test_mastercheck.py",
@@ -1084,9 +1084,9 @@
     {
       "RelativePath": "tests\\test_mwguard.py",
       "Source": "<Steam Morrowind>\\tests\\test_mwguard.py",
-      "Bytes": 6184,
-      "SHA256": "da0447f0255d3933f0c2aebe5934b4558630916748493056641a792f280584a7",
-      "SourceModified": "2026-11-24T10:15:40"
+      "Bytes": 9651,
+      "SHA256": "3eeaaa7fe69835f6359d397e4209ddc51301be7e782b05218d5bcf82ff4e814c",
+      "SourceModified": "2026-11-24T11:51:28"
     },
     {
       "RelativePath": "tests\\test_mwhangwatch.py",
