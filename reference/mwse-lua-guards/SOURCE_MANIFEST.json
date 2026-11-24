@@ -1,6 +1,6 @@
 {
   "Description": "The user's mw* MWSE Lua suite as it is in the Steam Morrowind install, copied byte for byte. dejespreplacements (formerly mwespreplacements) is excluded (user's personal load-order patches).",
-  "CopiedAt": "2026-11-22 (America/Los_Angeles); mwfloatfix refresh",
+  "CopiedAt": "2026-11-23 (sync.py)",
   "Files": [
     {
       "Path": "metadata/mwcustomclasspersistence-metadata.toml",
