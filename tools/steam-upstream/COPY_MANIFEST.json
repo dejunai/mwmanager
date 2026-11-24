@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-24T10:03:59",
+  "SyncedAt": "2026-11-24T10:17:17",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -1084,16 +1084,16 @@
     {
       "RelativePath": "tests\\test_mwguard.py",
       "Source": "<Steam Morrowind>\\tests\\test_mwguard.py",
-      "Bytes": 5522,
-      "SHA256": "2f0d24072a72521ce0c31c468e52065475f38dc4b9962f8f7cfcf1c9c06864e5",
-      "SourceModified": "2026-11-21T21:15:37"
+      "Bytes": 6184,
+      "SHA256": "da0447f0255d3933f0c2aebe5934b4558630916748493056641a792f280584a7",
+      "SourceModified": "2026-11-24T10:15:40"
     },
     {
       "RelativePath": "tests\\test_mwhangwatch.py",
       "Source": "<Steam Morrowind>\\tests\\test_mwhangwatch.py",
-      "Bytes": 2922,
-      "SHA256": "36ba1cd288e7b4f01324be2dc8d2df5ea9db4819e191e0758449f5da13cc85fd",
-      "SourceModified": "2026-11-21T21:15:37"
+      "Bytes": 3259,
+      "SHA256": "abd08b0928b89b565dbbf9f8dae9044904613918b25ca9d0e9e5f196cb50bf3d",
+      "SourceModified": "2026-11-24T10:15:40"
     },
     {
       "RelativePath": "tests\\test_mwpersonaleffects.py",
