@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-24T09:29:44",
+  "SyncedAt": "2026-11-24T10:03:59",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -118,10 +118,10 @@
     },
     {
       "RelativePath": "lua tools\\MWSE\\mods\\mwsuite\\mwfloatfix\\main.lua",
-      "Bytes": 35044,
-      "SHA256": "afdb169ad3b559a34f7d2db1851fc244fd959ff57a79469df7279eb7ce112de4",
+      "Bytes": 35946,
+      "SHA256": "6f1393e45c05a1016f9d9faca77835eef98bae0c8595d8624a88c5233956607b",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwfloatfix\\main.lua",
-      "SourceModified": "2026-11-22T12:49:38"
+      "SourceModified": "2026-11-24T10:00:40"
     },
     {
       "RelativePath": "lua tools\\MWSE\\mods\\mwsuite\\mwguard\\interop.lua",
@@ -321,10 +321,10 @@
     },
     {
       "RelativePath": "lua tools\\MWSE\\mods\\mwsuite\\mwsoundguard\\main.lua",
-      "Bytes": 18920,
-      "SHA256": "d8c2db9e6dfbb93af19403c338595127d39c3de40993197843ee3d74ec125f37",
+      "Bytes": 20186,
+      "SHA256": "4a44ac42012116f7031e1dff840284367795dc1a6b25a5cabc3212a644126951",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwsoundguard\\main.lua",
-      "SourceModified": "2026-11-22T10:28:29"
+      "SourceModified": "2026-11-24T10:00:40"
     },
     {
       "RelativePath": "lua tools\\MWSE\\mods\\mwsuite\\mwsoundguard\\mcm.lua",
@@ -440,10 +440,10 @@
     },
     {
       "RelativePath": "mwdialog_cellmods.py",
-      "Bytes": 29646,
-      "SHA256": "fe105db222bbffa03eed5f033b19497563cb34ed8bfc93f2a88fd8a100c9415c",
+      "Bytes": 31070,
+      "SHA256": "bcbed8fce4715edb8104d1b7f3616b1c0551f9640f76aa1da6e2a99eff3a37e7",
       "Source": "<Steam Morrowind>\\mwdialog_cellmods.py",
-      "SourceModified": "2026-11-23T23:30:23"
+      "SourceModified": "2026-11-24T10:00:40"
     },
     {
       "RelativePath": "mwdialog_check.bat",
@@ -469,9 +469,9 @@
     {
       "RelativePath": "mwdialog_check.py",
       "Source": "<morrowind-conflict-tools>\\mwdialog_check.py",
-      "Bytes": 594706,
-      "SHA256": "19f4d35faa3d472506671b53275b4a2442f542ab0b45d7c3f851af10cfd40a22",
-      "SourceModified": "2026-11-24T08:35:33"
+      "Bytes": 598846,
+      "SHA256": "77412a26179b8c75cc4a5d5e7505783cfd5d208eaebf8dab8629ea741b659376",
+      "SourceModified": "2026-11-24T10:00:40"
     },
     {
       "RelativePath": "mwdialog_console.py",
@@ -1440,10 +1440,10 @@
     },
     {
       "RelativePath": "mwdialog_soundfix.py",
-      "Bytes": 30029,
-      "SHA256": "3863867ae95e1d6d0e731cf3caa2897271cd5c8668fa50925a382998e77a8123",
+      "Bytes": 31732,
+      "SHA256": "56b0a74b17a3bad4ec6ba65ba320abf4815cc6fc9dc05adfb9556737b56e27b1",
       "Source": "<morrowind-conflict-tools>\\mwdialog_soundfix.py",
-      "SourceModified": "2026-11-24T07:38:57"
+      "SourceModified": "2026-11-24T10:00:40"
     }
   ]
 }

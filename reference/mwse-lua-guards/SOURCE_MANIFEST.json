@@ -131,9 +131,9 @@
     {
       "Path": "mods/mwfloatfix/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwfloatfix\\main.lua",
-      "SHA256": "afdb169ad3b559a34f7d2db1851fc244fd959ff57a79469df7279eb7ce112de4",
-      "Length": 35044,
-      "SourceModified": "2026-11-22T12:49:38"
+      "SHA256": "6f1393e45c05a1016f9d9faca77835eef98bae0c8595d8624a88c5233956607b",
+      "Length": 35946,
+      "SourceModified": "2026-11-24T10:00:40"
     },
     {
       "Path": "mods/mwguard/interop.lua",
@@ -341,9 +341,9 @@
     {
       "Path": "mods/mwsoundguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwsoundguard\\main.lua",
-      "SHA256": "d8c2db9e6dfbb93af19403c338595127d39c3de40993197843ee3d74ec125f37",
-      "Length": 18920,
-      "SourceModified": "2026-11-22T10:28:29"
+      "SHA256": "4a44ac42012116f7031e1dff840284367795dc1a6b25a5cabc3212a644126951",
+      "Length": 20186,
+      "SourceModified": "2026-11-24T10:00:40"
     },
     {
       "Path": "mods/mwsoundguard/mcm.lua",
