@@ -1,7 +1,7 @@
 {
   "repository": "https://github.com/dejunai/morrowind-conflict-tools",
-  "commit": "6983d8e",
-  "commit_subject": "Fix docs and --preserve-saves help after the Performers Patch removal",
+  "commit": "f23d8a8",
+  "commit_subject": "luafix: frame-drain and safe-handle patches, fewer false hits",
   "vendored_copy": "tools/steam-upstream/ (file list and SHA-256: tools/steam-upstream/COPY_MANIFEST.json)",
   "run_from_root": "every mwdialog_*.py and vortex_tidy.py in the repository root is a byte-identical copy of the same file in tools/steam-upstream/ (tests/test_game_writes.py checks the hashes)",
   "rule": "never edit the upstream files here; MWManager behaviour lives in the mwmanager_* extension modules"
