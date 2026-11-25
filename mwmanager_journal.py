@@ -82,6 +82,15 @@ MGE_REGENERATED = ("data files/distantland/*", "mgexe.toml")
 def mge_regenerated(k: str) -> bool:
     return any(fnmatch.fnmatchcase(k, pat) for pat in MGE_REGENERATED)
 
+# Runtime files written by our MWSE suite (and by --fix for those mods) under
+# Data Files\MWSE\config. They are not journaled when the game writes them, so
+# rollback would otherwise refuse. They are deleted like other generated files.
+GENERATED_RUNTIME = ("data files/mwse/config/mwfloatfix_*.json",)
+
+
+def generated_runtime(k: str) -> bool:
+    return any(fnmatch.fnmatchcase(k, pat) for pat in GENERATED_RUNTIME)
+
 
 def wipe_folder(path) -> None:
     """Delete a folder and everything in it at once, with no per-file bookkeeping. (A robocopy mirror of an
@@ -1294,8 +1303,16 @@ class Journal:
         prereq_paths = {key(rel) for rel in self.prerequisites()["files"]}
         planned_paths = {key(step["path"]) for step in steps + prerequisite_steps}
         against = "prerequisites" if preserve_prerequisites else "baseline"
-        unexplained = [p for p in self.verify(game_dir, against=against)["unexplained"]
-                       if key(p) not in journaled and key(p) not in prereq_paths and key(p) not in planned_paths]
+        unexplained = []
+        for rel in self.verify(game_dir, against=against)["unexplained"]:
+            k = key(rel)
+            if k in journaled or k in prereq_paths or k in planned_paths:
+                continue
+            if generated_runtime(k) and k not in rollback_checkpoint:
+                steps.append(delete_step(rel, k))
+                planned_paths.add(k)
+            else:
+                unexplained.append(rel)
         return {"steps": steps, "prerequisite_steps": prerequisite_steps, "refuse": refuse,
                 "unexplained": unexplained,
                 "cleanup_after_verify": sorted(set(used_backups))}

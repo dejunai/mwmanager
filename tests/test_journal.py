@@ -213,6 +213,20 @@ class BaselineTests(Fixture):
         self.assertIn(("delete", "Data Files/distantland/terrain.bin"),
                       {(step["op"], step["path"]) for step in store_only["prerequisite_steps"]})
 
+    def test_rollback_deletes_unjournaled_floatfix_runtime_files(self):
+        self.journal.capture_baseline(self.game)
+        self.journal.capture_prerequisites(self.game)
+        data = write(self.game / "Data Files/MWSE/config/mwfloatfix_data.json", b'{"cells":{}}')
+        rescue = write(self.game / "Data Files/MWSE/config/mwfloatfix_rescue.json", b'{"actors":{}}')
+        plan = self.journal.plan_rollback(self.game)
+        self.assertEqual((plan["refuse"], plan["unexplained"]), ([], []))
+        ops = {(step["op"], step["path"]) for step in plan["steps"]}
+        self.assertIn(("delete", "Data Files/MWSE/config/mwfloatfix_data.json"), ops)
+        self.assertIn(("delete", "Data Files/MWSE/config/mwfloatfix_rescue.json"), ops)
+        self.journal.execute_rollback(self.game, plan)
+        self.assertFalse(data.exists())
+        self.assertFalse(rescue.exists())
+
     def test_rollback_skips_a_journal_original_when_current_file_matches_prerequisite_checkpoint(self):
         plugin = self.game / "Data Files/XE Sky Variations.esp"
         self.journal.capture_baseline(self.game)
