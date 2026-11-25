@@ -213,14 +213,15 @@ def conflict_choice(index, total, kind, a, b, conflict, labels, options, default
         return input("  > ").strip().lower()
     from mwmanager_workflow import conflict_answer
 
-    details = f"{a} vs {b}\n\n"
+    details = f"{a} and {b} both change the same places in the game world.\n\n"
     evidence = conflict.get("incompatible")
     if evidence:
-        details += (f"Moved land leaves {', '.join(sorted(evidence['evidence']))} at the old location "
-                    f"in {len(evidence['cells'])} cell(s). Load order cannot fix this; one side must be "
-                    "turned off.\n\n")
+        details += (f"One of them moves the land, which leaves {', '.join(sorted(evidence['evidence']))} at the "
+                    f"old location in {len(evidence['cells'])} cell(s). Load order cannot fix this: pick which "
+                    "plugin to keep, and the other one is turned off.\n\n")
     else:
-        details += f"{b} loads later and currently wins where the plugins conflict.\n\n"
+        details += (f"Right now {b} wins: it loads after {a}, so where the two disagree the game shows "
+                    f"{b}'s version and {a}'s changes there are not seen.\n\n")
     affected = list(dict.fromkeys(
         str(labels.get(item[0], item[0][1]))
         for field in ("place", "refs", "settings") for item in conflict[field]))
@@ -243,13 +244,36 @@ def conflict_choice(index, total, kind, a, b, conflict, labels, options, default
             details += ("MWSE Lua or metadata also names these plugins; review those mods separately:\n" +
                         "\n".join(lua_affected) + "\n\n")
     if not evidence:
-        details += ("Ordering changes who wins; interior choices rebuild the affected cells. "
-                    "Disabling a plugin removes it from the active load order.\n\n")
-    details += ("Choose Skip to leave this pair unchanged, or Finish review to keep decisions already made.")
+        details += ("Picking a winner only changes the load order; both plugins stay on. Picking an interior "
+                    "layout rebuilds those cells. Turning a plugin off removes it from the load order.\n\n")
+    details += ("Choose \"Decide later\" to leave this pair as it is, or Finish review to keep the decisions "
+                "already made.")
     return conflict_answer(
         f"Cell conflict {index} of {total}: {kind}", details,
-        [(value[3], key) for key, value in options.items()] +
-        [("Skip this pair", "s"), ("Finish review", "q")], default or "s")
+        [(plain_conflict_choice(value, b), key) for key, value in options.items()] +
+        [(CONFLICT_LATER, "s"), ("Finish review", "q")], default or "s")
+
+
+CONFLICT_LATER = "Decide later (leave both as they are; asked again next run)"
+
+
+def plain_conflict_choice(option, current_winner):
+    """A cell-conflict choice in plain words: who wins, and what changes. option = (what, x, y, upstream label)
+    from conflict_session: ("order", first, last): last loads later and wins; ("keep", winner, other); ("off",
+    turned off, kept); ("cell", whose layout, other)."""
+    what, x, y, label = option
+    if what == "order":
+        same = y.lower() == str(current_winner).lower()
+        return (f"{y} wins: load it after {x}, so the game shows {y}'s version where they disagree"
+                + (" (no change)" if same else ""))
+    if what == "keep":
+        return f"{x} wins (an .esm always loads before an .esp, so nothing changes)"
+    if what == "off":
+        extra = label[len(f"turn off {x}"):] if label.startswith(f"turn off {x}") else ""
+        return f"Keep only {y}: turn off {x}{extra}"
+    if what == "cell":
+        return f"Use {x}'s layout for the rebuilt interior(s); {y}'s objects there are removed"
+    return label
 
 
 def repair_sound_ffmpeg():
@@ -291,6 +315,40 @@ def cell_conflicts_interactive(args):
             and not args.dry_run and not getattr(args, "no_interactive", False))
 
 
+
+
+def clear_pending_cell_conflicts(args):
+    """A --no-interactive --cell-conflicts scan of every active pair starts from an empty list of unanswered
+    pairs. The list used to be rewritten only when the scan got as far as listing pairs, so a scan that found
+    none (or a plugin that has since left the load order, such as an MGE XE grass plugin now in Data
+    Files\\Grass) kept the old pairs, and Generate Patches asked about them again (CR-25 stress run: rem-totsp.esp
+    vs Bloodmoon.esm and Solstheim Tomb of the Snow Prince.esm, left from before Rem-TOTSP.esp was a grass
+    plugin)."""
+    if (not getattr(args, "no_interactive", False) or args.dry_run
+            or getattr(args, "only_incompatible", False) or getattr(args, "only", None)):
+        return
+    try:
+        os.remove(output_file(NEW_CONFLICTS_FILE))
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        print(f"  Could not clear the old unresolved cell-conflict list: {exc}")
+
+
+def pending_cell_conflicts(args):
+    """The unanswered pairs from the last scan, without any pair whose plugin is no longer in the load order."""
+    try:
+        pairs = [l for l in open(output_file(NEW_CONFLICTS_FILE), encoding="utf-8").read().split("\n") if l]
+    except OSError:
+        return []
+    try:
+        active = read_load_order(args)
+    except (OSError, ValueError):
+        active = None
+    if active is None:
+        return pairs
+    on = {n.lower() for n in active}
+    return [p_ for p_ in pairs if all(n.lower() in on for n in p_.split("|"))]
 
 
 def save_pending_cell_conflicts(args, ranked):
@@ -716,6 +774,13 @@ def resolve(args, report):
             if p:
                 bsa_paths.append(p)
 
+    # upstream's resolve leaves MGE XE grass plugins out (judged by content: only grass statics placed in
+    # cells); this copy predates that, so a groundcover plugin in the load order (Rem-TOTSP.esp) was checked,
+    # sorted and asked about in cell conflicts against Bloodmoon.esm (CR-25 stress run follow-up)
+    plugin_paths, grass = drop_grass_plugins(plugin_paths)
+    if grass:
+        print("MGE XE grass plugin(s) left out of this run (they belong in Data Files\\Grass, not the load "
+              "order): " + ", ".join(os.path.basename(p) for p in grass), file=sys.stderr)
     if not preserve_order:
         plugin_paths = sort_vanilla(plugin_paths)
     return [(os.path.basename(p), p) for p in plugin_paths], bsa_paths, data_dirs
@@ -1011,10 +1076,7 @@ def run_full(args):
     if args.dry_run:
         return 0
     print("\n--full finished with no errors.")
-    try:
-        new_pairs = [l for l in open(output_file(NEW_CONFLICTS_FILE), encoding="utf-8").read().split("\n") if l]
-    except OSError:
-        new_pairs = []
+    new_pairs = pending_cell_conflicts(args)
     if new_pairs:
         print(f"\n{len(new_pairs)} new conflict(s) have no remembered answer yet: "
               + ", ".join(p_.replace("|", " vs ") for p_ in new_pairs[:5]) + (" ..." if len(new_pairs) > 5 else ""))
@@ -1620,6 +1682,7 @@ def _main(argv=None):
             ap.error("--merge needs the merged plugin's name and at least one input file or folder")
         return run_merge(args, plugins, bsas, data_dirs)
     if args.cell_conflicts:
+        clear_pending_cell_conflicts(args)
         return run_cell_conflicts(args, plugins)
     if args.fix and fix_omwaddon_masters(args) and not args.dry_run:
         if not args.sort and not IN_FULL:                    # their masters may load after them: sort

@@ -100,7 +100,7 @@ class WorkflowLogicTests(unittest.TestCase):
                     {"a.esp": "A.esp", "b.esp": "B.esp"}, {}, 1), 0)
             picker.assert_called_once()
             labels = picker.call_args.args[2]
-            self.assertIn(("Skip this pair", "s"), labels)
+            self.assertIn((scanner.CONFLICT_LATER, "s"), labels)
 
     def test_backend_selection_does_not_deploy_other_staged_packages(self):
         from major_master_deploy import deploy
