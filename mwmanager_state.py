@@ -536,6 +536,33 @@ def _kept_asset_finder(data_dir):
     return find
 
 
+def _journal_moves_back(game_dir, moves):
+    """Originals moved back from Data Files\\Off into place: both paths go into the install ledger, so the
+    deployed state that verify expects has the file in place and its Off copy gone. (Rollback needs nothing
+    more: the file in place is the original the earlier move kept.)"""
+    if not moves:
+        return
+    import mwmanager_journal
+    ledger = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
+    if not ledger.has_baseline():
+        return
+    game = Path(game_dir).resolve()
+    run = ledger.start_run("mwmanager.py", {"operation": "move originals back from Off"})
+    try:
+        for source, target in moves:
+            target = Path(target).resolve()
+            try:
+                source_rel = mwmanager_journal.rel_of(game, Path(source).resolve())
+                target_rel = mwmanager_journal.rel_of(game, target)
+            except ValueError:
+                continue
+            ledger.record(run["run"], source_rel, "move", None, None, tag="asset-moved-back")
+            ledger.record(run["run"], target_rel, "create", mwmanager_journal.sha256_file(target), None,
+                          tag="asset-moved-back")
+    finally:
+        ledger.finish_run(run)
+
+
 def write_generated(data_dir, game_dir, items, log):
     """Put missing files in place: the real file kept in Off or staging when there is one, else a stand-in.
     Records them for both --remove-generated and install rollback; never stops --full."""
@@ -545,6 +572,7 @@ def write_generated(data_dir, game_dir, items, log):
     pending = []
     find = _kept_asset_finder(data_dir)
     resolved = []
+    moved_back = []
     for item in items:
         rel, why, source = (item + (None,))[:3]
         if not source and not os.path.exists(os.path.join(data_dir, rel)):
@@ -553,11 +581,13 @@ def write_generated(data_dir, game_dir, items, log):
                 full = os.path.join(data_dir, rel)
                 os.makedirs(os.path.dirname(full), exist_ok=True)
                 os.replace(hit[1], full)                     # undoes a journaled move; rollback sees it in place
+                moved_back.append((hit[1], full))
                 log.append(("Data Files", f"'{rel}' is needed again", f"moved the original back from {hit[1]}"))
                 continue
             if hit:
                 item = (rel, why, hit[1]) + tuple(item[3:])  # copied below, recorded like any generated file
         resolved.append(item)
+    _journal_moves_back(game_dir, moved_back)
     items = resolved
     for item in items:
         rel, _why, source = (item + (None,))[:3]

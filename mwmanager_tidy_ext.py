@@ -1349,10 +1349,14 @@ def lua_apply(args, lres):
     lf, written, refused = lres["lf"], 0, []
     for package_name_raw, report in lres["reps"]:
         if package_name_raw == CORE_KEY:              # no mod folder to hold a bug report
-            count, rejected = lf.apply_report(
-                report, journal=JOURNAL,
-                head_extra=dict({"staging": args.staging, "plugin": package_name_raw, "lua": True},
-                                **getattr(args, "_journal_extra", {})), done=lres["done"])
+            held = _core_lua_ledger(report)
+            try:
+                count, rejected = lf.apply_report(
+                    report, journal=JOURNAL,
+                    head_extra=dict({"staging": args.staging, "plugin": package_name_raw, "lua": True},
+                                    **getattr(args, "_journal_extra", {})), done=lres["done"])
+            finally:
+                _record_core_lua(held)
             lines, _counts = lf.format_report(report, indent="  ", done=lres["done"], refused=dict(rejected))
             if lines:
                 print("\n".join("    " + x for x in lines))
@@ -1386,6 +1390,49 @@ def lua_apply(args, lres):
         print(f"    not patched: {os.path.relpath(path, args.staging)}: {why}")
     print(f"  patched {written} Lua file(s) (originals kept in each package's Off tree; "
           f"journal {JOURNAL}; --undo --only <package> puts one package's back)")
+
+
+def _core_lua_ledger(report):
+    """MWSE core Lua is a live game file, not a staged one: before luafix patches it, keep the original of each
+    file the report will patch in the install ledger's content store. Returns what _record_core_lua needs, or
+    None (no game baseline, nothing to patch)."""
+    import mwmanager_journal
+    try:
+        files = dict(report.files)
+    except (AttributeError, TypeError, ValueError):
+        return None
+    paths = [p for p, e in sorted(files.items()) if isinstance(e, dict) and (e.get("patch") or {}).get("ok")]
+    ledger = mwmanager_journal.Journal()
+    if not paths or not ledger.has_baseline():
+        return None
+    before = {}
+    for path in paths:
+        target = Path(path).resolve()
+        data = next((q for q in (target.parent, *target.parents) if q.name.casefold() == "data files"), None)
+        if data is None or not target.is_file():
+            continue
+        before[str(target)] = (data.parent, mwmanager_journal.sha256_file(target),
+                               ledger.preserve_original(data.parent, target))
+    return (ledger, before) if before else None
+
+
+def _record_core_lua(held):
+    """Journal each MWSE core Lua file luafix changed, so install verify explains it and rollback restores it."""
+    if not held:
+        return
+    import mwmanager_journal
+    ledger, before = held
+    changed = [(Path(t), game, original) for t, (game, digest, original) in before.items()
+               if Path(t).is_file() and mwmanager_journal.sha256_file(Path(t)) != digest]
+    if not changed:
+        return
+    run = ledger.start_run("mwmanager_install.py", {"operation": "MWSE core Lua repairs"})
+    try:
+        for target, game, original in changed:
+            ledger.record(run["run"], mwmanager_journal.rel_of(game, target), "modify",
+                          mwmanager_journal.sha256_file(target), original, tag="mwse-core-lua")
+    finally:
+        ledger.finish_run(run)
 
 
 def undo_lua_repairs():

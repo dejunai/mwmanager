@@ -51,6 +51,20 @@ from pathlib import Path
 
 MANAGER_DIR = Path(__file__).resolve().parent
 DEFAULT_ROOT = MANAGER_DIR / "journal"
+_REAL_ROOT = DEFAULT_ROOT
+
+
+def _redirected(root: Path) -> Path:
+    """MWMANAGER_JOURNAL_REDIRECT (set for a test run, and inherited by the processes it starts): MWManager's
+    real journal folder is never written by a test; the redirect folder is used in its place."""
+    target = os.environ.get("MWMANAGER_JOURNAL_REDIRECT")
+    if target:
+        try:
+            if Path(root).resolve() == _REAL_ROOT.resolve():
+                return Path(target)
+        except OSError:
+            pass
+    return Path(root)
 WIDTH = 115
 
 PREREQ_RULES = (
@@ -281,7 +295,7 @@ FOUND_AT_SETUP = "Found at Setup"      # Off/<this>: files no mod deployed (in D
 
 class Journal:
     def __init__(self, root: Path | str | None = None):
-        self.root = Path(root) if root else DEFAULT_ROOT
+        self.root = _redirected(Path(root) if root else DEFAULT_ROOT)
         self.baseline_file = self.root / "baseline" / "baseline.json"
         self.baseline_ini = self.root / "baseline" / "Morrowind.ini"
         self.prerequisites_file = self.root / "prerequisites" / "prerequisites.json"
@@ -1138,6 +1152,9 @@ class Journal:
                 report["ignored"] += 1
                 continue
             if against == "deployed" and k.startswith("data files/off/"):
+                report["ignored"] += 1
+                continue
+            if against == "deployed" and generated_runtime(k):     # MWSE suite runtime data; rollback deletes it
                 report["ignored"] += 1
                 continue
             report["extra"].append(rel_of(game_dir, path))

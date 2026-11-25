@@ -179,6 +179,18 @@ class PriorityList(unittest.TestCase):
         identity = core_addons._stage_plugin_identity(item, [PFP])
         self.assertEqual((identity["PLUGIN_VERSION"], identity["NEXUS_VERSION"]), ("5.0.6", "5.0.7"))
 
+    def test_current_stage_marker_keeps_a_newer_file_version_than_the_mod_page(self):
+        # Wares Ultimate: the Nexus mod page says 2.1.1, the downloaded file is 2.1.3 (status current by date)
+        item = {"archive": "Wares Ultimate-52013-2-1-3-1775985220.7z", "filename_version": "2.1.3",
+                "nexus": {"wares-base.esm": {"status": "current", "latest": "2.1.1"}}}
+        identity = core_addons._stage_plugin_identity(item, ["Wares-base.esm"])
+        self.assertEqual((identity["PLUGIN_VERSION"], identity["NEXUS_VERSION"]), ("2.1.3", "2.1.1"))
+
+    def test_current_stage_marker_keeps_the_nexus_spelling_of_the_same_number(self):
+        item = {"archive": "Tamriel Data (HD) 59927 26.08 2026-08-23T04-15Z 4vY6vjul.7z", "filename_version": "26.8",
+                "nexus": {"tamriel_data.esm": {"status": "current", "latest": "26.08"}}}
+        identity = core_addons._stage_plugin_identity(item, ["Tamriel_Data.esm"])
+        self.assertEqual(identity["PLUGIN_VERSION"], "26.08")
 
 class SortPlacesIt(unittest.TestCase):
     def test_shipped_rules_do_not_contain_install_specific_master_order(self):

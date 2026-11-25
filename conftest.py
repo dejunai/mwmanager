@@ -7,10 +7,16 @@ folders, and MWManager composes its copies (mwmanager_upstream.compose). So each
 modules: the upstream set is what tools/steam-upstream/tests/conftest.py loads, and before each file is collected
 and each test runs, sys.modules (and which of the two folders comes first on sys.path) is switched to that side's
 set. Running either folder alone is unchanged: nothing is switched until the upstream conftest is loaded."""
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
+
+# No test (nor a process it starts) writes MWManager's real journal folder: mwmanager_journal sends the real
+# folder to this one instead. (A crossed module set once left test entries in the real install ledger.)
+os.environ.setdefault("MWMANAGER_JOURNAL_REDIRECT", tempfile.mkdtemp(prefix="mwmanager-test-journal-"))
 
 ROOT = Path(__file__).resolve().parent
 UP = ROOT / "tools" / "steam-upstream"

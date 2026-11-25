@@ -1485,6 +1485,12 @@ def _stage_plugin_identity(item: dict, selected_masters: list[str]) -> dict:
     primary = selected_masters[0] if selected_masters else ""
     nexus = item.get("nexus", {}).get(primary.casefold(), {}) if primary else {}
     exact_current = nexus.get("latest") if nexus.get("status") == "current" else None
+    own = str(item.get("filename_version") or "")
+    if exact_current and own and re.findall(r"\d+", own) and \
+            [int(v) for v in re.findall(r"\d+", own)] != [int(v) for v in re.findall(r"\d+", str(exact_current))]:
+        # Nexus's spelling of the same number ("26.08" for "26.8") is kept; a different number is not this
+        # archive's version (the mod page can lag the file: Wares Ultimate 2.1.1 page, 2.1.3 file)
+        exact_current = None
     return {
         "PLUGIN_NAME": Path(primary).stem if primary else Path(item["archive"]).stem,
         "PLUGIN_VERSION": str(exact_current or item.get("filename_version") or "unknown"),
