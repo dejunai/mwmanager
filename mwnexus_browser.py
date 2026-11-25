@@ -221,7 +221,8 @@ def active_downloads() -> list[str]:
     return list(_read_json(_root() / "downloads.json").get("active", []))
 
 
-# Runs on a Nexus file page (?tab=files&file_id=N): reports the page and clicks its download button once.
+# Runs on a Nexus file page (?tab=files&file_id=N): reports the page and clicks its download button once ("Slow
+# download" on the older page, "Start download" on the current one).
 DOWNLOAD_JS = r"""
 (() => {
   const text = ((document.body && document.body.innerText) || '').slice(0, 20000);
@@ -230,7 +231,7 @@ DOWNLOAD_JS = r"""
     const visible = e => e.offsetParent !== null;
     const label = e => (e.innerText || e.textContent || '').trim();
     const els = Array.from(document.querySelectorAll('button, a, [role=button]')).filter(visible);
-    const el = document.querySelector('#slowDownloadButton') || els.find(e => /^slow download$/i.test(label(e)));
+    const el = document.querySelector('#slowDownloadButton') || els.find(e => /^(slow|start) download$/i.test(label(e)));
     if (el) { el.click(); clicked = window.__mwmClicked = label(el) || 'slow download'; }
   }
   return JSON.stringify({url: location.href, title: document.title, readyState: document.readyState,
@@ -649,7 +650,7 @@ def _run_embedded_browser() -> None:
                 window.hide()                                 # the proper page is back: carry on unseen
                 shown = False
             say(message="Nexus needs you in the MWManager browser: complete the security check or sign in, "
-                        "then click Slow download if it does not start." if shown else
+                        "then click Start download (Slow download on older pages) if it does not start." if shown else
                         "Waiting for Nexus to start the download…")
             time.sleep(1.0)
         window.hide()

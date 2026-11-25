@@ -1584,12 +1584,16 @@ def _main(argv=None):
             write_bug_reports(args, plugins, report, world)
         except Exception as e:                       # a report is a courtesy: never stop the run for it
             print(f"(bug reports not written: {e})", file=sys.stderr)
+    fixed = False
     if args.fix or args.patch_esm:
-        run_fix(args, plugins, bsas, data_dirs, report, world, only, hidden)
+        fixed = run_fix(args, plugins, bsas, data_dirs, report, world, only, hidden) is True
     if args.multipatch:
         run_multipatch(args, plugins, world)
 
-    return 1 if counts["ERROR"] else 0
+    # A run that applied its fixes did its job: the ERRORs it found were fixed or, where no fix exists, are listed
+    # in its final check. Exit 1 only when ERRORs were found and left (a check, a dry run, fixes not applied), so
+    # the GUI's "Plugin checks and patch generation" does not fail after fixing everything it found.
+    return 1 if counts["ERROR"] and not fixed else 0
 
 
 _upstream_write_bug_reports = write_bug_reports

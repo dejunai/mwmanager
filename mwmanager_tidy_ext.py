@@ -648,6 +648,20 @@ def plan_mod(mod_dir):
             move(src, os.path.join(mod_dir, dest_name),
                  "OpenMW-compatible plugin renamed .esp for vanilla Morrowind")
             CONVERTED_ADDONS[e.casefold()] = dest_name
+    def lone_data_wrapper(src, e):
+        """`e` is the mod's only content folder and holds a "Data Files" folder with game data in it."""
+        if fomod_files or fomod_dirs or not os.path.isdir(src):
+            return False
+        others = [x for x in entries if x != e and os.path.isdir(os.path.join(mod_dir, x))
+                  and x.casefold() not in OUR_DIRS | {"screenshots", "fomod"}]
+        if others:
+            return False
+        inner = next((os.path.join(src, c) for c in os.listdir(src)
+                      if c.casefold() == "data files" and os.path.isdir(os.path.join(src, c))), None)
+        return bool(inner) and any(c.casefold() in GAME_DIRS or c.casefold() in MISNAMED_DIRS
+                                   or os.path.splitext(c)[1].casefold() in KEEP_FILE_EXT
+                                   for c in os.listdir(inner))
+
     for e in sorted(entries):
         src = os.path.join(mod_dir, e)
         el, ext = e.lower(), os.path.splitext(e)[1].lower()
@@ -697,6 +711,13 @@ def plan_mod(mod_dir):
                                                          os.path.relpath(misnamed_file, child_src)),
                              misnamed_reason(child))
                     moves.append((child_src, None, "remove the emptied misnamed folder"))
+                elif os.path.isdir(child_src) and os.path.isdir(os.path.join(mod_dir, child)):
+                    # the root already has this folder ("Docs" beside "Data Files\\Docs"): a folder can't be
+                    # renamed onto it, so its files join the root's one by one
+                    for p in files_under(child_src):
+                        move(p, os.path.join(mod_dir, child, os.path.relpath(p, child_src)),
+                             "flatten the mod's Data Files folder into its staging root (merged)")
+                    moves.append((child_src, None, "remove the emptied folder"))
                 else:
                     move(child_src, os.path.join(mod_dir, child),
                          "flatten the mod's Data Files folder into its staging root")
@@ -785,6 +806,21 @@ def plan_mod(mod_dir):
                 else:
                     move(p, os.path.join(extras, e, rel), f"non-document in readme folder '{e}'")
             moves.append((src, None, "remove the emptied folder"))
+            continue
+        if lone_data_wrapper(src, e):
+            # "SM_BCTree_1_0\\Data files\\Meshes\\...": one wrapper folder around the mod's Data Files is packaging
+            # (Vortex installs from the Data Files folder too), not an option: flatten it like a root Data Files
+            for p in files_under(src):
+                rel = os.path.relpath(p, src)
+                parts = rel.split(os.sep)
+                if parts[0].casefold() == "data files" and len(parts) > 1:
+                    move(p, os.path.join(mod_dir, *parts[1:]),
+                         f"wrapper folder '{e}': its Data Files flattened into the staging root")
+                elif is_doc(p):
+                    move(p, doc_dest(p, rel), f"readme in wrapper folder '{e}' -> Docs")
+                else:
+                    move(p, os.path.join(extras, e, rel), f"non-game file in wrapper folder '{e}'")
+            moves.append((src, None, "remove the emptied wrapper folder"))
             continue
         move(src, os.path.join(extras, e), "not a game folder")
 
@@ -1467,6 +1503,23 @@ def _write_package_asset_bug_reports(ares):
         ah.update_bug_report(report_path, "vortex_tidy (files)", header, lines)
 
 
+def _ensure_dummy_assets(data_files, log=print):
+    """Copy the stand-ins (mwmanager_dummy*.nif/.kf) out of the game's Morrowind.bsa before the missing-asset pass.
+    A staged Tidy runs outside the game folder with no mwdialog_check run behind it, so upstream's dummy_path
+    can't find Morrowind.bsa by itself; given the game folder it copies each stand-in once and keeps it."""
+    if not data_files:
+        return []
+    import mwdialog_media as media
+    game_dir = os.path.dirname(os.path.abspath(data_files))
+    made = []
+    for name in sorted(media.DUMMY_SOURCES):
+        try:
+            made.append(media.dummy_path(name, game_dir))
+        except OSError as exc:
+            log(f"Stand-in {name} not available ({exc}).")
+    return made
+
+
 def assets_apply(args, ares, moved_mods=()):
     """Run upstream asset repairs while adding exact per-package restores to Tidy's journal."""
     if not ares:
@@ -1514,6 +1567,7 @@ def assets_apply(args, ares, moved_mods=()):
         result = _upstream_assets_apply(args, ares, moved_mods)
         _write_package_asset_bug_reports(ares)
         try:
+            _ensure_dummy_assets(GAME_DATA_FILES or ares.get("data_dir"))
             ops = resolve_missing_assets(args.staging, sorted(ares["mods"]), ares["data_dir"],
                                          ah.shared_cache(game_dir))
             for plugin, operations in ops.items():
