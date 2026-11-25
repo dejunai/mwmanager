@@ -210,12 +210,52 @@ def _read_json_from_text(data: bytes):
         return None
 
 
+def personal_marks(manager_dir: Path, profile: dict) -> list[dict]:
+    """The user's personal mods (nexus_ids) this profile names, by mod or by one of its deployed plugins:
+    [{"mod", "plugins"}]. An exported profile lists them as not distributable."""
+    import nexus_ids
+    table = nexus_ids.overrides(manager_dir)
+    names = nexus_ids.personal_names(manager_dir)
+    if not names:
+        return []
+    text = json.dumps(profile.get("files") or {}, ensure_ascii=False).casefold()
+    plugins: dict[str, set[str]] = {}
+    deployments = _read_json(Path(manager_dir) / "plugin_deployments.json")
+    for entry in (deployments or {}).get("deployments", []) if isinstance(deployments, dict) else ():
+        for source in (entry.get("archive"), entry.get("staging_package"), entry.get("label")):
+            if source and nexus_ids.is_personal(Path(str(source)).name, table=table):
+                plugins.setdefault(nexus_ids.name_key(Path(str(source)).name), set()).update(
+                    str(p) for p in entry.get("plugins") or ())
+    marks = []
+    for name in names:
+        key = nexus_ids.name_key(name)
+        named = sorted((p for p in plugins.get(key, ()) if p.casefold() in text), key=str.casefold)
+        if key in text or named:
+            marks.append({"mod": name, "plugins": named})
+    return marks
+
+
+def _with_marks(manager_dir: Path, profile: dict) -> dict:
+    marks = personal_marks(manager_dir, profile)
+    if marks:
+        profile = dict(profile, not_distributable=marks,
+                       not_distributable_note="Personal mods: the user's own or hand-adjusted files, not for sharing.")
+    return profile
+
+
 def export(manager_dir: Path, name: str, destination: Path) -> Path:
+    """Copy a profile out; personal mods it names are listed under "not_distributable"."""
     destination = Path(destination).resolve()
     source = profile_dir(manager_dir) / f"{_safe_name(name)}.json"
     if not source.is_file():
         raise FileNotFoundError(f"Profile does not exist: {name}")
-    shutil.copy2(source, destination)
+    value = _read_json(source)
+    marked = _with_marks(manager_dir, value) if isinstance(value, dict) else value
+    if marked is value:
+        shutil.copy2(source, destination)
+    else:
+        _atomic_write(destination, (json.dumps(marked, indent=2, sort_keys=True, ensure_ascii=False)
+                                    + "\n").encode("utf-8"))
     return destination
 
 
@@ -235,7 +275,7 @@ def import_profile(manager_dir: Path, source: Path, *, replace: bool = False) ->
 def archive(manager_dir: Path, name: str, destination: Path) -> Path:
     """Export a profile and its referenced manager decisions as a zip."""
     destination = Path(destination).resolve()
-    profile = load(manager_dir, name)
+    profile = _with_marks(manager_dir, load(manager_dir, name))
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         profile_file = root / f"{_safe_name(name)}.json"

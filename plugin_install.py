@@ -482,13 +482,20 @@ def _nexus_ids_from_archive_name(archive: Path) -> tuple[str | None, str | None]
     return match.group("modid"), match.group("fileid")
 
 
-def _apply_nexus_id_fallback(item: dict, archive: Path) -> None:
-    """Fill missing IDs from the archive name while preserving Vortex metadata values."""
+def _apply_nexus_id_fallback(item: dict, archive: Path, manager: Path | None = None, *, search=None,
+                             cache: dict | None = None) -> None:
+    """Fill missing IDs from the archive name while preserving Vortex metadata values. With `manager`, an archive
+    still without an ID goes on to nexus_ids.resolve: Vortex's own records, then (with `search`) a Nexus search,
+    else it is marked as not a Nexus mod; item["nexus_id_source"] says which answered. A mod the user marked
+    personal gets no ID, nexus_id_source "personal" and item["personal"]."""
     mod_id, file_id = _nexus_ids_from_archive_name(archive)
     if not item.get("nexus_mod_id") and mod_id:
         item["nexus_mod_id"] = mod_id
     if not item.get("nexus_file_id") and file_id:
         item["nexus_file_id"] = file_id
+    if manager is not None:
+        import nexus_ids
+        nexus_ids.apply(item, manager, search=search, cache=cache)
 
 
 def _metadata_value(data: dict, keys: set[str]):
@@ -559,7 +566,11 @@ def _write_archive_scan_cache(manager: Path, entries: dict) -> None:
 
 def scan_archives(downloads: Path, manager: Path, progress=None,
                   installed_plugins: set[str] | None = None,
-                  refresh_cache: bool = False) -> list[dict]:
+                  refresh_cache: bool = False, nexus_search=None) -> list[dict]:
+    """`nexus_search`: nexus_ids.NexusSearch (or a fake) to look up archives neither their name nor Vortex
+    identifies; None leaves those unresolved for a later scan."""
+    import nexus_ids
+    id_cache = nexus_ids.read_cache(manager)
     seven_zip = _seven_zip(manager)
     archives = sorted((p for p in downloads.rglob("*") if p.is_file()
                        and p.suffix.casefold() in ARCHIVE_EXTENSIONS
@@ -579,7 +590,7 @@ def scan_archives(downloads: Path, manager: Path, progress=None,
             if progress:
                 progress(f"Using cached scan {index} of {len(archives)}: {archive.name}")
             item = cached["item"]
-            _apply_nexus_id_fallback(item, archive)
+            _apply_nexus_id_fallback(item, archive, manager, search=nexus_search, cache=id_cache)
             found.append(item)
             new_cache[cache_key] = cached
             continue
@@ -641,10 +652,12 @@ def scan_archives(downloads: Path, manager: Path, progress=None,
                 ])),
                 "vortex_metadata": metadata}
         item["download_time"] = _download_timestamp(metadata, mtime)
-        _apply_nexus_id_fallback(item, archive)
+        _apply_nexus_id_fallback(item, archive, manager, search=nexus_search, cache=id_cache)
         found.append(item)
         new_cache[cache_key] = {"fingerprint": fingerprint, "item": item}
     _write_archive_scan_cache(manager, new_cache)
+    if id_cache:
+        nexus_ids.write_cache(manager, id_cache)
     for item in found:
         has_landmass_master = any(Path(name).suffix.casefold() == ".esm" for name in item["plugins"])
         large = has_landmass_master or item["asset_count"] >= 500 or (item["asset_count"] >= 150 and item["plugins"])
@@ -1239,7 +1252,7 @@ def record_deployment(manager: Path, item: dict, package: Path, operations: list
                       archives: list[Path], registrations: list[str], data_dir: Path | None = None) -> dict:
     state = _read_deployment_state(manager)
     source_archive = item.get("archive")
-    _apply_nexus_id_fallback(item, Path(source_archive)) if source_archive else None
+    _apply_nexus_id_fallback(item, Path(source_archive), manager) if source_archive else None
     label = deployment_label(item, package)
     entry = {"id": uuid.uuid4().hex, "label": label,
              "deployed_at": datetime.now().astimezone().isoformat(timespec="seconds"),

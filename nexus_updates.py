@@ -451,8 +451,12 @@ def check_and_offer_update(mod_dir: str | os.PathLike, *, manager_dir: str | os.
     """
     global _SESSION_KEY
     mod_dir, manager_dir = Path(mod_dir), Path(manager_dir)
+    import nexus_ids
+    personal = nexus_ids.overrides(manager_dir)
+    if nexus_ids.is_personal(mod_dir.name, table=personal):
+        return False                                            # the user's own mod: never update-checked
     mod = _metadata(mod_dir)
-    if not mod:
+    if not mod or nexus_ids.is_personal(mod.get("name", ""), table=personal):
         return False
     key = _SESSION_KEY or _read_key(manager_dir)
     if not key:

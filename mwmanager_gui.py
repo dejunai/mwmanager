@@ -2712,7 +2712,8 @@ class ManagerGUI(tk.Tk):
             self._run_progress_job(
                 "Scan plugin archives", "Inspecting Vortex archives and their plugin/assets…",
                 lambda progress: scan_archives(downloads if source else Path(manual).parent, APP_DIR, progress,
-                                               installed_plugins=installed, refresh_cache=force_refresh),
+                                               installed_plugins=installed, refresh_cache=force_refresh,
+                                               nexus_search=__import__("nexus_ids").default_search()),
                 scanned)
 
         run_scan()
@@ -2772,6 +2773,8 @@ class ManagerGUI(tk.Tk):
                 features.append("older plugin copy omitted")
             if item["blocked"]:
                 features.append("BLOCKED")
+            if item.get("personal"):
+                features.append("PERSONAL")
             date = time.strftime("%Y-%m-%d %H:%M", time.localtime(item["download_time"])) if item["download_time"] else "unknown"
             tree.insert("", "end", iid=iid, text=Path(item["archive"]).name,
                         values=("☐", ", ".join(item["plugins"]) or "(no ESP/ESM)",
@@ -2785,6 +2788,9 @@ class ManagerGUI(tk.Tk):
             notes = item.get("problem") or ("Newer archive selected for duplicate plugin names: " +
                     ", ".join(item.get("superseded_plugins", [])) if item.get("superseded_plugins") else
                     "Ready. Required masters are ordered before their dependents.")
+            if item and item.get("personal"):
+                notes = ("Personal mod: never update-checked or searched on Nexus, and marked not distributable "
+                         "in exported profiles. " + str(notes))
             details.set(str(notes)
                         if item else "Select an archive to see scan notes.")
         tree.bind("<<TreeviewSelect>>", show_archive_details)
