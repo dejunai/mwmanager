@@ -353,3 +353,10 @@ Behaviour changes:
   Builds recheck after sorting, including merged-plugin and unreadable-header safeguards; a failed build does not
   launch the game. `--full` unmerges before re-enabling, and dry-run unmerge does not launch a mutating follow-up.
 - Backup of replaced files and hashes: `_backup\pre-incompatible-sync-20261123-022706\`.
+
+## Test fixtures vendored with the snapshot (2026-11-25, Pacific)
+- `tools\steam-upstream\tests\fixtures\mwse\` (`ExclusionsPage.lua`, `ExclusionsPage.paged.lua`, `README.md`)
+  copied from the clone at f23d8a8 and listed in `COPY_MANIFEST.json`: the vendored `test_luafix.py` KB3/KB4 tests
+  read them. `sync.py`'s `to_mwmanager()` now always carries the clone's `tests\fixtures\` files and adds new ones
+  to the manifest. Run `tests` and `tools\steam-upstream\tests` as two pytest runs: both have a
+  `test_audit_fixes.py`, so one combined run stops at collection.

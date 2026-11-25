@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-25T02:10:16",
+  "SyncedAt": "2026-11-25T02:35:49",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -1479,6 +1479,27 @@
       "SHA256": "56b0a74b17a3bad4ec6ba65ba320abf4815cc6fc9dc05adfb9556737b56e27b1",
       "Source": "<morrowind-conflict-tools>\\mwdialog_soundfix.py",
       "SourceModified": "2026-11-24T10:00:40"
+    },
+    {
+      "RelativePath": "tests\\fixtures\\mwse\\ExclusionsPage.lua",
+      "Source": "<Steam Morrowind>\\tests\\fixtures\\mwse\\ExclusionsPage.lua",
+      "Bytes": 15830,
+      "SHA256": "b981743d02cab9a535207b010e54acaa76f5519c2feb275d8deb62c5071858fb",
+      "SourceModified": "2026-11-24T08:49:38"
+    },
+    {
+      "RelativePath": "tests\\fixtures\\mwse\\ExclusionsPage.paged.lua",
+      "Source": "<Steam Morrowind>\\tests\\fixtures\\mwse\\ExclusionsPage.paged.lua",
+      "Bytes": 18795,
+      "SHA256": "c1bf41cdfe62424db6781b4fe860408fcbc06a0c77bf0249796deb12cb020885",
+      "SourceModified": "2026-11-24T08:49:38"
+    },
+    {
+      "RelativePath": "tests\\fixtures\\mwse\\README.md",
+      "Source": "<Steam Morrowind>\\tests\\fixtures\\mwse\\README.md",
+      "Bytes": 444,
+      "SHA256": "b45223ab53cae7a65b5a13505def184cd63c7063d026da0ab1026a45ad5cce6d",
+      "SourceModified": "2026-11-24T08:49:38"
     }
   ]
 }
