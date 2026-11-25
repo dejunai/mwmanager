@@ -7,30 +7,83 @@ from mwdialog_check import *  # noqa: F401,F403  (names resolve in mwdialog_chec
 
 
 def major_master_conflict_overrides(plugin_paths):
-    """Read resolved major-master records for the generated ESM fixes patch."""
+    """Read resolved major-master records for the generated ESM fixes patch.
+
+    The review saves each choice under the catalog's label (database.catalog.record_identity): interiors by
+    name, exteriors as 'Name (x, y)', LAND as '(x, y)', PGRD as 'name (x, y)', SCPT by its header name,
+    SKIL/MGEF by index, the rest by NAME. Records are matched by that same label, not by NAME alone.
+    A CELL is copied as its header only (name, flags, region, water, ambient light...): its references
+    stay with the plugins that place them, since a copied FRMR would make the patch place every object
+    again as its own new reference. Dialogue responses (INFO) need their topic, so they follow load order.
+    Choices that cannot be applied are printed, never dropped silently."""
     choices_path = manager_file("mwmanager_major_master_conflicts.json")
     try:
         choices = json.loads(Path(choices_path).read_text(encoding="utf-8")).get("resolutions", [])
     except (OSError, ValueError, TypeError):
         return [], []
-    records, winners = [], []
+    wanted = {}
     for item in choices:
         if not isinstance(item, dict):
             continue
         winner = str(item.get("winner", ""))
-        path = plugin_paths.get(winner.casefold())
         tag = str(item.get("record_tag", ""))
-        editor_id = str(item.get("editor_id", "")).casefold()
-        if not path or len(tag) != 4 or not editor_id:
+        label = str(item.get("editor_id", ""))
+        if len(tag) != 4 or not label.strip():
             continue
+        if tag == "INFO":
+            print(f"  Major-master choice not applied: INFO {label} ({winner}) - a dialogue response "
+                  f"can't be copied without its topic; load order decides it.")
+            continue
+        path = plugin_paths.get(winner.casefold())
+        if not path:
+            print(f"  Major-master choice not applied: {tag} {label} - {winner} is not in the load order.")
+            continue
+        wanted.setdefault(path, []).append((tag, label.casefold(), winner, label))
+    records, winners = [], []
+    for path, items in wanted.items():
         try:
-            raw = extract_record(path, tag, editor_id)
-        except (OSError, FormatError):
-            raw = None
-        if raw:
+            found = _mm_records_by_label(path, {(tag, key) for tag, key, _w, _l in items})
+        except (OSError, FormatError) as exc:
+            found = {}
+            print(f"  Major-master choices from {Path(path).name} not applied: {exc}")
+        for tag, key, winner, label in items:
+            raw = found.get((tag, key))
+            if raw is None:
+                print(f"  Major-master choice not applied: {tag} {label} - not found in {winner}.")
+                continue
             records.append(raw)
             winners.append(winner)
     return records, winners
+
+
+def _mm_records_by_label(path, keys):
+    """{(tag, casefolded label): raw record} for the last record per key in one plugin (CELLs header-only)."""
+    from database.catalog import record_identity
+    tags = {tag for tag, _key in keys}
+    with open(path, "rb") as stream:
+        data = stream.read()
+    found = {}
+    for off, tag, _flags, body in iter_records(data):
+        if tag not in tags:
+            continue
+        identity = record_identity(tag, body)
+        if identity is None or (tag, identity[1].casefold()) not in keys:
+            continue
+        raw = data[off:off + 16 + len(body)]
+        found[(tag, identity[1].casefold())] = _mm_cell_header(raw) if tag == "CELL" else raw
+    return found
+
+
+def _mm_cell_header(raw):
+    """A CELL record cut down to the subrecords before its first reference (FRMR, MVRF or NAM0)."""
+    body = raw[16:]
+    head = []
+    for name, data in iter_subs(body):
+        if name in ("FRMR", "MVRF", "NAM0"):
+            break
+        head.append(struct.pack("<4sI", name.encode("ascii"), len(data)) + bytes(data))
+    out = b"".join(head)
+    return raw[:4] + struct.pack("<I", len(out)) + raw[8:16] + out
 
 
 MLOX_RULE_URLS = {
