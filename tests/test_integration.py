@@ -297,7 +297,7 @@ class IncompatibleWorkflow(unittest.TestCase):
                 stack.enter_context(mock.patch.object(m, "run_sort",
                     side_effect=lambda args, _plugins: setattr(args, "sort_changed", True)))
                 repairs = []
-                for name in ("fix_ref_groups", "fix_cell_layouts", "fix_cell_winners", "drop_performers_patch"):
+                for name in ("fix_ref_groups", "fix_cell_layouts", "fix_cell_winners", "retire_performers_patch"):
                     repairs.append(stack.enter_context(mock.patch.object(m, name)))
                 for name in ("fix_omwaddon_masters", "fix_long_names"):
                     stack.enter_context(mock.patch.object(m, name, return_value=False))
@@ -320,7 +320,7 @@ class IncompatibleWorkflow(unittest.TestCase):
             stack.enter_context(mock.patch.object(m, "build_compatibility_guard", side_effect=guard))
             stack.enter_context(mock.patch.object(m, "run_sort",
                 side_effect=lambda args, _plugins: (events.append("sort"), setattr(args, "sort_changed", True))))
-            for name in ("fix_ref_groups", "fix_cell_layouts", "drop_performers_patch"):
+            for name in ("fix_ref_groups", "fix_cell_layouts", "retire_performers_patch"):
                 stack.enter_context(mock.patch.object(m, name, side_effect=lambda *args, _name=name: events.append(_name)))
             for name in ("fix_omwaddon_masters", "fix_long_names"):
                 stack.enter_context(mock.patch.object(m, name, return_value=False))
@@ -332,7 +332,7 @@ class IncompatibleWorkflow(unittest.TestCase):
                          "--no-follow-up", "--no-interactive", "--yes"])
         self.assertEqual(rc, 2)
         self.assertEqual(events, ["guard", "sort", "guard", "fix_ref_groups", "fix_cell_layouts",
-                                  "drop_performers_patch", "guard"])
+                                  "retire_performers_patch", "guard"])
 
     def test_master_repair_sort_rechecks_before_fixing(self):
         m = self.scanner
@@ -388,14 +388,14 @@ class IncompatibleWorkflow(unittest.TestCase):
             raise ScanReached
 
         with contextlib.ExitStack() as stack:
-            for name in ("fix_ref_groups", "fix_cell_layouts", "fix_cell_winners", "drop_performers_patch"):
+            for name in ("fix_ref_groups", "fix_cell_layouts", "fix_cell_winners", "retire_performers_patch"):
                 stack.enter_context(mock.patch.object(m, name))
             for name in ("fix_omwaddon_masters", "fix_long_names"):
                 stack.enter_context(mock.patch.object(m, name, return_value=False))
             stack.enter_context(mock.patch.object(m, "build_compatibility_guard", return_value=0))
             stack.enter_context(mock.patch.object(m, "scan", side_effect=capture))
             with self.assertRaises(ScanReached):
-                m.main([str(self.data), "--fix", "--no-doubled", "--no-performers", "--no-vortex",
+                m.main([str(self.data), "--fix", "--no-doubled", "--no-vortex",
                         "--no-sounds", "--no-interactive", "--yes"])
         self.assertIn(m.CELL_WINNER_PATCH, scanned)
 

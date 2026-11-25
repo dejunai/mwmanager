@@ -730,7 +730,7 @@ def run_full(args):
         # Keep every internal full-pass subprocess scoped to the --init plugin list and base-game archive.
         common += ["--init-scope", "--plugins", *args.plugins]
     for flag in ("dry_run", "no_sounds", "no_mlox_rules", "no_content_order", "no_vortex", "no_doubled",
-                 "no_performers", "no_placeholders", "no_merge_objects"):
+                 "no_placeholders", "no_merge_objects"):
         if getattr(args, flag, False):
             common.append("--" + flag.replace("_", "-"))
     if getattr(args, "collide_radius", COLLIDE_ANY_RADIUS) != COLLIDE_ANY_RADIUS:
@@ -1064,11 +1064,6 @@ def _main(argv=None):
                          "icons, sounds, music, videos, fonts), search Vortex mod folders and .Orphaned for missing "
                          "ones, and with --fix put them back or use stand-ins (adds a few minutes)")
     tc.add_argument("--no-models", action="store_true", help=argparse.SUPPRESS)   # the old opt-out; now the default
-    tc.add_argument("--performers-patch", action="store_true",
-                    help="with --fix: delete doubled bards with mwmanager Performers Patch.esp, instead of "
-                         "leaving them to the mwperformers MWSE mod (which hides them in the game)")
-    tc.add_argument("--no-performers", action="store_true",
-                    help="with --fix: don't remove doubled bards (two plugins' performers in one inn)")
     tc.add_argument("--no-doubled", action="store_true",
                     help="with --fix: don't look for (or turn off) plugins that place the same objects twice")
     tc.add_argument("--reenable", nargs="*", metavar="NAME",
@@ -1494,10 +1489,8 @@ def _main(argv=None):
         if gone:
             plugins = [(n, p) for n, p in plugins if n.lower() not in gone]
             args._cell_ctx = None
-    if args.fix and args.performers_patch and not args.no_performers:
-        fix_performers(args, plugins)
-    elif args.fix and not args.dry_run:
-        drop_performers_patch(args)       # the mwperformers MWSE mod decides in the game now
+    if args.fix and not args.dry_run:
+        retire_performers_patch(args)     # an earlier version's patch: the mwperformers MWSE mod decides in the game
     if args.fix and args.sort and getattr(args, "sort_changed", False) and not args.dry_run:
         args._cell_ctx = None
         plugins, _bsas, _data_dirs = resolve(args, Report())
