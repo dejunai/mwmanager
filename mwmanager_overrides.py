@@ -26,9 +26,70 @@ def reenable_candidate_path(data_dir, name, lookup):
     return lookup.get(name.lower()) or find_disabled_plugin(data_dir, name)
 
 
+def _install_ledger():
+    """The install journal when it has a game baseline (rollback can then explain a change), else None."""
+    import mwmanager_journal
+    ledger = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
+    return ledger if ledger.has_baseline() else None
+
+
+def _last_journal_entries(ledger):
+    """{casefolded game-relative path: the last journal entry for it}."""
+    import mwmanager_journal
+    return {mwmanager_journal.key(entry["path"]): entry for entry in ledger.entries()[0]}
+
+
+def _game_rel(game_dir, path):
+    """path relative to the game folder (posix), or None when it is outside (MWManager\\disabled_plugins)."""
+    import mwmanager_journal
+    try:
+        return mwmanager_journal.rel_of(Path(game_dir).resolve(), Path(path).resolve())
+    except ValueError:
+        return None
+
+
+def journal_plugin_moves(data_dir, moved, operation):
+    """Journal plugin files already moved between MWManager\\disabled_plugins (or Data Files\\Off\\...) and
+    Data Files: a game-folder source as moved away, a game-folder target as created with its hash (a copy is
+    kept in the journal). Without it --full's 're-enable' step put plugins back that the journal still had as
+    moved away, and verify reported them as extra (CR-25 stress run round 5, error K). moved = [(source, target)]."""
+    ledger = _install_ledger() if moved else None
+    if ledger is None:
+        return
+    import mwmanager_journal
+    game_dir = Path(os.path.abspath(data_dir)).parent
+    checkpoint = ledger.checkpoint_state()
+    last = _last_journal_entries(ledger)
+    run = ledger.start_run("mwmanager.py", {"operation": operation})
+    try:
+        records = []
+        for source, target in moved:
+            source, target = Path(source), Path(target)
+            if source.exists() or not target.is_file():
+                continue                                   # this one did not move
+            kept = ledger.preserve_file(target)
+            src_rel, dst_rel = _game_rel(game_dir, source), _game_rel(game_dir, target)
+            if src_rel is not None:
+                records.append({"run": run["run"], "path": src_rel, "action": "move", "after_sha256": None,
+                                "original": kept, "tag": "reenabled-plugin",
+                                "mod": last.get(mwmanager_journal.key(src_rel), {}).get("mod")})
+            if dst_rel is not None:
+                k = mwmanager_journal.key(dst_rel)
+                records.append({"run": run["run"], "path": dst_rel, "action": "create",
+                                "after_sha256": kept["sha256"],
+                                "original": kept if k in checkpoint else {"kind": "absent"},
+                                "tag": "reenabled-plugin", "mod": last.get(k, {}).get("mod")})
+        if records:
+            ledger.record_many(records)
+    finally:
+        ledger.finish_run(run)
+
+
 def restore_reenabled_plugins(data_dir, names):
     lookup = index_dir(data_dir)
-    return restore_disabled_plugins(data_dir, [n for n in names if n.lower() not in lookup])
+    restored = restore_disabled_plugins(data_dir, [n for n in names if n.lower() not in lookup])
+    journal_plugin_moves(data_dir, restored, "re-enable plugins")
+    return restored
 
 
 def rollback_conflict_moves(moved):
@@ -36,7 +97,114 @@ def rollback_conflict_moves(moved):
 
 
 def rollback_reenabled_moves(restored):
-    rollback_disabled_plugin_moves(restored)
+    try:
+        rollback_disabled_plugin_moves(restored)
+    finally:
+        if restored:                                   # the re-enable was journaled: so is its undo
+            journal_plugin_moves(os.path.dirname(os.path.abspath(restored[0][1])),
+                                 [(target, source) for source, target in restored], "undo re-enable")
+
+
+def major_master_turnoffs(data_dir, names):
+    """The names a major-master deployment set aside for a conflict (Siege at Firemoth.esp moved to
+    Off\\Official Add-Ons when Tamriel Rebuilt is deployed without Remove Firemoth): the journal's last entry for
+    Data Files\\<name> is that deployment's move, and the plugin is not back at the Data Files root."""
+    ledger = _install_ledger() if names else None
+    if ledger is None:
+        return []
+    import mwmanager_journal
+    last = _last_journal_entries(ledger)
+    keep = []
+    for name in names:
+        base = os.path.basename(name)
+        entry = last.get(mwmanager_journal.key(f"Data Files/{base}"))
+        if entry and entry.get("action") == "move" and entry.get("tag") == "major-master-deployment" \
+                and not os.path.exists(os.path.join(os.path.abspath(data_dir), base)):
+            keep.append(name)
+    return keep
+
+
+def full_reset(args, game_dir):
+    """--full starts from scratch: undo what earlier runs decided, so this run decides it all again.
+    (Restored .bak copies are not part of it: plugins --fix repaired stay repaired.)
+      - plugins turned off (doubled by --fix, or by --cell-conflicts) are turned back on; MWManager: not one a
+        major-master deployment set aside for a conflict (Siege at Firemoth with Tamriel Rebuilt), which stays off
+      - the [Order] rules --cell-conflicts added are taken out of the rules file
+      - the stand-in files the asset check made are removed (the asset check makes what's still needed)
+    (Our generated patches need nothing: --fix and --multipatch always rebuild them from scratch.)
+    The auto-merge is undone as the step before this one."""
+    rec = read_disabled(game_dir)
+    kept_off = major_master_turnoffs(args.data_dir, list(rec))
+    back = [n for n in rec if n not in kept_off]
+    rules_path = MP.state_path(game_dir, RULES_FILE)
+    text = open(rules_path, encoding="cp1252", errors="replace").read() if os.path.exists(rules_path) else ""
+    own_text, earlier = split_conflict_rules(text)
+    gen_path = MP.state_path(game_dir, GENERATED_RECORD)
+    def has_gen_lines():
+        with open(gen_path, encoding="utf-8", errors="replace") as f:
+            return any(l.strip() and not l.startswith(";") for l in f)
+    has_gen = os.path.exists(gen_path) and has_gen_lines()
+    print(f"  plugins turned off by earlier runs, back on: {', '.join(back) or 'none'}")
+    if kept_off:
+        print(f"  kept off (a major-master deployment set them aside for a conflict): {', '.join(kept_off)}")
+    print(f"  [Order] rules from earlier --cell-conflicts runs removed: {len(earlier)}")
+    print(f"  stand-in files from earlier asset checks removed: {'yes' if has_gen else 'none recorded'}")
+    print(f"  rebuilt-interior choices from earlier --cell-conflicts runs removed: {len(read_cell_winners(game_dir))}")
+    if args.dry_run:
+        print("  (dry run: nothing changed)")
+        return 0
+    if back:
+        main([args.data_dir, "--reenable", *back] + (["--ini", args.ini] if args.ini else []))
+    if earlier:
+        shutil.copy2(rules_path, backup_path(rules_path))
+        with atomic_open(rules_path, encoding="cp1252", errors="replace", newline="\r\n") as f:
+            f.write(own_text)
+    if has_gen:
+        main([args.data_dir, "--remove-generated"])
+    if read_cell_winners(game_dir) and not getattr(args, "use_answers", False):
+        write_cell_winners(game_dir, {})     # --use-answers keeps them: the rebuilt-place choices stand
+    return 0
+
+
+_upstream_run_remove_generated = run_remove_generated
+
+
+def run_remove_generated(args):
+    """Upstream --remove-generated, with every stand-in it deletes journaled as removed. The stand-ins are
+    journaled when made ('generated-asset' creates); deleting them unjournaled left verify reporting them as
+    missing (CR-25 stress run round 5, error K). A stand-in the journal doesn't know is copied into it first."""
+    ledger = None if args.dry_run else _install_ledger()
+    if ledger is None:
+        return _upstream_run_remove_generated(args)
+    import mwmanager_journal
+    data_dir = Path(os.path.abspath(args.data_dir))
+    game_dir = data_dir.parent
+    try:
+        with open(MP.state_path(str(game_dir), GENERATED_RECORD), "r", encoding="utf-8") as f:
+            rels = [l.rstrip("\r\n").split("\t")[0].strip() for l in f
+                    if l.strip() and not l.startswith((";", "["))]
+    except OSError:
+        rels = []
+    last = _last_journal_entries(ledger)
+    present = {}
+    for rel in rels:
+        full = data_dir / rel
+        game_rel = _game_rel(game_dir, full) if full.is_file() else None
+        if game_rel is None:
+            continue
+        k = mwmanager_journal.key(game_rel)
+        present[k] = (full, game_rel, None if k in last else ledger.preserve_file(full))
+    rc = _upstream_run_remove_generated(args)
+    gone = [(k, rel, original) for k, (full, rel, original) in present.items() if not full.exists()]
+    if gone:
+        run = ledger.start_run("mwmanager.py", {"operation": "remove stand-in files"})
+        try:
+            ledger.record_many([{"run": run["run"], "path": rel, "action": "remove", "after_sha256": None,
+                                 "original": original, "tag": "generated-asset",
+                                 "mod": last.get(k, {}).get("mod")} for k, rel, original in gone])
+        finally:
+            ledger.finish_run(run)
+    return rc
 
 
 def conflict_choice(index, total, kind, a, b, conflict, labels, options, default,
