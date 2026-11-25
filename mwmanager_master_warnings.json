@@ -1,0 +1,20 @@
+{
+  "solstheim tomb of the snow prince.esm": {
+    "summary": "Warning: major Bloodmoon land revision; many Solstheim mods will not work.",
+    "text": "Solstheim Tomb of the Snow Prince is a major landmass revision of Bloodmoon's Solstheim. It makes a number of mods impossible to use: mods that edit Bloodmoon's Solstheim land or cells, or that were built for the vanilla Solstheim layout.",
+    "incompatible_heading": "These installed plugins already touch Bloodmoon's Solstheim cells, and are likely incompatible:",
+    "likely_incompatible": {
+      "overlap_cells_of": "Bloodmoon.esm",
+      "record_tags": ["CELL", "LAND", "PGRD"],
+      "exclude": [
+        "Morrowind.esm",
+        "Tribunal.esm",
+        "Bloodmoon.esm",
+        "Solstheim Tomb of the Snow Prince.esm",
+        "Patch for Purists.esm"
+      ],
+      "exclude_name_contains": ["totsp", "snow prince"],
+      "list_limit": 15
+    }
+  }
+}

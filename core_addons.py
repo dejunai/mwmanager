@@ -766,6 +766,8 @@ def prepare_core_master_review(manager_dir: str | Path, game_dir: str | Path,
                 row["selected"] = False
 
     readiness()
+    from master_warnings import attach_master_warnings
+    attach_master_warnings(rows, manager_dir / "game_catalog.sqlite3")
     return {"rows": rows, "index_by_name": index_by_name, "readiness": readiness,
             "select_dependencies": select_dependencies, "required_by_selection": required_by_selection}
 
@@ -807,6 +809,8 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         buttons.pack(side="bottom", fill="x", pady=(10, 0))
         legend = ttk.Frame(outer)
         legend.pack(side="bottom", fill="x", pady=(6, 0))
+        warning_box = ttk.Label(outer, text="", wraplength=810, foreground=COLORS["rust"], justify="left")
+        warning_box.pack(side="bottom", fill="x", pady=(6, 0))
         list_frame = ttk.Frame(outer)
         list_frame.pack(fill="both", expand=True)
         tree = ttk.Treeview(list_frame, columns=("use", "status", "requires"), show="tree headings")
@@ -828,6 +832,14 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         master_status_legend(legend, ("deployed", "not_staged", "locked", "problem", "skipped"), wraplength=810)
         item_ids = [tree.insert("", "end", text=row["name"]) for row in rows]
         variants = plan.get("master_variants") or {}
+
+        def shown_master_warning():
+            item_id = tree.focus()
+            if item_id in item_ids:
+                text = rows[item_ids.index(item_id)].get("warning")
+                if text:
+                    return text
+            return "\n\n".join(row["warning"] for row in rows if row.get("warning") and row["selected"])
 
         def refresh():
             readiness()
@@ -856,7 +868,10 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                     others = ", ".join(v for v in variant["available"] if v != variant["using"])
                     reasons = "; ".join(filter(None, (f"{variant['using']} in use, {others} also downloaded",
                                                       reasons)))
+                if row.get("warning_summary"):
+                    reasons = "; ".join(filter(None, (row["warning_summary"], reasons)))
                 tree.item(item_ids[i], text=row["name"], values=(use, status, reasons), tags=(tag,))
+            warning_box.configure(text=shown_master_warning())
 
         def toggle(event=None):
             item_id = tree.focus()
@@ -899,6 +914,8 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                             "Cannot select master",
                             f"{row['name']} cannot be selected because a required master is unavailable:\n\n{reason}",
                             parent=root)
+                    elif row.get("warning"):
+                        messagebox.showwarning(row["name"], row["warning"], parent=root)
                 refresh()
 
         tree.bind("<Double-1>", toggle)
@@ -1054,6 +1071,7 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
             label = other_variant(row)
             swap_button.configure(text=f"Use {label}" if label else "Use other variant")
             swap_button.state(["!disabled"] if label else ["disabled"])
+            warning_box.configure(text=shown_master_warning())
             status = row.get("nexus", {}).get("status") if row else None
             if not row or row["installed"] or not row.get("page") or status == "current":
                 action_button.configure(text="Download")
@@ -1075,6 +1093,12 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         if outdated:
             tree.focus(outdated[0])
             tree.selection_set(outdated[0])
+        else:
+            warned = [item_ids[i] for i, row in enumerate(rows)
+                      if row.get("warning") and row["selected"] and not row["installed"]]
+            if warned:
+                tree.focus(warned[0])
+                tree.selection_set(warned[0])
         update_action()
         ttk.Button(buttons, text="Confirm selected", command=accept).pack(side="right", padx=(6, 0))
         ttk.Button(buttons, text="Abort", command=root.destroy).pack(side="right")
@@ -1112,6 +1136,8 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         for row in rows:
             state = "READY" if row["ready"] else "MISSING: " + "; ".join(row["reasons"])
             print(f"  {row['name']}: {state}")
+            if row.get("warning"):
+                print(f"  Warning: {row['warning']}")
         print("Interactive selection requires the Tk GUI; aborting safely.")
         return None
 
