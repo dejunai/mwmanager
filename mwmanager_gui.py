@@ -2809,7 +2809,10 @@ class ManagerGUI(tk.Tk):
                    command=lambda: close_then_install([item for item in items if not item["blocked"]])).pack(side="right", padx=(0, 6))
         ttk.Button(footer, text="Skip", command=dialog.destroy).pack(side="right", padx=(0, 6))
 
-    def _install_plugin_archives(self, items, *, accept_staged=False, then=None, title=None, intro=None):
+    def _install_plugin_archives(self, items, *, accept_staged=False, then=None, title=None, intro=None,
+                                 enable_plugins=False):
+        """enable_plugins: the mods 'Install mods your options need' installs (option-choice mods): their
+        plugins go into the active load order as each batch deploys (option_plugins.py), before the checks."""
         from plugin_install import (apply_plugin_compatibility, check_deploy_path_lengths, count_bsa_assets,
                                     deploy_package, extract_archive, deployment_label, has_altered_assets,
                                     altered_assets, settle_altered_assets,
@@ -2822,6 +2825,8 @@ class ManagerGUI(tk.Tk):
         game_dir = Path(self.settings["game_dir"])
         data_dir = game_dir / "Data Files"
         manager_script = APP_DIR / "mwmanager.py"
+        option_enabled = []                 # option-choice plugins put into the load order (enable_plugins)
+        merged_now = list(self.merge_inputs)
         py = self._console_python()
         quiet = {}
         if os.name == "nt":
@@ -2953,6 +2958,7 @@ class ManagerGUI(tk.Tk):
                     transaction_root, [APP_DIR, data_dir.parent, staging_root])
                 transaction = DurableTransaction(
                     transaction_root, [APP_DIR, data_dir.parent, staging_root]).begin()
+                batch_plugins = []
                 try:
                     for path in (
                             data_dir.parent / "Morrowind.ini",
@@ -2986,6 +2992,7 @@ class ManagerGUI(tk.Tk):
                         archives = sorted(package.glob("*.bsa"), key=lambda path: path.name.casefold())
                         registrations = register_archives(data_dir.parent / "Morrowind.ini", archives, APP_DIR)
                         plugins = item.get("selected_plugins", item.get("plugins", []))
+                        batch_plugins.extend(plugins)
                         record_deployment(APP_DIR, item, package, operations, archives, registrations, data_dir)
                         index_deployment(APP_DIR, data_dir, plugins, archives)
                         _remove_ready_plugin_stage(package)
@@ -3000,6 +3007,15 @@ class ManagerGUI(tk.Tk):
                         progress(f"{'Restored' if choice == 'restore' else 'Deleted'} {count:,} altered "
                                  f"asset(s) of {deployed_label}.")
                 altered_choices.clear()
+                if enable_plugins and batch_plugins:
+                    from option_plugins import enable_option_plugins
+                    enabled, skipped = enable_option_plugins(data_dir, batch_plugins, SORT_FILE, DISABLED_RECORD,
+                                                             APP_DIR / "journal", merged=merged_now)
+                    option_enabled.extend(enabled)
+                    if enabled:
+                        progress(f"Enabled option-choice plugin(s) in the load order: {', '.join(enabled)}")
+                    for name, why in skipped.items():
+                        progress(f"Not enabled: {name} ({why})")
                 progress("Running --all checks and resolving newly surfaced cell conflicts…")
                 run_batch_check(progress)
                 pending = []
@@ -3246,6 +3262,10 @@ class ManagerGUI(tk.Tk):
                     "No files from this batch were deployed. Inspect the staging folder before starting another deployment.",
                     parent=self)
                 return
+            if option_enabled:                 # already in the load-order file: active here too
+                self.active_names.update(name.casefold() for name in option_enabled)
+                known = {name.casefold() for name in self.order}
+                self.order += [name for name in option_enabled if name.casefold() not in known]
             self.refresh()
             self.gui_state["generated_signature"] = None
             write_gui_state(self.gui_state)
@@ -4780,7 +4800,7 @@ class ManagerGUI(tk.Tk):
 
             names = [Path(item["archive"]).name for item in items]
             self._install_plugin_archives(
-                items, then=put_options_in, title="Install mods your options need",
+                items, then=put_options_in, title="Install mods your options need", enable_plugins=True,
                 intro=(f"Options you chose for {', '.join(masters)} need other mods, so these {len(names)} are installed "
                        f"now: {', '.join(names[:6])}{' …' if len(names) > 6 else ''}. Their own options are asked "
                        "first, then they are staged and deployed; after that the waiting options go into the masters."))
