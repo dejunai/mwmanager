@@ -222,18 +222,28 @@ def active_downloads() -> list[str]:
 
 
 # Runs on a Nexus file page (?tab=files&file_id=N): reports the page and where its download button is ("Slow
-# download" on the older page, "Start download" on the current one). The browser then clicks it with a real
-# (trusted) mouse click: Nexus ignores a script's el.click() on the current page (found by the CR-25 stress run).
+# download" on the older page, "Start download" on the current one). The browser then clicks it from script; if
+# no download starts within 15 s it also sends a trusted DevTools mouse click there (CR-25 stress run: the button
+# sits in a shadow root; the script click starts the download, a DevTools click into the hidden window does not).
 DOWNLOAD_JS = r"""
 (() => {
   const text = ((document.body && document.body.innerText) || '').slice(0, 20000);
   const clicked = window.__mwmClicked || '';
   let target = null;
   if (!clicked && document.readyState === 'complete') {
-    const visible = e => e.offsetParent !== null;
+    // the current page draws its button inside a web component (<mod-file-download>'s shadow root), which
+    // document.querySelectorAll does not reach: walk open shadow roots too (found by the CR-25 stress run)
+    const deep = (root, sel, out) => {
+      for (const e of root.querySelectorAll('*')) {
+        if (e.matches(sel)) out.push(e);
+        if (e.shadowRoot) deep(e.shadowRoot, sel, out);
+      }
+      return out;
+    };
+    const visible = e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; };
     const label = e => (e.innerText || e.textContent || '').trim();
-    const els = Array.from(document.querySelectorAll('button, a, [role=button]')).filter(visible);
-    const el = document.querySelector('#slowDownloadButton') || els.find(e => /^(slow|start) download$/i.test(label(e)));
+    const els = deep(document, 'button, a, [role=button], #slowDownloadButton', []).filter(visible);
+    const el = els.find(e => e.id === 'slowDownloadButton') || els.find(e => /^(slow|start) download$/i.test(label(e)));
     if (el) {
       el.scrollIntoView({block: 'center', inline: 'center'});
       const r = el.getBoundingClientRect();
@@ -247,7 +257,7 @@ DOWNLOAD_JS = r"""
 })()
 """
 
-# Marks the button as clicked; with fallback=true it also clicks it from script (when no trusted click is possible).
+# Marks the button as clicked; with click=true it also clicks it from script (the normal path).
 MARK_CLICKED_JS = r"""
 ((fallback) => {
   const el = window.__mwmButton;
@@ -686,16 +696,16 @@ def _run_embedded_browser() -> None:
         window.load_url(url)
         started, shown = time.monotonic(), False
         say(message="Opening the Nexus file page…")
-        clicked_at, fallback_done = 0.0, False
+        clicked_at, fallback_done, last_target = 0.0, False, {}
         while not closed["value"] and not downloads["active"] and not new_results():
             page, _detail = run_script(DOWNLOAD_JS, 10)
             target = page.get("target") if page else None
             if target and not page.get("clicked"):
-                trusted = trusted_click(target.get("x"), target.get("y"))
-                run_script(MARK_CLICKED_JS % ("false" if trusted else "true"), 10)
-                clicked_at, fallback_done = time.monotonic(), not trusted
+                run_script(MARK_CLICKED_JS % "true", 10)       # script click: starts the download on Nexus
+                clicked_at, fallback_done, last_target = time.monotonic(), False, target
             elif clicked_at and not fallback_done and time.monotonic() - clicked_at > 15:
-                run_script(MARK_CLICKED_JS % "true", 10)      # the trusted click did nothing: try the script click
+                # no download yet: a trusted click at the same spot (works when the window is shown)
+                trusted_click(last_target.get("x"), last_target.get("y"))
                 fallback_done = True
             blocked = bool(page) and is_challenge(str(page.get("title", "")), str(page.get("text", "")))
             stuck = time.monotonic() - started > 30          # no download button found: login or a changed page
