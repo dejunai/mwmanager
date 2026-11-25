@@ -30,6 +30,7 @@ nexus_ids.json
 nexus_id_overrides.json
 game_catalog.sqlite3
 mwmanager_setup_state.json
+mwmanager_translation_rebuild.json
 plugin_deployments.json
 protected_replacer_textures.json
 mwdialog_patch_inputs.json

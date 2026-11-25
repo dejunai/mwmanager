@@ -143,6 +143,8 @@ class UserOutput:
         text = str(message).rstrip("\r\n")
         if text.startswith("MWMANAGER-STAGE:"):
             return [text]
+        if text.startswith("MWMANAGER-DETAIL:"):
+            return []                      # detail-log only (append() has already recorded it there)
         indent = len(_INDENT_RE.match(text).group(0))
         stripped = text.strip()
         package = _PACKAGE_RE.match(text)
