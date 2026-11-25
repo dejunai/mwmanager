@@ -21,4 +21,5 @@ def _private_temp(tmp_path, monkeypatch):
     for var in ("TEMP", "TMP"):
         monkeypatch.setenv(var, str(temp))
     monkeypatch.setattr(tempfile, "tempdir", str(temp))
-    monkeypatch.setattr(mwdialog_paths, "GAME_LOCK_DIR", str(temp / "mwmanager-locks"))
+    import mwdialog_paths as paths               # the copy this test sees (the root conftest may switch copies)
+    monkeypatch.setattr(paths, "GAME_LOCK_DIR", str(temp / "mwmanager-locks"))

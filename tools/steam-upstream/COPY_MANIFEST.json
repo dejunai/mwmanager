@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-25T02:35:49",
+  "SyncedAt": "2026-11-25T02:48:37",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -1499,6 +1499,132 @@
       "Source": "<Steam Morrowind>\\tests\\fixtures\\mwse\\README.md",
       "Bytes": 444,
       "SHA256": "b45223ab53cae7a65b5a13505def184cd63c7063d026da0ab1026a45ad5cce6d",
+      "SourceModified": "2026-11-24T08:49:38"
+    },
+    {
+      "RelativePath": "lua tools\\MWSE\\mods\\mwsuite\\mwsoundfix\\main.lua",
+      "Source": "<Steam Morrowind>\\lua tools\\MWSE\\mods\\mwsuite\\mwsoundfix\\main.lua",
+      "Bytes": 5104,
+      "SHA256": "aef1ad8b7bf534701a77555d69423aa7272be32b2651dd22004f3d050ade11f9",
+      "SourceModified": "2026-11-24T03:03:22"
+    },
+    {
+      "RelativePath": "tests\\test_backup_beside.py",
+      "Source": "<Steam Morrowind>\\tests\\test_backup_beside.py",
+      "Bytes": 3625,
+      "SHA256": "c45c532144f212a828f4c59354d5b375d2366596d99ab97234f01ef25c325067",
+      "SourceModified": "2026-11-23T23:50:10"
+    },
+    {
+      "RelativePath": "tests\\test_builtin_order.py",
+      "Source": "<Steam Morrowind>\\tests\\test_builtin_order.py",
+      "Bytes": 1794,
+      "SHA256": "3a1b4e6a3810fc237f5faf3244a8be3e13a596deeb40fe55bb0f650c32dc76a0",
+      "SourceModified": "2026-11-24T00:00:34"
+    },
+    {
+      "RelativePath": "tests\\test_conflict_fast_answers.py",
+      "Source": "<Steam Morrowind>\\tests\\test_conflict_fast_answers.py",
+      "Bytes": 3598,
+      "SHA256": "284e0f52d2e68c3a6642f6fb87151409b2da3b633a9a9427e36c72d7135e15f5",
+      "SourceModified": "2026-11-24T01:31:06"
+    },
+    {
+      "RelativePath": "tests\\test_cr18_floatfix.py",
+      "Source": "<Steam Morrowind>\\tests\\test_cr18_floatfix.py",
+      "Bytes": 7722,
+      "SHA256": "89577141b01d3e4fc4e8a0b2acaaba443e5b5f727fe75af998d10de24b9a2375",
+      "SourceModified": "2026-11-24T19:13:49"
+    },
+    {
+      "RelativePath": "tests\\test_cr18_suite_logging.py",
+      "Source": "<Steam Morrowind>\\tests\\test_cr18_suite_logging.py",
+      "Bytes": 16730,
+      "SHA256": "7e2c53d1f413cb0f1cf159e95213f9f1d4c7c3d68d3b5d06da431d87f62fdd87",
+      "SourceModified": "2026-11-24T19:13:49"
+    },
+    {
+      "RelativePath": "tests\\test_cr6_soundfix_notes.py",
+      "Source": "<Steam Morrowind>\\tests\\test_cr6_soundfix_notes.py",
+      "Bytes": 4150,
+      "SHA256": "fbb7e682500e0f48438e4b0ad2aeeb0146a23a5256b1162eedc1b0e9b582f779",
+      "SourceModified": "2026-11-24T10:00:40"
+    },
+    {
+      "RelativePath": "tests\\test_cr6_suite_data.py",
+      "Source": "<Steam Morrowind>\\tests\\test_cr6_suite_data.py",
+      "Bytes": 8962,
+      "SHA256": "85a4cb8df2cf71836025d922e6b7a86bb1ac21709318dd86dabbc288bcdbf790",
+      "SourceModified": "2026-11-24T19:13:49"
+    },
+    {
+      "RelativePath": "tests\\test_cr8_bugreports.py",
+      "Source": "<Steam Morrowind>\\tests\\test_cr8_bugreports.py",
+      "Bytes": 9890,
+      "SHA256": "e67db51ba87e3484296cf1b6a980b8fe48b2b8ab98caad22ca07b9479c29c868",
+      "SourceModified": "2026-11-24T11:07:51"
+    },
+    {
+      "RelativePath": "tests\\test_float_drops.py",
+      "Source": "<Steam Morrowind>\\tests\\test_float_drops.py",
+      "Bytes": 4445,
+      "SHA256": "582d8211ee737965c32539e8dfe2fb4ebaecc7c8079be9500a34151bfc480e19",
+      "SourceModified": "2026-11-24T19:13:49"
+    },
+    {
+      "RelativePath": "tests\\test_mwcriminal_lockpick.py",
+      "Source": "<Steam Morrowind>\\tests\\test_mwcriminal_lockpick.py",
+      "Bytes": 2917,
+      "SHA256": "8c268a67bab8e091ca6524488564d39897228af6a68034160989139d33bb8b42",
+      "SourceModified": "2026-11-24T03:49:38"
+    },
+    {
+      "RelativePath": "tests\\test_mwsoundfix_lua.py",
+      "Source": "<Steam Morrowind>\\tests\\test_mwsoundfix_lua.py",
+      "Bytes": 3530,
+      "SHA256": "d396e58632df748018c2b6861300fead3c405d1c28cd524613ae5128e1f467c9",
+      "SourceModified": "2026-11-24T03:03:16"
+    },
+    {
+      "RelativePath": "tests\\test_patch_back_in_order.py",
+      "Source": "<Steam Morrowind>\\tests\\test_patch_back_in_order.py",
+      "Bytes": 1439,
+      "SHA256": "26b1b97a4abf98badb9d91669c04e8c0c1062f058dbc7c8d959f5d64197c3a88",
+      "SourceModified": "2026-11-24T02:38:50"
+    },
+    {
+      "RelativePath": "tests\\test_preserve_saves.py",
+      "Source": "<Steam Morrowind>\\tests\\test_preserve_saves.py",
+      "Bytes": 2998,
+      "SHA256": "feb617952abe7893cc76a325253aabb6f9749bcd59699bf278316be038bb2a22",
+      "SourceModified": "2026-11-24T01:41:50"
+    },
+    {
+      "RelativePath": "tests\\test_soundfix_build.py",
+      "Source": "<Steam Morrowind>\\tests\\test_soundfix_build.py",
+      "Bytes": 5098,
+      "SHA256": "5eb26fe2d116210ebfa0f29fec9bb4988480448a7b90fab8adb09e4dc786796f",
+      "SourceModified": "2026-11-24T03:03:18"
+    },
+    {
+      "RelativePath": "tests\\test_soundfix_rewrite.py",
+      "Source": "<Steam Morrowind>\\tests\\test_soundfix_rewrite.py",
+      "Bytes": 6487,
+      "SHA256": "26061474b7e40d8629024ca8fab38384ae22f9f0dc5fe9f42da562d9e4b6e37e",
+      "SourceModified": "2026-11-24T08:49:38"
+    },
+    {
+      "RelativePath": "tests\\test_state_path.py",
+      "Source": "<Steam Morrowind>\\tests\\test_state_path.py",
+      "Bytes": 2079,
+      "SHA256": "d542b383216e471d4a5284cef4512839398682fabd6e64be6c749c311948594e",
+      "SourceModified": "2026-11-23T23:30:16"
+    },
+    {
+      "RelativePath": "tests\\test_tidy_core_known_bugs.py",
+      "Source": "<Steam Morrowind>\\tests\\test_tidy_core_known_bugs.py",
+      "Bytes": 2111,
+      "SHA256": "6e0c8da9994b7183594673b4d960fe84bb28666430588e2e87a38b0db96a5713",
       "SourceModified": "2026-11-24T08:49:38"
     }
   ]

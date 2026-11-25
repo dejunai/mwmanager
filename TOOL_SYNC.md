@@ -358,5 +358,12 @@ Behaviour changes:
 - `tools\steam-upstream\tests\fixtures\mwse\` (`ExclusionsPage.lua`, `ExclusionsPage.paged.lua`, `README.md`)
   copied from the clone at f23d8a8 and listed in `COPY_MANIFEST.json`: the vendored `test_luafix.py` KB3/KB4 tests
   read them. `sync.py`'s `to_mwmanager()` now always carries the clone's `tests\fixtures\` files and adds new ones
-  to the manifest. Run `tests` and `tools\steam-upstream\tests` as two pytest runs: both have a
-  `test_audit_fixes.py`, so one combined run stops at collection.
+  to the manifest.
+
+## Vendored upstream tests complete; one combined test run (2026-11-25, Pacific)
+- The 17 conflict-tools tests MWManager lacked are in `tools\steam-upstream\tests\` and `COPY_MANIFEST.json`,
+  with `lua tools\MWSE\mods\mwsuite\mwsoundfix\main.lua`, which `test_mwsoundfix_lua.py` runs. `sync.py`'s
+  `to_mwmanager()` now always carries the clone's `tests\` and suite Lua files and adds new ones to the manifest.
+- MWManager's own `tests\test_audit_fixes.py` is now `tests\test_mwmanager_audit_fixes.py`, and the root
+  `conftest.py` keeps one set of the shared module names per side, so
+  `python -m pytest tests tools/steam-upstream/tests` runs both suites in one process.

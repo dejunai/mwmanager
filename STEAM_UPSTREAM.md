@@ -78,6 +78,9 @@ python -m pytest tests tools/steam-upstream/tests
 
 The command must not fail because `mwdialog_check` came from `tools/steam-upstream`.
 
+Done on the MWManager side (2026-11-25): the root `conftest.py` switches `sys.modules` between the two sides'
+copies of the shared module names before each file is collected and each test runs.
+
 ### 5. Close the generated-files record after reading it
 
 `mwdialog_state.read_generated_record()` must open the record with a context manager. The former bare `open()` left
