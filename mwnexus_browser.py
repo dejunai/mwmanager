@@ -221,23 +221,51 @@ def active_downloads() -> list[str]:
     return list(_read_json(_root() / "downloads.json").get("active", []))
 
 
-# Runs on a Nexus file page (?tab=files&file_id=N): reports the page and clicks its download button once ("Slow
-# download" on the older page, "Start download" on the current one).
+# Runs on a Nexus file page (?tab=files&file_id=N): reports the page and where its download button is ("Slow
+# download" on the older page, "Start download" on the current one). The browser then clicks it with a real
+# (trusted) mouse click: Nexus ignores a script's el.click() on the current page (found by the CR-25 stress run).
 DOWNLOAD_JS = r"""
 (() => {
   const text = ((document.body && document.body.innerText) || '').slice(0, 20000);
-  let clicked = window.__mwmClicked || '';
+  const clicked = window.__mwmClicked || '';
+  let target = null;
   if (!clicked && document.readyState === 'complete') {
     const visible = e => e.offsetParent !== null;
     const label = e => (e.innerText || e.textContent || '').trim();
     const els = Array.from(document.querySelectorAll('button, a, [role=button]')).filter(visible);
     const el = document.querySelector('#slowDownloadButton') || els.find(e => /^(slow|start) download$/i.test(label(e)));
-    if (el) { el.click(); clicked = window.__mwmClicked = label(el) || 'slow download'; }
+    if (el) {
+      el.scrollIntoView({block: 'center', inline: 'center'});
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0)
+        target = {x: r.left + r.width / 2, y: r.top + r.height / 2, label: label(el) || 'slow download'};
+      window.__mwmButton = el;
+    }
   }
   return JSON.stringify({url: location.href, title: document.title, readyState: document.readyState,
-                         text: text, clicked: clicked});
+                         text: text, clicked: clicked, target: target});
 })()
 """
+
+# Marks the button as clicked; with fallback=true it also clicks it from script (when no trusted click is possible).
+MARK_CLICKED_JS = r"""
+((fallback) => {
+  const el = window.__mwmButton;
+  if (!el) return '';
+  const label = (el.innerText || el.textContent || '').trim() || 'slow download';
+  if (fallback) el.click();
+  window.__mwmClicked = label;
+  return label;
+})(%s)
+"""
+
+
+def trusted_click_events(x: float, y: float) -> list[dict]:
+    """DevTools Input.dispatchMouseEvent parameters for one left click at viewport point (x, y)."""
+    x, y = round(float(x), 1), round(float(y), 1)
+    return [{"type": "mouseMoved", "x": x, "y": y, "button": "none"},
+            {"type": "mousePressed", "x": x, "y": y, "button": "left", "buttons": 1, "clickCount": 1},
+            {"type": "mouseReleased", "x": x, "y": y, "button": "left", "buttons": 0, "clickCount": 1}]
 
 
 def download_file(url: str, download_dir, progress=None, timeout: float = 4 * 3600) -> Path:
@@ -626,6 +654,25 @@ def _run_embedded_browser() -> None:
             "Wait for Nexus to finish loading, then retry."
         )
 
+    def trusted_click(x, y) -> bool:
+        """Click viewport point (x, y) through WebView2's DevTools protocol: a trusted click, like the user's.
+
+        Returns False when it cannot be sent (no WebView2 handle), so the caller falls back to a script click."""
+        try:
+            from System import Func, Object
+            control = window.native.browser.webview
+            events = trusted_click_events(x, y)
+
+            def send():
+                core = control.CoreWebView2
+                for event in events:
+                    core.CallDevToolsProtocolMethodAsync("Input.dispatchMouseEvent", json.dumps(event))
+                return None
+            control.Invoke(Func[Object](send))
+            return True
+        except Exception:
+            return False
+
     def download(command_id: str, url: str):
         """Load a file page hidden, click its download button, and report until the file is complete."""
         def say(**fields):
@@ -639,8 +686,17 @@ def _run_embedded_browser() -> None:
         window.load_url(url)
         started, shown = time.monotonic(), False
         say(message="Opening the Nexus file page…")
+        clicked_at, fallback_done = 0.0, False
         while not closed["value"] and not downloads["active"] and not new_results():
             page, _detail = run_script(DOWNLOAD_JS, 10)
+            target = page.get("target") if page else None
+            if target and not page.get("clicked"):
+                trusted = trusted_click(target.get("x"), target.get("y"))
+                run_script(MARK_CLICKED_JS % ("false" if trusted else "true"), 10)
+                clicked_at, fallback_done = time.monotonic(), not trusted
+            elif clicked_at and not fallback_done and time.monotonic() - clicked_at > 15:
+                run_script(MARK_CLICKED_JS % "true", 10)      # the trusted click did nothing: try the script click
+                fallback_done = True
             blocked = bool(page) and is_challenge(str(page.get("title", "")), str(page.get("text", "")))
             stuck = time.monotonic() - started > 30          # no download button found: login or a changed page
             if (blocked or stuck) and not shown:

@@ -197,6 +197,20 @@ def matches_after(path: Path, want: str) -> bool:
     return sha256_file(path) == want
 
 
+def redated_plugin(path: Path, want: str) -> bool:
+    """A hardlinked plugin whose only difference from its stat marker is the date: the load order is the plugin
+    dates, and every sort (Install mods, Run --full) sets them again without rewriting a byte. Same size, still
+    a hardlink to its staged source (link count > 1), a .esp/.esm. Found by the CR-25 stress run (round 3)."""
+    if not want.startswith("stat:") or Path(path).suffix.casefold() not in (".esp", ".esm"):
+        return False
+    try:
+        size = int(want.split(":")[1])
+        stat = Path(path).stat()
+    except (OSError, ValueError, IndexError):
+        return False
+    return stat.st_size == size and stat.st_nlink > 1
+
+
 def hashes(path: Path) -> tuple[str, str]:
     sha, md5 = hashlib.sha256(), hashlib.md5()
     with open(path, "rb") as stream:
@@ -1130,8 +1144,12 @@ class Journal:
                     report["unexplained"].append(k)
                 continue
             if want.startswith("stat:"):
-                if not matches_after(path, want):
-                    report["changed"].append(rel_of(game_dir, path))
+                if matches_after(path, want):
+                    continue
+                if redated_plugin(path, want):            # load-order date set again by a sort: not a change
+                    report["ignored"] += 1
+                    continue
+                report["changed"].append(rel_of(game_dir, path))
                 continue
             st, info = path.stat(), stats.get(k)
             same_quick = (info is not None and info["sha256"] == want and st.st_size == info["size"]

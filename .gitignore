@@ -28,6 +28,9 @@ mwmanager_required_by_cache.json
 archive_scan_cache.json
 game_catalog.sqlite3
 mwmanager_setup_state.json
+plugin_deployments.json
+protected_replacer_textures.json
+mwdialog_patch_inputs.json
 STEAM_UTILITY_REVIEW.md
 # working folders
 archive_cache/

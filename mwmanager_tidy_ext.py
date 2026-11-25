@@ -649,7 +649,9 @@ def plan_mod(mod_dir):
                  "OpenMW-compatible plugin renamed .esp for vanilla Morrowind")
             CONVERTED_ADDONS[e.casefold()] = dest_name
     def lone_data_wrapper(src, e):
-        """`e` is the mod's only content folder and holds a "Data Files" folder with game data in it."""
+        """`e` is the mod's only content folder and holds its game data: in a "Data Files" folder
+        ("SM_BCTree_1_0\\Data files\\Meshes") -> "data files", or directly ("Better Telvanni Crystal V2 4k\\Meshes",
+        found by the CR-25 stress run round 3) -> "root". Anything else -> False."""
         if fomod_files or fomod_dirs or not os.path.isdir(src):
             return False
         others = [x for x in entries if x != e and os.path.isdir(os.path.join(mod_dir, x))
@@ -658,9 +660,14 @@ def plan_mod(mod_dir):
             return False
         inner = next((os.path.join(src, c) for c in os.listdir(src)
                       if c.casefold() == "data files" and os.path.isdir(os.path.join(src, c))), None)
-        return bool(inner) and any(c.casefold() in GAME_DIRS or c.casefold() in MISNAMED_DIRS
-                                   or os.path.splitext(c)[1].casefold() in KEEP_FILE_EXT
-                                   for c in os.listdir(inner))
+        if inner:
+            return "data files" if any(c.casefold() in GAME_DIRS or c.casefold() in MISNAMED_DIRS
+                                       or os.path.splitext(c)[1].casefold() in KEEP_FILE_EXT
+                                       for c in os.listdir(inner)) else False
+        # game folders straight inside the wrapper: only real game folder names count here (a lone folder of
+        # loose files or misnamed folders is still left to the usual rules)
+        return "root" if any(c.casefold() in GAME_DIRS and os.path.isdir(os.path.join(src, c))
+                             for c in os.listdir(src)) else False
 
     for e in sorted(entries):
         src = os.path.join(mod_dir, e)
@@ -795,6 +802,29 @@ def plan_mod(mod_dir):
                 move(src, os.path.join(mod_dir, "Off", off_owner, feature, e),
                      "OpenMW resource retained outside vanilla Data Files")
             continue
+        # before the readme-folder rule: a wrapper named for the mod with a readme in it still holds the game data
+        wrapper = lone_data_wrapper(src, e)
+        if wrapper:
+            # "SM_BCTree_1_0\\Data files\\Meshes\\..." or "Better Telvanni Crystal V2 4k\\Meshes\\...": one wrapper
+            # folder around the mod's data is packaging (Vortex installs from inside it too), not an option:
+            # flatten it like a root Data Files
+            for p in files_under(src):
+                rel = os.path.relpath(p, src)
+                parts = rel.split(os.sep)
+                if wrapper == "data files" and parts[0].casefold() == "data files" and len(parts) > 1:
+                    move(p, os.path.join(mod_dir, *parts[1:]),
+                         f"wrapper folder '{e}': its Data Files flattened into the staging root")
+                elif wrapper == "root" and len(parts) > 1 and parts[0].casefold() in GAME_DIRS:
+                    move(p, os.path.join(mod_dir, rel), f"wrapper folder '{e}': its game folders moved to the root")
+                elif wrapper == "root" and len(parts) == 1 and os.path.splitext(rel)[1].casefold() in KEEP_FILE_EXT \
+                        and not is_doc(p):
+                    move(p, os.path.join(mod_dir, rel), f"wrapper folder '{e}': its game file moved to the root")
+                elif is_doc(p):
+                    move(p, doc_dest(p, rel), f"readme in wrapper folder '{e}' -> Docs")
+                else:
+                    move(p, os.path.join(extras, e, rel), f"non-game file in wrapper folder '{e}'")
+            moves.append((src, None, "remove the emptied wrapper folder"))
+            continue
         inside = [p for p in files_under(src) if os.path.basename(p).lower() not in VORTEX_FILES]
         named_for = el in plugins or el == name.lower() or el in DOC_DIR_NAMES
         all_docs = bool(inside) and all(is_doc(p) for p in inside)
@@ -806,21 +836,6 @@ def plan_mod(mod_dir):
                 else:
                     move(p, os.path.join(extras, e, rel), f"non-document in readme folder '{e}'")
             moves.append((src, None, "remove the emptied folder"))
-            continue
-        if lone_data_wrapper(src, e):
-            # "SM_BCTree_1_0\\Data files\\Meshes\\...": one wrapper folder around the mod's Data Files is packaging
-            # (Vortex installs from the Data Files folder too), not an option: flatten it like a root Data Files
-            for p in files_under(src):
-                rel = os.path.relpath(p, src)
-                parts = rel.split(os.sep)
-                if parts[0].casefold() == "data files" and len(parts) > 1:
-                    move(p, os.path.join(mod_dir, *parts[1:]),
-                         f"wrapper folder '{e}': its Data Files flattened into the staging root")
-                elif is_doc(p):
-                    move(p, doc_dest(p, rel), f"readme in wrapper folder '{e}' -> Docs")
-                else:
-                    move(p, os.path.join(extras, e, rel), f"non-game file in wrapper folder '{e}'")
-            moves.append((src, None, "remove the emptied wrapper folder"))
             continue
         move(src, os.path.join(extras, e), "not a game folder")
 

@@ -5851,6 +5851,19 @@ class ManagerGUI(tk.Tk):
                 if reuse_answers:
                     os.environ["MWMANAGER_REUSE_FOMOD"] = "1"
                 try:
+                    if reuse_answers:
+                        # MWManager's follow-up after a deployment (options that waited on a mod now installed):
+                        # the masters are deployed without those options, so that deployment comes out first; the
+                        # masters are deployed again once the options are in (found by the CR-25 stress run)
+                        from major_master_deploy import remove_deployed, tracked_deployment_masters
+                        if tracked_deployment_masters(APP_DIR):
+                            progress("Removing the deployed major masters so the waiting options can go in…")
+                            removed = remove_deployed(staging, game_data_files, APP_DIR, progress=progress)
+                            if removed.get("pending") or removed.get("edited"):
+                                raise RuntimeError(
+                                    "Some deployed major-master files were changed after deployment, so the "
+                                    "deployment was not fully removed and the waiting options were not put in. "
+                                    "Use Remove deployed masters to review them, then reopen the options.")
                     for package, masters in _package_roots(staging, list(names)):
                         assert_package_disposable(package, staging, game_data_files, APP_DIR, self.major_masters,
                                                   check_dependencies=False)
