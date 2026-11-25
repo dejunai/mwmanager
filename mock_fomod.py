@@ -962,7 +962,7 @@ def _mod_is_staged(needed: str, mod_dir: Path) -> bool:
         return False
 
 
-def _installed_plugins(data_files: Path, prior: set[str]) -> set[str]:
+def _installed_plugins(data_files: Path, prior: set[str] = frozenset()) -> set[str]:
     found = set(prior)
     from major_master_deploy import ASSET_FOLDERS     # plugins are never in Sound, Textures...: skip them
     for base, dirs, files in os.walk(data_files):
@@ -3295,11 +3295,12 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         state = json.loads(journal_path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         state = {"version": 1, "known_installed_plugins": [], "mods": {}}
-    old_installed = set(state.get("known_installed_plugins", []))
     mods = state.setdefault("mods", {})
     saved_selections = state.setdefault("saved_selections", {})
     changed_mods = set()
-    installed = _installed_plugins(data_files, old_installed)
+    # What is in Data Files now, never the journal's list from earlier runs: a master removed since (a rollback,
+    # a different major-master set) must count as missing, or options that need it deploy without it.
+    installed = _installed_plugins(data_files, set())
     # Required staged masters may still be nested under Extras before activation.
     for candidate in staging.iterdir():
         if candidate.is_dir() and candidate.name.casefold() not in STAGING_RESERVED:

@@ -77,6 +77,30 @@ TIDY_SCRIPT = APP_DIR / "mwmanager_install.py"
 TIDY_REFUSED = 2                                      # mwmanager_install.py --apply: plan missing or changed
 
 
+def merge_conflict_choices(saved, rows):
+    """One reviewed batch of the major-master conflict window into `saved` {(tag, editor_id): winner}: a pick
+    other than the load-order winner is an override; picking the load-order winner drops any earlier override."""
+    for row in rows:
+        key = (row["record_tag"], row["editor_id"])
+        winner = row["winner"].get() if hasattr(row["winner"], "get") else row["winner"]
+        if winner == row.get("default"):
+            saved.pop(key, None)
+        else:
+            saved[key] = winner
+    return saved
+
+
+def write_conflict_choices(path, saved):
+    """mwmanager_major_master_conflicts.json, written whole (a crash mid-write never leaves half a file)."""
+    data = {"version": 1, "resolutions": [
+        {"record_tag": tag, "editor_id": editor_id, "winner": winner}
+        for (tag, editor_id), winner in saved.items()]}
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(tmp, path)
+
+
 class TidyPlanPaused(RuntimeError):
     """The user kept a repeatedly changing Tidy package staged for a later retry."""
 
@@ -3570,7 +3594,9 @@ class ManagerGUI(tk.Tk):
                     self._show_report("MWManager report", report_path)
                 else:
                     messagebox.showerror("Generate Patches failed", str(error), parent=self)
-                log = APP_DIR / "outputs" / "mwmanager_status.log"
+                log = JobView.detail_log_path(APP_DIR / "outputs" / "mwmanager_status.log")   # every line, Tidy's too
+                if not log.is_file():
+                    log = APP_DIR / "outputs" / "mwmanager_status.log"
                 if log.is_file() and messagebox.askyesno(
                         "Generate Patches failed", "Open the full log of this run to see where it stopped?",
                         parent=self):
@@ -5002,7 +5028,8 @@ class ManagerGUI(tk.Tk):
                           width=58).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
                 chooser = ttk.Combobox(content, textvariable=variable, values=sources, state="readonly", width=38)
                 chooser.grid(row=row, column=1, sticky="ew", pady=2)
-                row_vars.append({"record_tag": tag, "editor_id": editor_id, "winner": variable})
+                row_vars.append({"record_tag": tag, "editor_id": editor_id, "winner": variable,
+                                 "default": sources[-1]})
             content.columnconfigure(1, weight=1)
             canvas.yview_moveto(0)
 
@@ -5012,21 +5039,18 @@ class ManagerGUI(tk.Tk):
             page = 0
 
         def save_batch():
-            for item in row_vars:
-                saved[(item["record_tag"], item["editor_id"])] = item["winner"].get()
+            # each batch is written as it is saved: closing after any batch keeps what was reviewed so far
+            merge_conflict_choices(saved, row_vars)
+            try:
+                write_conflict_choices(choices_path, saved)
+            except OSError as exc:
+                messagebox.showerror("Could not save conflict choices", str(exc), parent=dialog)
+                return
             records = grouped.get(level_var.get(), [])
             pages = max(1, (len(records) + page_size - 1) // page_size)
             if page + 1 < pages:
                 nonlocal_page_next()
                 render()
-                return
-            data = {"version": 1, "resolutions": [
-                {"record_tag": tag, "editor_id": editor_id, "winner": winner}
-                for (tag, editor_id), winner in saved.items()]}
-            try:
-                choices_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-            except OSError as exc:
-                messagebox.showerror("Could not save conflict choices", str(exc), parent=dialog)
                 return
             dialog.destroy()
             messagebox.showinfo("Conflict choices saved",

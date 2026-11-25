@@ -91,6 +91,106 @@ def is_action_line(message):
             and not line.split("(")[0].strip().isupper() and not re.match(r"[A-Za-z]:\\", line))
 
 
+_INDENT_RE = re.compile(r"[ \t]*")
+_DRIVE_PATH_RE = re.compile(r"^[A-Za-z]:\\")
+_PACKAGE_RE = re.compile(r"^(?:Tidy|Options) (?!changes:)(.+?): ")
+_LUA_PATCHED_RE = re.compile(r"^\s+patched (.+?): (\S.*?) \(([A-Z]{1,3}\d+(?:, [A-Z]{1,3}\d+)*)\)\s*$")
+_LUA_REPORT_RE = re.compile(r"^\s+lua \S.*\.lua\s*$", re.I)
+_LUA_END_RE = re.compile(r"^\s+=> (?:NOT )?PATCHED\b")
+_LUA_SUMMARY_RE = re.compile(r"^\s*patched (\d+) Lua file\(s\)")
+_TIDY_CONTEXT_RE = re.compile(r"^(?:Tidy |Options |Running Tidy|vortex_tidy plan|ASSET CHECK|Asset |Tidy changes)")
+_LEAVE_TIDY_RE = re.compile(r"^(?:# --full step|--full|==== |Preflight:|Cataloguing|Sorting)")
+# top-level lines MWManager itself prints: one of them always ends a Lua report a "=>" line did not close
+_TOP_LEVEL_RE = re.compile(r"^(?:(?:Tidy|Options) [^:]+: |Tidy changes: |Running Tidy |Finished |Checking |Saved |Collecting |Preparing |Staging "
+                           r"|Extracting |Staged |Asset |Missing assets |Applying |Deploy|Cataloguing|# --full|--full"
+                           r"|==== |MWMANAGER-STAGE:)")
+_DROP_TOP_RE = re.compile(r"^(?:={10,}\s*$|ASSET CHECK\b|vortex_tidy plan,|Full plan:|Plan\s*$|Lua check:"
+                          r"|Nothing changed\. Purge in Vortex|The plan matches the one you reviewed)")
+_DROP_DETAIL_RE = re.compile(r"^\s+(?:ERROR|WARNING|WARN|INFO|NOTE|FIXED|REPAIRED|PATCHED|NOT PATCHED|SKIPPED)\b"
+                             r"|^\s+->|^\s+\d+ texture\(s\) without mipmaps")
+
+
+def _short_package(name):
+    """'Patch for Purists 45096 5.0.7 2026-09-30T01-36Z Le0Pe4QA' -> 'Patch for Purists' (Nexus id onward cut)."""
+    short = re.split(r"[ _-]\d{3,6}(?=[ _-])", name, maxsplit=1)[0].strip(" _-")
+    return short or name
+
+
+class UserOutput:
+    """What the job window shows of a step's output. Tidy and luafix print their full CLI report (the replacement
+    Lua of each patch, every asset repaired, the plan and journal paths, --apply hints); that is kept in the detail
+    log and the Tidy journal, and the window gets at most one plain line per package for it instead."""
+
+    def __init__(self):
+        self.package = ""
+        self.in_tidy = False
+        self.in_lua = False
+        self.skip_children_of = None       # indent of a dropped line: its wrapped continuation lines go too
+        self.lua_files, self.lua_codes = set(), set()
+
+    def _lua_summary(self, files=None):
+        count = len(self.lua_codes)
+        scripts = files if files is not None else len(self.lua_files)
+        where = f" for {_short_package(self.package)}" if self.package else ""
+        self.lua_files, self.lua_codes = set(), set()
+        if not count and not scripts:
+            return []
+        issues = f"{count} known issue(s)" if count else "known issues"
+        return [f"Fixed {issues} in {scripts} Lua script(s){where} (details in the Tidy journal)"]
+
+    def feed(self, message):
+        """The lines to show for one line of output (none, the line, or a shorter version of it)."""
+        text = str(message).rstrip("\r\n")
+        if text.startswith("MWMANAGER-STAGE:"):
+            return [text]
+        indent = len(_INDENT_RE.match(text).group(0))
+        stripped = text.strip()
+        package = _PACKAGE_RE.match(text)
+        if package:
+            self.package = package.group(1)
+        if _LEAVE_TIDY_RE.match(text):
+            self.in_tidy = False
+        elif _TIDY_CONTEXT_RE.match(text):
+            self.in_tidy = True
+        patched = _LUA_PATCHED_RE.match(text)
+        if patched:
+            self.in_lua, self.skip_children_of = True, None
+            self.lua_files.add(patched.group(2).casefold())
+            self.lua_codes.update((patched.group(2).casefold(), c) for c in patched.group(3).split(", "))
+            return []
+        if _LUA_REPORT_RE.match(text):
+            self.in_lua, self.skip_children_of = True, None
+            return []
+        if self.in_lua:
+            if _LUA_END_RE.match(text):
+                self.in_lua = False
+                return []
+            if not (indent == 0 and _TOP_LEVEL_RE.match(text)) and not _LUA_SUMMARY_RE.match(text):
+                return []                  # replacement Lua and its findings
+            self.in_lua = False
+        if self.skip_children_of is not None:
+            if stripped and indent > self.skip_children_of:
+                return []
+            self.skip_children_of = None
+        summary = _LUA_SUMMARY_RE.match(text)
+        if summary:
+            self.skip_children_of = indent
+            return self._lua_summary(int(summary.group(1)))
+        if not self.in_tidy:
+            return [text]
+        if _DROP_TOP_RE.match(stripped) or _DRIVE_PATH_RE.match(stripped) or _DROP_DETAIL_RE.match(text) \
+                or (self.package and stripped == self.package):
+            self.skip_children_of = indent
+            return []
+        if stripped.endswith("Journal:"):
+            self.skip_children_of = indent
+            return [text[:text.rfind("Journal:")].rstrip()]
+        text = re.sub(r"\s*\((?:details in|run with --apply)[^)]*\)", "", text)
+        text = re.sub(r";\s*each is listed in \S.*$", "", text)
+        text = re.sub(r"\s*\(originals (?:in|kept)[^)]*\)?\s*$", "", text)
+        return [text] if text.strip() else []
+
+
 PHASES = (
     ("Paths", ("paths_confirmed",)),
     ("Prerequisites", ("preflight_complete",)),
@@ -168,11 +268,17 @@ class JobView:
     status_log = None           # the GUI sets outputs\mwmanager_status.log: everything the window shows, kept
     _fresh_logs = set()         # logs already started by this MWManager session
 
-    def _record(self, text):
+    @staticmethod
+    def detail_log_path(status_log):
+        """outputs\\mwmanager_status_detail.log: every line of output, the full Tidy/luafix reports included."""
+        log = Path(status_log)
+        return log.with_name(log.stem + "_detail" + log.suffix)
+
+    def _record(self, text, detail=False):
         if not self.status_log:
             return
         try:
-            log = Path(self.status_log)
+            log = self.detail_log_path(self.status_log) if detail else Path(self.status_log)
             log.parent.mkdir(parents=True, exist_ok=True)
             key = os.path.normcase(str(log.resolve()))
             if key not in JobView._fresh_logs:                       # a new session: a new log, the last one kept
@@ -185,7 +291,10 @@ class JobView:
             pass                                                     # the window still shows it
 
     def begin(self, title, description, control):
-        self._record(f"\n==== {time.strftime('%Y-%m-%d %H:%M:%S')}  {title} ====")
+        header = f"\n==== {time.strftime('%Y-%m-%d %H:%M:%S')}  {title} ===="
+        self._record(header)
+        self._record(header, detail=True)
+        self.user_output = UserOutput()
         self.control = control
         self.title.set(title)
         self.description.set(description)
@@ -228,8 +337,16 @@ class JobView:
         self.window.protocol("WM_DELETE_WINDOW", self.window.withdraw)
         self.close.pack(side="right")
 
+    user_output = None
+
     def append(self, message):
-        text = str(message)
+        self._record(str(message), detail=True)
+        if self.user_output is None:
+            self.user_output = UserOutput()
+        for text in self.user_output.feed(message):
+            self._show(text)
+
+    def _show(self, text):
         self._record(text)
         stopping = self.control is not None and self.control.cancelled.is_set()
         if text.startswith("MWMANAGER-STAGE:"):
