@@ -1936,6 +1936,17 @@ def apply(moves, staging, progress=None, head_extra=None):
                     done += 1
                     mark(i)
                     continue
+                if os.path.isdir(src) and os.path.isdir(dst) and not os.path.samefile(src, dst):
+                    # a folder moving onto one that is already there (MW Containers Animated: Data Files\Docs ->
+                    # Docs once the readme had made Docs) joins it file by file; found by the CR-25 stress run
+                    clashes = _merge_folder_into(src, dst, j, package_of)
+                    if clashes:
+                        raise FileExistsError(f"{len(clashes)} file(s) already in {dst} differ: "
+                                              + ", ".join(clashes[:3]))
+                    moved_dirs.append((os.path.abspath(src), os.path.abspath(dst)))
+                    done += 1
+                    mark(i)
+                    continue
                 # journaled (on disk) before the move: a crash between the two never leaves a move --undo can't see
                 j.write(json.dumps({"src": src, "dst": dst, "plugin": package_of(src)}) + "\n")
                 j.flush()
@@ -1965,6 +1976,38 @@ def apply(moves, staging, progress=None, head_extra=None):
     if total and last_reported != total - 1:
         mark(total - 1, force=True, record=False)
     return failed
+
+
+def _merge_folder_into(src, dst, j, package_of):
+    """Move the files of folder `src` into the existing folder `dst`, journaling each move so --undo puts them
+    back. A file already at the target with the same bytes is dropped from `src` (journaled as a duplicate);
+    a different one stays where it is and is returned. Folders left empty in `src` are removed."""
+    import filecmp
+    clashes = []
+    for base, _dirs, files in os.walk(src):
+        rel = os.path.relpath(base, src)
+        for name in files:
+            source = os.path.join(base, name)
+            target = os.path.normpath(os.path.join(dst, rel, name))
+            if os.path.lexists(target):
+                if os.path.isfile(target) and filecmp.cmp(source, target, shallow=False):
+                    os.remove(source)
+                    j.write(json.dumps({"duplicate": target, "restore": source, "plugin": package_of(source)}) + "\n")
+                    j.flush()
+                else:
+                    clashes.append(os.path.relpath(source, src))
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            j.write(json.dumps({"src": source, "dst": target, "plugin": package_of(source)}) + "\n")
+            j.flush()
+            os.fsync(j.fileno())
+            os.rename(source, target)
+    for base, _dirs, _files in os.walk(src, topdown=False):
+        if not os.listdir(base):
+            os.rmdir(base)
+            j.write(json.dumps({"rmdir": base, "plugin": package_of(base)}) + "\n")
+            j.flush()
+    return clashes
 
 
 def _write_packing_reports(staging, packing):

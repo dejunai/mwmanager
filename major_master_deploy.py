@@ -638,6 +638,41 @@ def save_altered(paths, game_dir: Path, manager_dir: Path) -> Path:
     return folder
 
 
+def _redated_plugin(target: Path, stat, operation: dict) -> bool:
+    """Still the staged hardlink, a .esp/.esm, same size: only its date changed. The load order is the plugin
+    dates and every sort sets them again without rewriting a byte (CR-25 stress run, rounds 3 and 4)."""
+    return target.suffix.casefold() in (".esp", ".esm") and stat.st_size == operation.get("size")
+
+
+def removal_blockers(staging: Path, data_dir: Path, manager_dir: Path) -> list[str]:
+    """Read-only: the deployed major-master files remove_deployed would have to leave in place - replaced since
+    (a plugin deployed after the masters moved the master's link into its own backup) or edited. Empty when
+    the deployment can come out cleanly."""
+    staging, data_dir, manager_dir = (Path(p).resolve() for p in (staging, data_dir, manager_dir))
+    blockers = []
+    for deployment in _read_deployment_state(manager_dir)["deployments"]:
+        for operation in deployment.get("operations", []):
+            source, target = Path(operation.get("source", "")), Path(operation.get("target", ""))
+            if not target.is_file():
+                continue
+            try:
+                same = source.is_file() and os.path.samefile(source, target)
+            except OSError:
+                same = False
+            if not same:
+                backup = Path(operation["backup"]) if operation.get("backup") else None
+                if (operation.get("original_sha256") and not (backup and backup.exists())
+                        and sha256(target) == operation["original_sha256"]):
+                    continue        # an earlier interrupted removal already put the original back
+                blockers.append(str(target))
+            elif "mtime_ns" in operation:
+                stat = target.stat()
+                if ((stat.st_size, stat.st_mtime_ns) != (operation["size"], operation["mtime_ns"])
+                        and not _redated_plugin(target, stat, operation)):
+                    blockers.append(str(target))
+    return blockers
+
+
 def remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=None, *, remove_edited=False) -> dict:
     staging, data_dir, manager_dir = (Path(p).resolve() for p in (staging, data_dir, manager_dir))
     with mutation_lock(manager_dir, Path(data_dir).parent):
@@ -710,7 +745,7 @@ def _remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=
             if source_matches and "mtime_ns" in operation:
                 stat = target.stat()
                 if (stat.st_size, stat.st_mtime_ns) != (operation["size"], operation["mtime_ns"]) \
-                        and not remove_edited:
+                        and not remove_edited and not _redated_plugin(target, stat, operation):
                     edited.append(str(target))          # changed since deployment: the user decides
                     pending_operations.append(operation)
                     continue

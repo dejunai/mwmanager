@@ -5855,8 +5855,16 @@ class ManagerGUI(tk.Tk):
                         # MWManager's follow-up after a deployment (options that waited on a mod now installed):
                         # the masters are deployed without those options, so that deployment comes out first; the
                         # masters are deployed again once the options are in (found by the CR-25 stress run)
-                        from major_master_deploy import remove_deployed, tracked_deployment_masters
+                        from major_master_deploy import (removal_blockers, remove_deployed,
+                                                         tracked_deployment_masters)
                         if tracked_deployment_masters(APP_DIR):
+                            # mods deployed after the masters (the ones these options need, often) may cover
+                            # master files; taking the masters out from under them can't be clean, so nothing
+                            # is removed and the options stay held (CR-25 stress run, round 4)
+                            blockers = removal_blockers(staging, game_data_files, APP_DIR)
+                            if blockers:
+                                self._set_master_stage_ready(names, True)
+                                return {"kept_waiting": True, "names": sorted(names), "blockers": blockers}
                             progress("Removing the deployed major masters so the waiting options can go in…")
                             removed = remove_deployed(staging, game_data_files, APP_DIR, progress=progress)
                             if removed.get("pending") or removed.get("edited"):
@@ -5881,6 +5889,23 @@ class ManagerGUI(tk.Tk):
                 return names
 
             def options_reopened(_result, error):
+                if not error and isinstance(_result, dict) and _result.get("kept_waiting"):
+                    self._setup_complete("major_masters_staged")
+                    self._initializing_manager = False
+                    count = len(_result["blockers"])
+                    self.status.set(
+                        f"Waiting options kept held: {count:,} deployed major-master file(s) are covered by mods "
+                        "deployed after them, so the masters were not taken out. Nothing was changed.")
+                    if messagebox.askyesno(
+                            "Run --full?",
+                            f"The options that waited on other mods were not added to {', '.join(_result['names'])}: "
+                            f"{count:,} of the masters' deployed files are now covered by mods deployed after them, "
+                            "so the masters can't be taken out cleanly to add them. Nothing was changed; the "
+                            "options stay held (Remove deployed plugins that cover them, then Reopen options).\n\n"
+                            "The load order changed. Run --full against the new load order now? It rebuilds "
+                            "the patches and may take a while.", parent=self):
+                        self.generate_patches(mode="full", force=True)
+                    return
                 if error:
                     if isinstance(error, TidyPlanPaused):
                         self._initializing_manager = False
