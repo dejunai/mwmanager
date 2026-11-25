@@ -1738,9 +1738,14 @@ def _option_description(record: dict, mod_dir: Path, page_text: str = "") -> str
     # ("01 Replacer" -> "Replacer - a replacer for some of the worst offenders ..."),
     # so payload file names and changelog lines do not drown out the real sentence.
     try:
+        from option_descriptions import refine
+    except ImportError:
+        def refine(text):
+            return text
+    try:
         from mwnexus_parse import best_option_sentences
     except ImportError:
-        return best(page_text)
+        return refine(best(page_text))
     folder = record.get("path")
     label = str(record.get("label", "")) or (Path(folder).name if folder else "")
     names = [label]
@@ -1749,7 +1754,7 @@ def _option_description(record: dict, mod_dir: Path, page_text: str = "") -> str
     for name in names:
         chosen = best_option_sentences(page_text, name, extra_terms=record.get("targets", []))
         if chosen:
-            return "\n".join(chosen)
+            return refine("\n".join(chosen))
     return ""
 
 
