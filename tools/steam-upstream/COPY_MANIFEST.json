@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-24T21:45:39",
+  "SyncedAt": "2026-11-24T22:05:39",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -646,6 +646,13 @@
       "Bytes": 36250,
       "SHA256": "54fc4cbbaff8dcb5d66b016f7821c4200b2f0457779fd6113064dd4d1c97fc04",
       "Source": "<Steam Morrowind>\\README.md",
+      "SourceModified": "2026-11-24T21:42:38"
+    },
+    {
+      "RelativePath": "MORE_INFO.md",
+      "Bytes": 49751,
+      "SHA256": "76a79fcf24abe276426de72d632baa6e007d52dff29d7936b56d2dd1b3370d47",
+      "Source": "<morrowind-conflict-tools>\\MORE_INFO.md",
       "SourceModified": "2026-11-24T21:42:38"
     },
     {
