@@ -1331,7 +1331,12 @@ def run_post_option_tidy(args, changed=None):
 
 
 def lua_apply(args, lres):
-    """Patch each package's Lua files with its originals kept inside that package."""
+    """Patch each package's Lua files with its originals kept inside that package.
+
+    MWSE core is reported under CORE_KEY, a lua_check label, not a staged folder.
+    Those files are patched in place with luafix's usual backups; findings are printed
+    instead of written under staging.
+    """
     if not lres or not lres["n_ok"]:
         return
     if lres["checker"] is None:
@@ -1343,6 +1348,17 @@ def lua_apply(args, lres):
         return
     lf, written, refused = lres["lf"], 0, []
     for package_name_raw, report in lres["reps"]:
+        if package_name_raw == CORE_KEY:              # no mod folder to hold a bug report
+            count, rejected = lf.apply_report(
+                report, journal=JOURNAL,
+                head_extra=dict({"staging": args.staging, "plugin": package_name_raw, "lua": True},
+                                **getattr(args, "_journal_extra", {})), done=lres["done"])
+            lines, _counts = lf.format_report(report, indent="  ", done=lres["done"], refused=dict(rejected))
+            if lines:
+                print("\n".join("    " + x for x in lines))
+            written += count
+            refused.extend(rejected)
+            continue
         package = os.path.join(args.staging, package_name_raw)
         owner = package_name(package)
         count, rejected = lf.apply_report(

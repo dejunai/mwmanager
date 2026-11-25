@@ -740,6 +740,27 @@ class TidySteps(unittest.TestCase):
         self.assertIn("considered main.lua", report.read_text(encoding="utf-8"))
         self.assertEqual(set(lua.format_report.call_args.kwargs["refused"].values()), {"syntax check failed"})
 
+    def test_lua_apply_does_not_treat_mwse_core_as_a_staged_package(self):
+        """CORE_KEY is a lua_check label; applying it must not listdir a missing staging folder."""
+        lua = mock.Mock()
+        lua.apply_report.return_value = (1, [])
+        lua.format_report.return_value = (["  repaired exclusionspage.lua"], {"KB4": 1})
+        later = self.staging / "ModA-1-1-0"
+        args = mock.Mock(staging=str(self.staging), yes=True, _journal_extra={})
+        lres = {"n_ok": 2, "checker": object(), "lf": lua, "done": [],
+                "reps": [(self.t.CORE_KEY, mock.Mock()), (later.name, mock.Mock())]}
+        fake = Path(args.staging) / self.t.CORE_KEY
+        with mock.patch.dict(os.environ, {"MWMANAGER_PLUGIN_NAME": "ModA"}):
+            self.t.lua_apply(args, lres)
+        self.assertFalse(fake.exists())
+        self.assertEqual(lua.apply_report.call_count, 2)
+        core_kwargs = lua.apply_report.call_args_list[0].kwargs
+        self.assertNotIn("backup_relative_to", core_kwargs)
+        self.assertNotIn("backup_root", core_kwargs)
+        pkg_kwargs = lua.apply_report.call_args_list[1].kwargs
+        self.assertEqual(Path(pkg_kwargs["backup_root"]), later / "Off" / "ModA" / "LuaRepairs")
+        self.assertTrue((later / "bugreports" / "ModA.mwse.bugreport.txt").is_file())
+
     def test_asset_and_lua_reports_share_plugin_name_and_nexus_id(self):
         assets = self.t._scanner.asset_health_module()
         root = self.staging / "OAAB_Data 49042 2.7.5 2026-11-05T04-50Z sZJEZCNJ"
