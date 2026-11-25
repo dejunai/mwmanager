@@ -1,0 +1,25 @@
+{
+ "_note": "Canned Nexus GraphQL answers for tests/test_nexus_ids.py: mods by search text, files by mod id.",
+ "game": {"id": 100},
+ "mods": {
+  "Glowing Bitter Coast": [{"modId": 51001, "name": "Glowing Bitter Coast"},
+                           {"modId": 51002, "name": "Glowing Bitter Coast - Patch for Purists"}],
+  "Quiet Guars": [{"modId": 52001, "name": "Quiet Guars"}],
+  "Twin Lamps": [{"modId": 53001, "name": "Twin Lamps"}, {"modId": 53002, "name": "Twin Lamps Redux"}],
+  "Lonely Shack": [{"modId": 54001, "name": "Lonely Shack Overhaul"}]
+ },
+ "files": {
+  "51001": [{"fileId": 1000070001, "name": "Glowing Bitter Coast", "version": "1.2",
+             "uri": "Glowing_Bitter_Coast_v1.2.7z", "sizeInBytes": "4096"}],
+  "51002": [{"fileId": 1000070002, "name": "PfP patch", "version": "1.0",
+             "uri": "GBC PfP-51002-1-0-1700000000.7z", "sizeInBytes": "900"}],
+  "52001": [{"fileId": 1000070003, "name": "Quiet Guars", "version": "2.0",
+             "uri": "ab/cd/ef/abcdef01-uuid", "sizeInBytes": "2048"}],
+  "53001": [{"fileId": 1000070004, "name": "Twin Lamps", "version": "1.0",
+             "uri": "Twin Lamps-53001-1-0.7z", "sizeInBytes": "777"}],
+  "53002": [{"fileId": 1000070005, "name": "Twin Lamps", "version": "1.0",
+             "uri": "Twin Lamps-53002-1-0.7z", "sizeInBytes": "778"}],
+  "54001": [{"fileId": 1000070006, "name": "Lonely Shack Overhaul", "version": "3.0",
+             "uri": "Lonely Shack Overhaul-54001-3-0.7z", "sizeInBytes": "5000"}]
+ }
+}

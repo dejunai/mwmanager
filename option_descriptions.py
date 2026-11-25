@@ -1,6 +1,7 @@
 """Keep BAIN/folder option descriptions current: readme text first, then the Nexus mod page, both cleaned by regex.
 
     python option_descriptions.py update [--fetch cache|browser|http] [--refresh-days N] [--limit N] [--report FILE]
+                                         [--archives DIR]
     python option_descriptions.py show [ARCHIVE_SUBSTRING]
 
 The packages come from the mock-FOMOD corpus (outputs/mock_fomod_corpus/index.json; build it with
@@ -15,7 +16,10 @@ The packages come from the mock-FOMOD corpus (outputs/mock_fomod_corpus/index.js
 
 Every chosen text goes through refine() (BBCode, markdown, links, page chrome, changelog lines, length). The result
 is outputs/option_descriptions.json, keyed by archive and option folder; a run keeps entries whose source text did
-not change and reports what was added or changed. Pages older than --refresh-days are read again (browser/http)."""
+not change and reports what was added or changed. Pages older than --refresh-days are read again (browser/http).
+
+An archive whose name has no Nexus id is looked up with nexus_ids (Vortex's records for the file in --archives,
+default Vortex's downloads folder; with browser/http also a Nexus search). One that is not a Nexus mod gets no page."""
 import argparse
 import hashlib
 import json
@@ -129,7 +133,24 @@ def page_text(mod_id: str, fetch: str, refresh_days: float, log=print) -> tuple[
         return "", None, f"fetch failed: {exc}"
 
 
-def update(fetch="cache", refresh_days=14.0, limit=None, out=OUT, corpus=None, log=print, delay=2.0) -> dict:
+def _resolver(archives, fetch: str):
+    """archive name -> (mod id, source) for names without an id: nexus_ids with its cache, Vortex's records for files
+    in `archives`, and a Nexus search when pages may be fetched."""
+    import nexus_ids
+    cache = nexus_ids.read_cache(APP)
+    search = nexus_ids.default_search() if fetch != "cache" else None
+    folder = Path(archives) if archives else None
+
+    def lookup(name: str) -> tuple[str, str]:
+        result = nexus_ids.resolve((folder / name) if folder else Path(name), APP, vortex=None if folder else False,
+                                   search=search if folder else None, cache=cache)
+        return result["mod_id"], result["source"]
+    lookup.save = lambda: nexus_ids.write_cache(APP, cache) if cache else None
+    return lookup
+
+
+def update(fetch="cache", refresh_days=14.0, limit=None, out=OUT, corpus=None, log=print, delay=2.0,
+           archives=None, resolver=None) -> dict:
     import mock_fomod_corpus as corpus_mod
     from mwnexus_parse import best_option_sentences
     corpus = Path(corpus) if corpus else corpus_mod.CORPUS
@@ -141,14 +162,22 @@ def update(fetch="cache", refresh_days=14.0, limit=None, out=OUT, corpus=None, l
              "changed": 0, "kept": 0, "pages_read": 0, "page_problems": {}}
     samples = []
     reads = 0
+    lookup = resolver or _resolver(archives, fetch)
+    stats["not_nexus"] = 0
     for record in records:
         if not record.get("options"):
             continue
         stats["packages"] += 1
-        mod_id = nexus_id(record["archive"])
+        mod_id, id_source = nexus_id(record["archive"]), "filename"
+        if not mod_id:
+            mod_id, id_source = lookup(record["archive"])
         texts = {o["folder"]: corpus_mod.option_text(record, o) for o in record["options"]}
         page, cached_at = "", None
-        if any(not t.strip() for t in texts.values()):
+        if id_source == "not_nexus":
+            stats["not_nexus"] += 1
+            if any(not t.strip() for t in texts.values()):
+                stats["page_problems"][record["archive"]] = "not a Nexus mod"
+        elif any(not t.strip() for t in texts.values()):
             if limit is None or reads < limit:
                 before = time.time()
                 page, cached_at, problem = page_text(mod_id, fetch, refresh_days, log)
@@ -182,6 +211,7 @@ def update(fetch="cache", refresh_days=14.0, limit=None, out=OUT, corpus=None, l
             entries[key] = entry
             if raw and text != raw and len(samples) < 12:
                 samples.append({"option": key, "source": source, "before": raw[:400], "after": text[:400]})
+    getattr(lookup, "save", lambda: None)()
     Path(out).parent.mkdir(parents=True, exist_ok=True)
     tmp = Path(out).with_name(Path(out).name + ".tmp")
     tmp.write_text(json.dumps({"updated_at": time.strftime("%Y-%m-%dT%H:%M:%S"), "options": entries}, indent=1,
@@ -189,6 +219,16 @@ def update(fetch="cache", refresh_days=14.0, limit=None, out=OUT, corpus=None, l
     tmp.replace(out)
     stats["samples"] = samples
     return stats
+
+
+def _vortex_downloads():
+    try:
+        import vortex_state
+        template = vortex_state.read_prefix("settings###downloads###path").get("settings###downloads###path")
+    except Exception:
+        return None
+    folder = Path(str(template).replace("{game}", "morrowind")) if template else None
+    return folder if folder and folder.is_dir() else None
 
 
 def main(argv=None):
@@ -199,6 +239,8 @@ def main(argv=None):
     u.add_argument("--refresh-days", type=float, default=14.0)
     u.add_argument("--limit", type=int, help="read at most N pages this run")
     u.add_argument("--report", type=Path, help="also write the stats and samples as JSON")
+    u.add_argument("--archives", type=Path, help="the downloads folder (default: Vortex's) for looking up "
+                                                 "archives whose name has no Nexus id")
     s = sub.add_parser("show")
     s.add_argument("match", nargs="?", default="")
     a = p.parse_args(argv)
@@ -208,7 +250,7 @@ def main(argv=None):
             if a.match.casefold() in key.casefold():
                 print(f"{key} [{e['source'] or '-'}]\n    " + (e["text"].replace("\n", "\n    ") or "(none)"))
         return 0
-    stats = update(a.fetch, a.refresh_days, a.limit)
+    stats = update(a.fetch, a.refresh_days, a.limit, archives=a.archives or _vortex_downloads())
     if a.report:
         a.report.write_text(json.dumps(stats, indent=1, ensure_ascii=False), encoding="utf-8")
     samples = stats.pop("samples")

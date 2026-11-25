@@ -2688,7 +2688,8 @@ class ManagerGUI(tk.Tk):
             self._run_progress_job(
                 "Scan plugin archives", "Inspecting Vortex archives and their plugin/assets…",
                 lambda progress: scan_archives(downloads if source else Path(manual).parent, APP_DIR, progress,
-                                               installed_plugins=installed, refresh_cache=force_refresh),
+                                               installed_plugins=installed, refresh_cache=force_refresh,
+                                               nexus_search=__import__("nexus_ids").default_search()),
                 scanned)
 
         run_scan()

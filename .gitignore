@@ -26,6 +26,8 @@ major_master_deployments.json
 mwmanager_master_variants.json
 mwmanager_required_by_cache.json
 archive_scan_cache.json
+nexus_ids.json
+nexus_id_overrides.json
 game_catalog.sqlite3
 mwmanager_setup_state.json
 plugin_deployments.json
