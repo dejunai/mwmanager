@@ -2,7 +2,8 @@
 
     python nexus_ids.py resolve [DOWNLOADS_DIR] [--search api|none] [--only-missing] [--report FILE]
     python nexus_ids.py show [ARCHIVE_SUBSTRING]
-    python nexus_ids.py set ARCHIVE_NAME (MOD_ID | none)      a manual answer; wins over everything else
+    python nexus_ids.py set NAME (MOD_ID | none | personal) [--manager]   a manual answer; wins over everything else
+    python nexus_ids.py personal                                 list the mods marked personal
     python nexus_ids.py rescan (ARCHIVE_NAME ... | --all)       forget cached answers so they are looked up again
 
 Resolution order (the first that answers wins):
@@ -17,7 +18,14 @@ Resolution order (the first that answers wins):
      has this exact file name, or this file's exact size and a similar name, or a close name and the same version;
   7. otherwise the archive is not a Nexus mod. That answer is remembered (nexus_ids.json) so it is not searched
      again every run, and the Nexus update check and page text are skipped for it. `set` or `rescan` changes it.
-A search that could not run (offline, Nexus down) answers nothing and is not remembered."""
+A search that could not run (offline, Nexus down) answers nothing and is not remembered.
+
+Personal mods ("set NAME personal"): the user's own or hand-adjusted mods. They are never update- or currency-checked,
+never searched on Nexus, shown as personal, and listed as not distributable in an exported profile. NAME is an archive
+name, a staged mod folder or an MWSE mod name; it matches with or without the archive extension.
+
+Manual answers live in the user's own nexus_id_overrides.json (%LOCALAPPDATA%\\MWManager, so they outlast a reset or
+rollback of the MWManager folder); one in the MWManager folder (--manager) wins over it."""
 import argparse
 import difflib
 import hashlib
@@ -37,6 +45,7 @@ GAME_ID_FALLBACK = 100
 NEXUS_GRAPHQL = "https://api.nexusmods.com/v2/graphql"
 DOWNLOADS_MARKER = "__vortex_downloads_folder"
 NOT_NEXUS = "not_nexus"
+PERSONAL = "personal"
 UNRESOLVED = "unresolved"
 CACHED_SOURCES = {"vortex_download", "vortex_mod", "vortex_staging", "nexus_search", NOT_NEXUS}
 
@@ -389,20 +398,59 @@ def write_cache(manager_dir, entries: dict) -> None:
     _write(Path(manager_dir) / CACHE_NAME, {"version": CACHE_VERSION, "entries": entries})
 
 
-def overrides(manager_dir) -> dict[str, str]:
-    """{archive name casefolded: mod id or "none"} the user set."""
-    return {str(k).casefold(): str(v).strip() for k, v in _read(Path(manager_dir) / OVERRIDES_NAME).items()}
+def user_dir() -> Path | None:
+    """The user's own MWManager data folder (%LOCALAPPDATA%\\MWManager), or None when there is no such variable."""
+    base = os.environ.get("LOCALAPPDATA", "").strip()
+    return Path(base) / "MWManager" if base else None
+
+
+def name_key(name: str) -> str:
+    """How override names are compared: casefolded, without the archive extension or a " (1)" duplicate mark."""
+    return _stem(str(name).strip().rstrip("\\/")).casefold()
+
+
+def overrides(manager_dir=None) -> dict[str, str]:
+    """{name key: mod id, "none" or "personal"} the user set: the user's own file, then the MWManager folder's."""
+    found = {}
+    for folder in (user_dir(), Path(manager_dir) if manager_dir else None):
+        if folder is not None:
+            found.update({name_key(k): str(v).strip().casefold() for k, v in _read(folder / OVERRIDES_NAME).items()})
+    return found
+
+
+def override_for(name, manager_dir=None, table: dict | None = None) -> str | None:
+    return (overrides(manager_dir) if table is None else table).get(name_key(Path(str(name)).name))
+
+
+def is_personal(name, manager_dir=None, table: dict | None = None) -> bool:
+    """True for an archive, staged folder or mod name the user marked personal."""
+    return bool(name) and override_for(name, manager_dir, table) == PERSONAL
+
+
+def personal_names(manager_dir=None) -> list[str]:
+    names = {}
+    for folder in (user_dir(), Path(manager_dir) if manager_dir else None):
+        if folder is not None:
+            for key, value in _read(folder / OVERRIDES_NAME).items():
+                if str(value).strip().casefold() == PERSONAL:
+                    names.setdefault(name_key(key), str(key))
+                else:
+                    names.pop(name_key(key), None)
+    return sorted(names.values(), key=str.casefold)
 
 
 def set_override(manager_dir, archive_name: str, value: str | None) -> None:
-    """Record a manual answer ("12345", or "none" for not a Nexus mod); None removes it."""
+    """Record a manual answer ("12345", "none" for not a Nexus mod, "personal" for the user's own mod) in
+    manager_dir's nexus_id_overrides.json (user_dir() for the user's own file); None removes it."""
     path = Path(manager_dir) / OVERRIDES_NAME
-    data = {str(k): v for k, v in _read(path).items() if str(k).casefold() != Path(archive_name).name.casefold()}
+    key = name_key(Path(archive_name).name)
+    data = {str(k): v for k, v in _read(path).items() if name_key(k) != key}
     if value is not None:
         text = str(value).strip().casefold()
-        if text != "none" and not _digits(text):
-            raise ValueError("a Nexus mod id is a number, or 'none'")
+        if text not in {"none", PERSONAL} and not _digits(text):
+            raise ValueError("a Nexus mod id is a number, 'none' or 'personal'")
         data[Path(archive_name).name] = text
+    Path(manager_dir).mkdir(parents=True, exist_ok=True)
     _write(path, data)
 
 
@@ -445,7 +493,9 @@ def resolve(archive, manager_dir=None, *, metadata: dict | None = None, plugins=
     archive = Path(archive)
     key = archive.name.casefold()
     manager = Path(manager_dir) if manager_dir else None
-    override = overrides(manager).get(key) if manager else None
+    override = override_for(archive.name, manager)
+    if override == PERSONAL:
+        return _result(source=PERSONAL, detail="a personal mod: no Nexus lookup, update check or sharing")
     if override:
         return (_result(source=NOT_NEXUS, detail="set by hand") if override == "none"
                 else _result(override, "", "override", "set by hand"))
@@ -492,6 +542,10 @@ def resolve(archive, manager_dir=None, *, metadata: dict | None = None, plugins=
 def apply(item: dict, manager_dir, *, vortex=None, search=None, cache=None) -> dict:
     """Fill a scanned archive item's nexus_mod_id/nexus_file_id when it has none (or when a previous resolve filled
     them, so an override or rescan takes effect); records where the answer came from in nexus_id_source."""
+    if is_personal(Path(str(item["archive"])).name, manager_dir):
+        item.update(nexus_mod_id=None, nexus_file_id=None, nexus_id_source=PERSONAL, personal=True)
+        return item
+    item.pop("personal", None)
     if item.get("nexus_mod_id") and not item.get("nexus_id_source"):
         return item
     result = resolve(item["archive"], manager_dir, metadata=item.get("vortex_metadata") or {},
@@ -534,13 +588,20 @@ def main(argv=None) -> int:
     o = sub.add_parser("set")
     o.add_argument("archive")
     o.add_argument("value")
+    o.add_argument("--manager", action="store_true", help="write the MWManager folder's file, not the user's own")
+    sub.add_parser("personal")
     c = sub.add_parser("rescan")
     c.add_argument("archives", nargs="*")
     c.add_argument("--all", action="store_true")
     args = parser.parse_args(argv)
     if args.cmd == "set":
-        set_override(APP, args.archive, args.value)
-        print(f"{args.archive}: {args.value}")
+        target = APP if args.manager or user_dir() is None else user_dir()
+        set_override(target, args.archive, None if args.value.casefold() == "clear" else args.value)
+        print(f"{args.archive}: {args.value} ({target / OVERRIDES_NAME})")
+        return 0
+    if args.cmd == "personal":
+        for name in personal_names(APP):
+            print(name)
         return 0
     if args.cmd == "rescan":
         if not args.all and not args.archives:

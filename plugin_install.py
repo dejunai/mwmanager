@@ -486,13 +486,14 @@ def _apply_nexus_id_fallback(item: dict, archive: Path, manager: Path | None = N
                              cache: dict | None = None) -> None:
     """Fill missing IDs from the archive name while preserving Vortex metadata values. With `manager`, an archive
     still without an ID goes on to nexus_ids.resolve: Vortex's own records, then (with `search`) a Nexus search,
-    else it is marked as not a Nexus mod; item["nexus_id_source"] says which answered."""
+    else it is marked as not a Nexus mod; item["nexus_id_source"] says which answered. A mod the user marked
+    personal gets no ID, nexus_id_source "personal" and item["personal"]."""
     mod_id, file_id = _nexus_ids_from_archive_name(archive)
     if not item.get("nexus_mod_id") and mod_id:
         item["nexus_mod_id"] = mod_id
     if not item.get("nexus_file_id") and file_id:
         item["nexus_file_id"] = file_id
-    if manager is not None and (not item.get("nexus_mod_id") or item.get("nexus_id_source")):
+    if manager is not None:
         import nexus_ids
         nexus_ids.apply(item, manager, search=search, cache=cache)
 

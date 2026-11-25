@@ -163,20 +163,25 @@ def update(fetch="cache", refresh_days=14.0, limit=None, out=OUT, corpus=None, l
     samples = []
     reads = 0
     lookup = resolver or _resolver(archives, fetch)
-    stats["not_nexus"] = 0
+    import nexus_ids
+    manual = nexus_ids.overrides(APP)
+    stats["not_nexus"] = stats["personal"] = 0
     for record in records:
         if not record.get("options"):
             continue
         stats["packages"] += 1
         mod_id, id_source = nexus_id(record["archive"]), "filename"
-        if not mod_id:
+        if nexus_ids.is_personal(record["archive"], table=manual):
+            mod_id, id_source = "", "personal"
+        elif not mod_id:
             mod_id, id_source = lookup(record["archive"])
         texts = {o["folder"]: corpus_mod.option_text(record, o) for o in record["options"]}
         page, cached_at = "", None
-        if id_source == "not_nexus":
-            stats["not_nexus"] += 1
+        if id_source in ("not_nexus", "personal"):
+            stats[id_source] += 1
             if any(not t.strip() for t in texts.values()):
-                stats["page_problems"][record["archive"]] = "not a Nexus mod"
+                stats["page_problems"][record["archive"]] = ("a personal mod" if id_source == "personal"
+                                                             else "not a Nexus mod")
         elif any(not t.strip() for t in texts.values()):
             if limit is None or reads < limit:
                 before = time.time()

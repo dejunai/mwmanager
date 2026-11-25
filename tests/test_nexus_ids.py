@@ -15,6 +15,13 @@ import vortex_state as vs  # noqa: E402
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "nexus_graphql_search.json"
 
 
+@pytest.fixture(autouse=True)
+def own_user_folder(tmp_path, monkeypatch):
+    """The user's own override file goes to a temporary folder, never the real %LOCALAPPDATA%."""
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "localappdata"))
+    return tmp_path / "localappdata" / "MWManager"
+
+
 # ---- a tiny LevelDB writer for fixtures (uncompressed tables, one log) ---------------------------------------------
 
 def _varint(n: int) -> bytes:
@@ -345,3 +352,85 @@ def test_option_descriptions_skip_pages_for_mods_not_on_nexus(tmp_path, monkeypa
     assert stats["page_problems"]["Homebrew Tweaks.7z"] == "not a Nexus mod"
     data = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))["options"]
     assert data["Old Style-45674-1.zip | 01 Core"]["nexus_id"] == "45674"
+
+
+# ---- personal mods ------------------------------------------------------------------------------------------------
+
+def test_personal_mod_is_never_searched_and_matches_by_any_of_its_names(tmp_path, own_user_folder):
+    downloads = _downloads(tmp_path)
+    manager = tmp_path / "manager"
+    manager.mkdir()
+    archive = downloads / "My Own Thing.7z"
+    archive.write_bytes(b"p")
+    ni.set_override(ni.user_dir(), "My Own Thing.7z", "personal")
+    assert (own_user_folder / ni.OVERRIDES_NAME).is_file()
+    search = FakeSearch({"mod_id": "1", "file_id": "", "detail": "must not be asked"})
+    result = ni.resolve(archive, manager, vortex=False, search=search)
+    assert (result["mod_id"], result["source"]) == ("", ni.PERSONAL) and search.calls == []
+    assert ni.is_personal("My Own Thing") and ni.is_personal("my own thing (1).7z")    # folder name, duplicate copy
+    assert not ni.is_personal("My Own Thing Else.7z")
+    assert ni.personal_names(manager) == ["My Own Thing.7z"]
+    ni.set_override(manager, "My Own Thing", "none")                    # the MWManager folder's answer wins
+    assert not ni.is_personal("My Own Thing.7z", manager) and ni.personal_names(manager) == []
+
+
+def test_personal_wins_over_an_id_in_the_name_and_can_be_undone(tmp_path):
+    manager = tmp_path / "manager"
+    manager.mkdir()
+    name = "Hand Tweaked-12345-1-0-1700000000.7z"
+    item = {"archive": str(tmp_path / name), "plugins": [], "vortex_metadata": {}, "nexus_mod_id": "12345"}
+    ni.set_override(ni.user_dir(), name, "personal")
+    ni.apply(item, manager, vortex=False)
+    assert (item["nexus_mod_id"], item["nexus_id_source"], item["personal"]) == (None, ni.PERSONAL, True)
+    ni.set_override(ni.user_dir(), name, None)
+    ni.apply(item, manager, vortex=False)
+    assert (item["nexus_mod_id"], item["nexus_id_source"]) == ("12345", "filename") and "personal" not in item
+
+
+def test_personal_mod_is_not_update_checked(tmp_path, monkeypatch):
+    import nexus_updates
+    folder = tmp_path / "staging" / "Own Lua Fixes"
+    folder.mkdir(parents=True)
+    ni.set_override(ni.user_dir(), "Own Lua Fixes", "personal")
+    monkeypatch.setattr(nexus_updates, "_metadata", lambda mod_dir: pytest.fail("a personal mod was looked up"))
+    assert nexus_updates.check_and_offer_update(folder, manager_dir=tmp_path) is False
+
+
+def test_exported_profile_lists_personal_mods_as_not_distributable(tmp_path):
+    import mwmanager_profiles as mp
+    manager = tmp_path / "manager"
+    manager.mkdir()
+    (manager / "mwmanager_sort_order.txt").write_text("Morrowind.esm\nMyOwn.esp\nShared.esp\n", encoding="utf-8")
+    (manager / "plugin_deployments.json").write_text(json.dumps({"deployments": [
+        {"archive": str(tmp_path / "My Own Thing.7z"), "plugins": ["MyOwn.esp"]},
+        {"archive": str(tmp_path / "Shared-12345-1-0.7z"), "plugins": ["Shared.esp"]}]}), encoding="utf-8")
+    mp.save(manager, "plain")
+    plain = json.loads(mp.export(manager, "plain", tmp_path / "plain.json").read_text(encoding="utf-8"))
+    assert "not_distributable" not in plain
+    ni.set_override(ni.user_dir(), "My Own Thing.7z", "personal")
+    marked = json.loads(mp.export(manager, "plain", tmp_path / "marked.json").read_text(encoding="utf-8"))
+    assert marked["not_distributable"] == [{"mod": "My Own Thing.7z", "plugins": ["MyOwn.esp"]}]
+    assert marked["files"] == plain["files"]                            # the load order itself is unchanged
+
+
+def test_cli_set_personal_writes_the_users_own_file(own_user_folder, capsys):
+    assert ni.main(["set", "Made Up Build.7z", "personal"]) == 0
+    assert json.loads((own_user_folder / ni.OVERRIDES_NAME).read_text(encoding="utf-8")) == {
+        "Made Up Build.7z": "personal"}
+    assert ni.main(["personal"]) == 0 and "Made Up Build.7z" in capsys.readouterr().out
+    assert ni.main(["set", "Made Up Build.7z", "clear"]) == 0 and not ni.is_personal("Made Up Build.7z")
+
+
+def test_option_descriptions_skip_pages_for_personal_mods(tmp_path, monkeypatch):
+    import option_descriptions as od
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    records = [{"archive": "Own Build-45674-1-0-1700000000.7z", "doc_dir": "", "options": [{"folder": "01 Core"}]}]
+    (corpus / "index.json").write_text(json.dumps(records), encoding="utf-8")
+    ni.set_override(ni.user_dir(), records[0]["archive"], "personal")
+    pages = []
+    monkeypatch.setattr(od, "page_text", lambda mod_id, *a, **k: pages.append(mod_id) or ("", None, ""))
+    stats = od.update(fetch="cache", out=tmp_path / "out.json", corpus=corpus, log=lambda *_: None, delay=0,
+                      resolver=lambda name: pytest.fail("a personal mod was looked up"))
+    assert pages == [] and stats["personal"] == 1
+    assert stats["page_problems"][records[0]["archive"]] == "a personal mod"
