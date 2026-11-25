@@ -54,6 +54,30 @@ DEFAULT_ROOT = MANAGER_DIR / "journal"
 WIDTH = 115
 
 PREREQ_RULES = (
+    # user-data is first so in-game MWSE suite settings are not caught by
+    # data files/mwse/config/* (a prerequisite catch-all). The settings list is
+    # explicit; a prereq's own config stays prereq:mwse.
+    ("user-data", ("saves/*", "*.log", "warnings.txt", "mwse_minidump.dmp", "programflow.txt",
+                     "data files/mwse/config/mwguard.json",
+                     "data files/mwse/config/mwfloatfix.json",
+                     "data files/mwse/config/mwfloatfix_blacklist.json",
+                     "data files/mwse/config/mwhangwatch.json",
+                     "data files/mwse/config/mwsaveguard.json",
+                     "data files/mwse/config/mwsoundguard.json",
+                     "data files/mwse/config/mwperformers.json",
+                     "data files/mwse/config/mwcollide.json",
+                     "data files/mwse/config/mwstranded.json",
+                     "data files/mwse/config/mwcompanions.json",
+                     "data files/mwse/config/mwcriminal.json",
+                     "data files/mwse/config/mwcustomclasspersistence.json",
+                     "data files/mwse/config/mweffectinspector.json",
+                     "data files/mwse/config/mwexitguard.json",
+                     "data files/mwse/config/mwmouseguard.json",
+                     "data files/mwse/config/mwpluginpatches.json",
+                     "data files/mwse/config/mwquicktoggle.json",
+                     "data files/mwse/config/mwteleportguard.json",
+                     "data files/mwse/config/mwwarnsuppression.json",
+                     )),
     ("prereq:mcp", ("mcpatch/*", "morrowind code patch.exe", "mcp readme.txt", "mcp history.txt",
                     "morrowind.original.exe", "mwedit/customfunctions.dat")),
     ("prereq:mge_xe", ("d3d8.dll", "d3d9.dll", "dinput8.dll", "mgexegui.exe", "mgegui.exe", "mgehost64.exe",
@@ -67,7 +91,6 @@ PREREQ_RULES = (
                      "morrowind.pdb", "data files/mwse/core/*", "data files/mwse/lib/*", "data files/mwse/config/*",
                      "data files/mwse/.vscode/*", "data files/mwse/mods/readme.txt", "data files/textures/mwse/*",
                      "data files/meshes/mwse/*")),
-    ("user-data", ("saves/*", "*.log", "warnings.txt", "mwse_minidump.dmp", "programflow.txt")),
     ("store-meta", ("goggame-*", "goglog.ini", "gog.ico", "support.ico", "unins000.*", "*.lnk",
                     "steam_api*.dll", "steam_appid.txt", ".egstore/*")),
     ("game-exe", ("morrowind.exe",)),
@@ -82,10 +105,19 @@ MGE_REGENERATED = ("data files/distantland/*", "mgexe.toml")
 def mge_regenerated(k: str) -> bool:
     return any(fnmatch.fnmatchcase(k, pat) for pat in MGE_REGENERATED)
 
-# Runtime files written by our MWSE suite (and by --fix for those mods) under
+# Runtime data written by our MWSE suite (and by --fix for those mods) under
 # Data Files\MWSE\config. They are not journaled when the game writes them, so
 # rollback would otherwise refuse. They are deleted like other generated files.
-GENERATED_RUNTIME = ("data files/mwse/config/mwfloatfix_*.json",)
+# Explicit names, not mwfloatfix_*.json: mwfloatfix_blacklist.json is user-data.
+# mwcollide_data.json and mwstranded_data.json are journaled by --full and are
+# not listed here.
+GENERATED_RUNTIME = (
+    "data files/mwse/config/mwfloatfix_data.json",
+    "data files/mwse/config/mwfloatfix_rescue.json",
+    "data files/mwse/config/mwsoundguard_data.json",
+    "data files/mwse/config/mwsoundfix_data.json",
+    "data files/mwse/config/mwinfoloop_cache.json",
+)
 
 
 def generated_runtime(k: str) -> bool:

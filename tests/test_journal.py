@@ -227,6 +227,59 @@ class BaselineTests(Fixture):
         self.assertFalse(data.exists())
         self.assertFalse(rescue.exists())
 
+    def test_rollback_deletes_unjournaled_suite_data_files(self):
+        self.journal.capture_baseline(self.game)
+        self.journal.capture_prerequisites(self.game)
+        paths = [write(self.game / f"Data Files/MWSE/config/{name}", b"{}")
+                 for name in ("mwsoundguard_data.json", "mwsoundfix_data.json",
+                              "mwinfoloop_cache.json")]
+        plan = self.journal.plan_rollback(self.game)
+        self.assertEqual((plan["refuse"], plan["unexplained"]), ([], []))
+        ops = {(step["op"], step["path"]) for step in plan["steps"]}
+        for path in paths:
+            self.assertIn(("delete", path.relative_to(self.game).as_posix()), ops)
+        self.journal.execute_rollback(self.game, plan)
+        self.assertTrue(all(not path.exists() for path in paths))
+
+    def test_rollback_leaves_mwsuite_settings_and_does_not_refuse(self):
+        settings = (
+            "mwguard.json", "mwfloatfix.json", "mwfloatfix_blacklist.json",
+            "mwhangwatch.json", "mwsaveguard.json", "mwsoundguard.json",
+            "mwperformers.json", "mwcollide.json", "mwstranded.json",
+            "mwcompanions.json", "mwcriminal.json", "mwcustomclasspersistence.json",
+            "mweffectinspector.json", "mwexitguard.json", "mwmouseguard.json",
+            "mwpluginpatches.json", "mwquicktoggle.json", "mwteleportguard.json",
+            "mwwarnsuppression.json",
+        )
+        for name in settings:
+            self.assertEqual(mj.classify(f"Data Files/MWSE/config/{name}"), "user-data", name)
+            self.assertFalse(mj.generated_runtime(f"data files/mwse/config/{name}"), name)
+        # a prereq's own config, and journaled suite data, stay outside user-data
+        self.assertEqual(mj.classify("Data Files/MWSE/config/mwse.json"), "prereq:mwse")
+        for name in ("mwcollide_data.json", "mwstranded_data.json"):
+            self.assertEqual(mj.classify(f"Data Files/MWSE/config/{name}"), "prereq:mwse", name)
+            self.assertFalse(mj.generated_runtime(f"data files/mwse/config/{name}"), name)
+        self.journal.capture_baseline(self.game)
+        self.journal.capture_prerequisites(self.game)
+        kept = [write(self.game / f"Data Files/MWSE/config/{name}", b"{\"enabled\":true}")
+                for name in settings]
+        plan = self.journal.plan_rollback(self.game)
+        self.assertEqual((plan["refuse"], plan["unexplained"]), ([], []))
+        planned = {step["path"] for step in plan["steps"] + plan["prerequisite_steps"]}
+        for path in kept:
+            self.assertNotIn(path.relative_to(self.game).as_posix(), planned)
+        self.journal.execute_rollback(self.game, plan)
+        self.assertTrue(all(path.is_file() for path in kept))
+
+    def test_rollback_still_refuses_an_unlisted_mwse_config(self):
+        self.journal.capture_baseline(self.game)
+        self.journal.capture_prerequisites(self.game)
+        stray = write(self.game / "Data Files/MWSE/config/mwse.json", b"{}")
+        plan = self.journal.plan_rollback(self.game)
+        self.assertIn("Data Files/MWSE/config/mwse.json", plan["unexplained"])
+        self.assertFalse(any(step.get("path") == "Data Files/MWSE/config/mwse.json"
+                             and step["op"] == "delete" for step in plan["steps"]))
+
     def test_rollback_skips_a_journal_original_when_current_file_matches_prerequisite_checkpoint(self):
         plugin = self.game / "Data Files/XE Sky Variations.esp"
         self.journal.capture_baseline(self.game)
