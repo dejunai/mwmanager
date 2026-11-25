@@ -1876,6 +1876,24 @@ def _sole_data_files_choices(records: list[dict]) -> set[str]:
     return hidden
 
 
+_NEEDS_A_CHOICE = {"selectexactlyone", "selectatleastone"}
+
+
+def _empty_required_groups(records: list[dict], chosen) -> set[str]:
+    """Groups that must have a choice (SelectExactlyOne / SelectAtLeastOne, as the Apply check reads them) with
+    none of their options in `chosen`. The window never saves such an answer, but one can still arrive (an update
+    renamed an option, a hand-edited answer file): replaying it would install the package with that group empty,
+    and the window would refuse Apply with nothing ticked. Those groups are asked again with their defaults."""
+    chosen = set(chosen or ())
+    grouped = {}
+    for item in records:
+        grouped.setdefault(item.get("group_key", f"bain:{item.get('number', 0):02d}"), []).append(item)
+    return {key for key, items in grouped.items()
+            if str(items[0].get("selection_type", "")).casefold() in _NEEDS_A_CHOICE
+            and not any(item.get("required") for item in items)
+            and not any(item["key"] in chosen for item in items)}
+
+
 def _show_selector(mod_name: str, records: list[dict], previous: set[str], force_targets: set[str],
                    answered_groups: set[str] | None = None) -> set[str] | None:
     answered_groups = answered_groups or set()
@@ -1921,6 +1939,9 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
     records = [item for item in records if item["key"] not in hidden_required]
     if not records:
         return hidden_required
+    # A saved answer that leaves a must-choose group empty is no answer for that group: use its defaults.
+    stale_groups = _empty_required_groups(records, previous) & answered_groups
+    answered_groups = answered_groups - stale_groups
     try:
         import tkinter as tk
         from tkinter import ttk
@@ -2515,6 +2536,9 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
                 defaults = [i for i, item in enumerate(items) if not item.get("informational_utility")]
             if not defaults and first.get("plugin_choice") and exclusive:
                 defaults = [i for i, item in enumerate(items) if not item.get("informational_utility")][:1]
+            if not defaults and group_key in stale_groups and selection_type.casefold() == "selectexactlyone":
+                # its saved choice no longer matches any option: the first one, so saved answers still apply
+                defaults = [i for i, item in enumerate(items) if not item.get("informational_utility")][:1]
         if is_bain and number == 0:
             for item in items:
                 row = option_row(box, item)
@@ -2849,7 +2873,8 @@ def _companion_options(root: Path, record: dict, mod_dir: Path, output_dir, inst
     answer = _load_answer_file(Path(output_dir), identity) if output_dir else None
     previous = set(answer.get("selected", [])) if answer else set()
     answered = set(answer.get("answered_groups", [])) if answer else set()
-    if answer is not None and _reuse_saved_answers() and _legacy_answer_groups(records) <= answered:
+    if answer is not None and _reuse_saved_answers() and _legacy_answer_groups(records) <= answered \
+            and not _empty_required_groups(records, previous):
         chosen = previous
     else:
         chosen = _show_selector(f"{mod_dir.name}: {record['label']}", records, previous, installed, answered)
@@ -3431,7 +3456,8 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             previous = set(entry.get("selected", []))
             saved_selections[selection_identity] = sorted(previous)
             answered_groups = _legacy_answer_groups(records)
-        if answer is not None and _reuse_saved_answers() and _legacy_answer_groups(records) <= answered_groups:
+        if answer is not None and _reuse_saved_answers() and _legacy_answer_groups(records) <= answered_groups \
+                and not _empty_required_groups(records, previous):
             chosen = sorted(previous)       # every group already answered and nothing new: no window
             print(f"{mod_dir.name}: saved option choices applied")
         else:
