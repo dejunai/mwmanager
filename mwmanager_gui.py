@@ -4014,6 +4014,15 @@ class ManagerGUI(tk.Tk):
         except (OSError, ValueError):
             keywords = {name: [] for name in masters}
         data_dir = Path(self.settings["game_dir"]) / "Data Files"
+        warning_cache = {}
+
+        def warning_for(name):
+            key = Path(name).name.casefold()
+            if key not in warning_cache:
+                from master_warnings import warning_text
+                warning_cache[key] = warning_text(name, catalog_db=APP_DIR / "game_catalog.sqlite3")
+            return warning_cache[key]
+
         frame = ttk.Frame(dialog, padding=12)
         frame.pack(fill="both", expand=True)
         ttk.Label(frame, text="Optional community masters", font=FONTS["h2"]).pack(anchor="w")
@@ -4090,6 +4099,7 @@ class ManagerGUI(tk.Tk):
             last_scan.update(staged=staged_map, unfinished=unfinished, required=required_names,
                              tracked=scan["tracked"])
             update_master_buttons()
+            update_master_warning()
 
         scan_generation = {"value": 0}
 
@@ -4165,6 +4175,23 @@ class ManagerGUI(tk.Tk):
         legend = ttk.Frame(frame)
         legend.pack(fill="x", pady=(7, 0))
         master_status_legend(legend, ("deployed", "staged", "not_staged", "locked", "problem"))
+        warning_box = ttk.Label(frame, text="", wraplength=660, foreground=COLORS["rust"], justify="left")
+        warning_box.pack(fill="x", pady=(6, 0))
+
+        def update_master_warning(_event=None):
+            names, seen, texts = [], set(), []
+            names.extend(tree.selection())
+            names.extend(name for name in masters if name.casefold() in self.selected_major_masters)
+            for name in names:
+                key = name.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                text = warning_for(name)
+                if text:
+                    texts.append(text)
+            warning_box.configure(text="\n\n".join(texts))
+
         footer = ttk.Frame(frame)
         footer.pack(fill="x", pady=(10, 0))
         footer_top = ttk.Frame(footer)
@@ -4278,6 +4305,9 @@ class ManagerGUI(tk.Tk):
                 self.selected_major_masters.discard(name.casefold())
                 self.active_names.discard(name.casefold())
             else:
+                text = warning_for(name)
+                if text:
+                    messagebox.showwarning(name, text, parent=dialog)
                 self.selected_major_masters.add(name.casefold())
                 self.active_names.add(name.casefold())
             self.gui_state["selected_major_masters"] = [n for n in masters
@@ -4287,6 +4317,7 @@ class ManagerGUI(tk.Tk):
             values[0] = "☑" if name.casefold() in self.selected_major_masters else "☐"
             tree.item(name, values=values)
             update_master_buttons()
+            update_master_warning()
             tree.selection_set(name)
             return "break"
 
@@ -4345,6 +4376,9 @@ class ManagerGUI(tk.Tk):
                 return
             masters.append(name)
             keywords[name] = [Path(name).stem.replace("_", " ").casefold()]
+            text = warning_for(name)
+            if text:
+                messagebox.showwarning(name, text, parent=dialog)
             refresh_masters()
             tree.selection_set(name)
             tree.see(name)
@@ -4383,6 +4417,7 @@ class ManagerGUI(tk.Tk):
                 action()
 
         tree.bind("<<TreeviewSelect>>", update_master_buttons)
+        tree.bind("<<TreeviewSelect>>", update_master_warning, add="+")
         tree.bind("<Button-1>", click_master)
         up.configure(command=lambda: move_master(-1))
         down.configure(command=lambda: move_master(1))
