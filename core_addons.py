@@ -2027,6 +2027,17 @@ def _stage_core_master_archives(plan, selected_masters, manager_dir, game_dir, *
             except OSError:
                 pass
             raise
+    try:
+        import td_translation
+        td_translation.refresh_from_staging(
+            staging, tools_dir=manager / "tools", manager_dir=manager,
+            packages=staged, progress_callback=progress_callback)
+    except Exception as exc:
+        # Translation.txt is optional: a copy failure must not undo a finished stage.
+        if progress_callback:
+            progress_callback(
+                f"Translation.txt was not updated: {exc}. Staging finished; "
+                "Generate Patches can still run.")
     return staged
 
 

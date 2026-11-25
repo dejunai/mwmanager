@@ -2515,7 +2515,9 @@ class ManagerGUI(tk.Tk):
         unselected_new = [name for name in new_plugins if name.casefold() not in self.active_names]
         self.enable_new_button.state(["!disabled"] if unselected_new else ["disabled"])
         signature = self._current_generation_signature()
-        has_changes = bool(new_plugins) or signature != self.gui_state.get("generated_signature")
+        import td_translation
+        has_changes = (bool(new_plugins) or signature != self.gui_state.get("generated_signature")
+                       or td_translation.rebuild_is_pending(APP_DIR))
         # Keep it clickable while idle so modifier-clicks work; the idle style shows no changes.
         self.generate_button.state(["!disabled"])
         self.generate_button.configure(style="Primary.TButton" if has_changes else "GenerateIdle.TButton")
@@ -3583,6 +3585,9 @@ class ManagerGUI(tk.Tk):
             self.gui_state["game_dir"] = str(Path(self.settings["game_dir"]).resolve())
             self.gui_state["known_plugins"] = plugins_in_data(data_dir)
             self.gui_state["generated_signature"] = self._current_generation_signature()
+            if mode == "full":
+                import td_translation
+                td_translation.clear_rebuild(APP_DIR)
             write_gui_state(self.gui_state)
             self.refresh()
             self.status.set("Plugin checks and patch generation completed. Play is ready.")
@@ -4748,8 +4753,12 @@ class ManagerGUI(tk.Tk):
             if result.get("conflicts"):
                 self._resolve_major_master_conflicts(result["conflicts"])
             def offer_full():
-                if messagebox.askyesno("Run --full?", "The load order changed. Run --full against the new load "
-                                       "order now? It rebuilds the patches and may take a while.", parent=self):
+                import td_translation
+                prompt = td_translation.rebuild_offer_text(
+                    APP_DIR,
+                    "The load order changed. Run --full against the new load "
+                    "order now? It rebuilds the patches and may take a while.")
+                if messagebox.askyesno("Run --full?", prompt, parent=self):
                     self.generate_patches(mode="full", force=True)
 
             def next_step():                    # options waiting on another mod first, then --full
@@ -5514,6 +5523,10 @@ class ManagerGUI(tk.Tk):
         deployed, or once deployment is declined here - not before."""
         self._set_staging_run(None)
         self._setup_complete("major_masters_staged")
+        import td_translation
+        alert = td_translation.pending_alert(APP_DIR)
+        if alert:
+            messagebox.showinfo("Translation.txt updated", alert, parent=self)
         from mwmanager_batch import BatchCoordinator
         from core_addons import unfinished_packages
         active_batch = BatchCoordinator.resume(APP_DIR)
@@ -5916,14 +5929,17 @@ class ManagerGUI(tk.Tk):
                     self.status.set(
                         f"Waiting options kept held: {count:,} deployed major-master file(s) are covered by mods "
                         "deployed after them, so the masters were not taken out. Nothing was changed.")
+                    import td_translation
+                    held_prompt = (
+                        f"The options that waited on other mods were not added to {', '.join(_result['names'])}: "
+                        f"{count:,} of the masters' deployed files are now covered by mods deployed after them, "
+                        "so the masters can't be taken out cleanly to add them. Nothing was changed; the "
+                        "options stay held (Remove deployed plugins that cover them, then Reopen options).\n\n"
+                        "The load order changed. Run --full against the new load order now? It rebuilds "
+                        "the patches and may take a while.")
                     if messagebox.askyesno(
                             "Run --full?",
-                            f"The options that waited on other mods were not added to {', '.join(_result['names'])}: "
-                            f"{count:,} of the masters' deployed files are now covered by mods deployed after them, "
-                            "so the masters can't be taken out cleanly to add them. Nothing was changed; the "
-                            "options stay held (Remove deployed plugins that cover them, then Reopen options).\n\n"
-                            "The load order changed. Run --full against the new load order now? It rebuilds "
-                            "the patches and may take a while.", parent=self):
+                            td_translation.rebuild_offer_text(APP_DIR, held_prompt), parent=self):
                         self.generate_patches(mode="full", force=True)
                     return
                 if error:
