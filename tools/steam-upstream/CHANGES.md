@@ -1,3 +1,31 @@
+# luafix: generic tuning rules for throttles (2026-11-25)
+
+- `G2S`: a per-frame handler `G2` used to leave at medium (unseen calls or state writes) is gated at high when
+  its call closure scans the world every frame (`tes3.rayTest`, `:iterateReferences()`, `tes3.getReference` of
+  anything but the player, `tes3.findActorsInProximity`, `tes3.iterateObjects`) and nothing in it is
+  frame-critical. Same gate and interval as `G2`, its own id.
+- `G8`: a literal `tes3.messageBox` in a handler of an event that fires per hit or per NPC decision is shown at
+  most once per `messageInterval` (new key, 10 s). User-action events are left alone; in a per-frame handler it
+  is a report.
+- `U1`: a per-frame handler that sets the `.text` of a `createLabel` / `createBlock` element to a plain value
+  writes it only when it differs.
+- `skipRules` (new key): generic rule ids to report but never apply, like `skipKnown` for KB/KP/KR.
+- `M1` and `G2` both open a handler with an early return; at `--level medium` the second pass no longer sees the
+  gate as missing when the menu-mode return comes first (both are read from the handler's leading guards), so
+  such files are no longer rejected. `M1` skips a handler that already returns in menu mode.
+- `KP3` wording: Keg Drip refreshes once a second as shipped.
+
+# --play never deploys an older lua tools file over a newer one (2026-11-25)
+
+- A deployed Lua file is only replaced when that isn't a downgrade. Hash lineage decides: the deploy record
+  (`generated\mwdialog_lua_manifest.json`) now keeps, per file, the SHA-256s --play deployed before
+  (`history`, newest first, up to 16), so a lua tools copy that is a version Data Files already had and moved
+  past is left alone. A deployed file whose content no record knows (edited by hand) is dated by modification
+  time, as before. Identical files are a no-op; a file never deployed, with nothing newer, deploys as usual.
+- Each file left alone gets one warning line naming it and what to do (copy it into lua tools, or delete it so
+  --play deploys lua tools' copy), instead of a header and a list.
+- `mwdialog_paths`: `downgrade_reason`, `git_blob_ids`, `git_path_history` (the same rule for sync.py's hops,
+  against each destination repo's git log).
 # Vortex folders found again after Vortex compacts its settings (2026-11-25)
 
 - Vortex's settings (`%APPDATA%\Vortex\state.v2`) are read as the LevelDB they are: sorted tables (`.ldb`, keys

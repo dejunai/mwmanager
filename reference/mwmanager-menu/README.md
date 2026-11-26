@@ -1,6 +1,6 @@
 # mwmanagermenu: one Mod Config Menu entry for the mw* suite
 
-MWManager's own MWSE mod (not a copy of anything in the Steam install). `--init` installs
+The menu itself (`mods/mwmanagermenu/main.lua` and the metadata files) is a byte-identical copy of the same files in the Steam Morrowind install. `--init` installs
 `mods/mwmanagermenu/` to `Data Files\MWSE\mods\mwsuite\mwmanagermenu\` and the metadata files to
 `Data Files\`, together with the suite in `reference/mwse-lua-guards/`. The `bootstrap/main.lua` loads first
 and adds `mwsuite` to Lua's module search path.

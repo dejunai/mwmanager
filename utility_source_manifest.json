@@ -4,13 +4,13 @@
   "tracked_tools": [
     {
       "name": "dialog scanner / manager core",
-      "source": "<Steam Morrowind>\\mwdialog_check.py",
+      "source": "<morrowind-conflict-tools>\\mwdialog_check.py",
       "snapshot": "tools\\steam-upstream\\mwdialog_check.py",
       "working": "mwdialog_check.py",
-      "working_copy_action": "upstream verbatim (integration 2026-11-14); MWManager behaviour in mwmanager.py, mwmanager_upstream.py, mwmanager_state.py, mwmanager_overrides.py, mwmanager_init.py",
-      "source_sha256": "add5436b0c575ded3ebfd4df00749b83bb7cc12d157a4bd3d14825b12ad00ffc",
-      "snapshot_sha256": "add5436b0c575ded3ebfd4df00749b83bb7cc12d157a4bd3d14825b12ad00ffc",
-      "working_sha256": "add5436b0c575ded3ebfd4df00749b83bb7cc12d157a4bd3d14825b12ad00ffc",
+      "working_copy_action": "upstream verbatim (conflict-tools 6f13e7d)",
+      "source_sha256": "207a5f2a11d6b4abf3a2d552732f0236e252bce0b8838018906226a3d1e5a850",
+      "snapshot_sha256": "207a5f2a11d6b4abf3a2d552732f0236e252bce0b8838018906226a3d1e5a850",
+      "working_sha256": "207a5f2a11d6b4abf3a2d552732f0236e252bce0b8838018906226a3d1e5a850",
       "working_matches_upstream": true,
       "extension": [
         "mwmanager.py",
@@ -36,13 +36,13 @@
     },
     {
       "name": "Vortex tidy utility",
-      "source": "<Steam Morrowind>\\vortex_tidy.py",
+      "source": "<morrowind-conflict-tools>\\vortex_tidy.py",
       "snapshot": "tools\\steam-upstream\\vortex_tidy.py",
       "working": "vortex_tidy.py",
-      "working_copy_action": "upstream verbatim (integration 2026-11-14); MWManager behaviour in mwmanager_tidy_ext.py, mwmanager_install.py",
-      "source_sha256": "816cda7d89c4987155c79656f280bc6591537ca02ac13e68f80e4e06f48380b2",
-      "snapshot_sha256": "816cda7d89c4987155c79656f280bc6591537ca02ac13e68f80e4e06f48380b2",
-      "working_sha256": "816cda7d89c4987155c79656f280bc6591537ca02ac13e68f80e4e06f48380b2",
+      "working_copy_action": "upstream verbatim (conflict-tools 6f13e7d)",
+      "source_sha256": "78154442011f891b0c55741f6f300b8ec6481f8248652901a2c23fa4d1cd2c5d",
+      "snapshot_sha256": "78154442011f891b0c55741f6f300b8ec6481f8248652901a2c23fa4d1cd2c5d",
+      "working_sha256": "78154442011f891b0c55741f6f300b8ec6481f8248652901a2c23fa4d1cd2c5d",
       "working_matches_upstream": true,
       "extension": [
         "mwmanager_tidy_ext.py",
@@ -54,10 +54,10 @@
       "source": "<morrowind-conflict-tools>\\mwdialog_luafix.py",
       "snapshot": "tools\\steam-upstream\\mwdialog_luafix.py",
       "working": "mwdialog_luafix.py",
-      "working_copy_action": "upstream verbatim (conflict-tools bcf8d59)",
-      "source_sha256": "8c044f8f3f285e559d0e88fec3eeb2e8fbbae4c5eacb84d53e9d6ab954f56e17",
-      "snapshot_sha256": "8c044f8f3f285e559d0e88fec3eeb2e8fbbae4c5eacb84d53e9d6ab954f56e17",
-      "working_sha256": "8c044f8f3f285e559d0e88fec3eeb2e8fbbae4c5eacb84d53e9d6ab954f56e17",
+      "working_copy_action": "upstream verbatim (conflict-tools 6f13e7d)",
+      "source_sha256": "55d30d6333354804b1302917775762fdd28fa1fc26072b48ef1ee199b1c975b8",
+      "snapshot_sha256": "55d30d6333354804b1302917775762fdd28fa1fc26072b48ef1ee199b1c975b8",
+      "working_sha256": "55d30d6333354804b1302917775762fdd28fa1fc26072b48ef1ee199b1c975b8",
       "working_matches_upstream": true
     },
     {
@@ -84,13 +84,13 @@
     },
     {
       "name": "relative / Vortex-derived paths",
-      "source": "<Steam Morrowind>\\mwdialog_paths.py",
+      "source": "<morrowind-conflict-tools>\\mwdialog_paths.py",
       "snapshot": "tools\\steam-upstream\\mwdialog_paths.py",
       "working": "mwdialog_paths.py",
-      "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "7d95e3d6d8a6eaa4b76f640eab5ac8b43ed49f78d629280427eb5e1f98e1fa94",
-      "snapshot_sha256": "7d95e3d6d8a6eaa4b76f640eab5ac8b43ed49f78d629280427eb5e1f98e1fa94",
-      "working_sha256": "7d95e3d6d8a6eaa4b76f640eab5ac8b43ed49f78d629280427eb5e1f98e1fa94",
+      "working_copy_action": "upstream verbatim (conflict-tools 6f13e7d)",
+      "source_sha256": "38869bcc861ce82fe4d95366786e9319fec4017c52b7329a9bbf2bba8c24ee8e",
+      "snapshot_sha256": "38869bcc861ce82fe4d95366786e9319fec4017c52b7329a9bbf2bba8c24ee8e",
+      "working_sha256": "38869bcc861ce82fe4d95366786e9319fec4017c52b7329a9bbf2bba8c24ee8e",
       "working_matches_upstream": true
     },
     {

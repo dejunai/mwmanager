@@ -6,9 +6,9 @@ byte-identical copy of the Steam file; `SOURCE_MANIFEST.json` lists each one wit
 Steam install, then copy them again and refresh the manifest.
 
 - `mods/<name>/` - one folder per suite mod, installed by `--init` to `Data Files\MWSE\mods\mwsuite\<name>\`:
-  mwguard, mwhangwatch, mwfloatfix, mwstranded, mwcollide, mwperformers, mwinfoloop, mwsoundguard,
-  mwsaveguard, mwwarnsuppression, mwcriminal, mwpluginpatches, mweffectinspector, mwmouseguard,
-  mwteleportguard, mwexitguard, mwquicktoggle, mwcustomclasspersistence, mwpersonaleffects
+  mwcollide, mwcompanions, mwconsole, mwcriminal, mwcustomclasspersistence, mwexitguard, mwfloatfix, mwguard,
+  mwhangwatch, mwinfoloop, mwmouseguard, mwperformers, mwpluginpatches, mwquicktoggle, mwsaveguard, mwsoundfix,
+  mwsoundguard, mwstranded, mwteleportguard, mwwarnsuppression
   (20 mods). Plain Paper Fix is absorbed by `mwcriminal`. `dejespreplacements` (formerly mwespreplacements) is the user's own replacement for plugins in one load order;
   it is not part of the suite and MWManager does not ship it.
 - `metadata/<name>-metadata.toml` - the MWSE metadata files that go beside them in `Data Files\` (load priority).

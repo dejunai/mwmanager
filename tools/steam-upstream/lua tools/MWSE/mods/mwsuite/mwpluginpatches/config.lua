@@ -97,6 +97,36 @@ function config.isGraphicHerbalismActive()
         or false
 end
 
+function config.isMwcaConsumerActive()
+    return (lfs and lfs.fileexists and (
+        lfs.fileexists("Data Files/MWSE/mods/herbert100/animated containers/main.lua")
+        or lfs.fileexists("Data Files/MWSE/mods/oaab/mwca/main.lua")
+        or lfs.fileexists("Data Files/MWSE/mods/x32/mwca/main.lua")
+    )) or false
+end
+
+-- Intercepts for tweaks that used to be hand edits (patches/: wtsMetadataLog, partyAlchemyModuleBox, kegDripCadence, essentialAttackerFilter, magicantMenuGuard). These run when
+-- mwpluginpatches loads, before the load order is readable, so they look for the mod's own Lua file.
+function config.isWatchTheSkiesInstalled()
+    return (lfs and lfs.fileexists and lfs.fileexists("Data Files/MWSE/mods/tew/Watch the Skies/util.lua")) or false
+end
+
+function config.isPartyAlchemyInstalled()
+    return (lfs and lfs.fileexists and lfs.fileexists("Data Files/MWSE/mods/partyAlchemy/main.lua")) or false
+end
+
+function config.isKegDripInstalled()
+    return (lfs and lfs.fileexists and lfs.fileexists("Data Files/MWSE/mods/KegDrip/main.lua")) or false
+end
+
+function config.isEssentialIndicatorsInstalled()
+    return (lfs and lfs.fileexists and lfs.fileexists("Data Files/MWSE/mods/Essential Indicators/main.lua")) or false
+end
+
+function config.isMagicantInstalled()
+    return (lfs and lfs.fileexists and lfs.fileexists("Data Files/MWSE/mods/tew/Magican't/main.lua")) or false
+end
+
 local function getDynamicDefaults()
     local mca = config.isMcaActive()
     local eu = config.isEbonheartUnderworksActive()
@@ -195,6 +225,17 @@ local function getDynamicDefaults()
         -- Graphic Herbalism Respawn Delay (days)
         graphicHerbalismRespawnEnabled = config.isGraphicHerbalismActive(),
         herbRespawnDays = 3,
+
+        -- MWCA interop stub for Animated Containers Rewritten and OAAB / Garden of Dreams addons
+        mwcaInteropEnabled = config.isMwcaConsumerActive(),
+
+        -- Intercepts that replace old hand edits (patches/: wtsMetadataLog, partyAlchemyModuleBox, kegDripCadence, essentialAttackerFilter, magicantMenuGuard)
+        wtsMetadataLogEnabled = config.isWatchTheSkiesInstalled(),
+        partyAlchemyModuleBoxEnabled = config.isPartyAlchemyInstalled(),
+        kegDripCadenceEnabled = config.isKegDripInstalled(),
+        kegDripIntervalSeconds = 3,
+        essentialAttackerFilterEnabled = config.isEssentialIndicatorsInstalled(),
+        magicantMenuGuardEnabled = config.isMagicantInstalled(),
     }
 end
 
