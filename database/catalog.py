@@ -19,6 +19,24 @@ CORE_ESMS = ("Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm")
 CORE_BSAS = ("Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa")
 
 
+def is_grass_plugin(path: Path) -> bool:
+    """An MGE XE grass plugin (vortex_tidy's content test). It is read by MGE XE's distant land generator from
+    Data Files\\Grass, never loaded by the game, so it is never catalogued and never reaches a conflict."""
+    if path.suffix.casefold() != ".esp":
+        return False
+    root = str(Path(__file__).resolve().parents[1])
+    if root not in sys.path:
+        sys.path.insert(0, root)
+    try:
+        from vortex_tidy import is_grass_plugin as test
+    except ImportError:
+        return False
+    try:
+        return bool(test(str(path)))
+    except (OSError, ValueError, struct.error):
+        return False
+
+
 def sha256_file(path: Path) -> bytes:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -65,8 +83,10 @@ def read_initial_esm_load_order(ini_path: Path) -> list[str]:
 
 
 def enumerate_expected(data_dir: Path, ini_path: Path, canonical_core: bool = False,
-                       plugin_files: list[str] | None = None) -> tuple[list[Path], list[Path], list[str]]:
-    """Print ordered plugin inputs, all expected core archives, and additional ESM/BSA files."""
+                       plugin_files: list[str] | None = None,
+                       left_out: list[Path] | None = None) -> tuple[list[Path], list[Path], list[str]]:
+    """Print ordered plugin inputs, all expected core archives, and additional ESM/BSA files. An MGE XE grass
+    plugin named in plugin_files is left out (and added to left_out): it never reaches the record conflicts."""
     missing: list[str] = []
     found_esms: list[Path] = []
     found_bsas: list[Path] = []
@@ -84,6 +104,10 @@ def enumerate_expected(data_dir: Path, ini_path: Path, canonical_core: bool = Fa
         if path is None:
             print(f"  MISSING  GameFile{load_order}={name}")
             missing.append(name)
+        elif plugin_files is not None and is_grass_plugin(path):
+            print(f"  GRASS    {path.name}  (MGE XE grass plugin: belongs in Data Files\\Grass, left out)")
+            if left_out is not None:
+                left_out.append(path)
         else:
             print(f"  [{load_order}] FOUND    {path.name}  ({path.stat().st_size:,} bytes)")
             found_esms.append(path)
@@ -291,8 +315,9 @@ def main(argv: list[str] | None = None) -> int:
     if not data_dir.is_dir():
         print(f"ERROR: Data Files folder not found: {data_dir}", file=sys.stderr)
         return 2
+    grass: list[Path] = []
     esms, bsas, missing = enumerate_expected(data_dir, ini_path, canonical_core=args.canonical_core,
-                                               plugin_files=args.plugin_files)
+                                               plugin_files=args.plugin_files, left_out=grass)
     if missing:
         print("\nERROR: core catalog is incomplete; import was not started.", file=sys.stderr)
         return 2
@@ -303,6 +328,10 @@ def main(argv: list[str] | None = None) -> int:
         with sqlite3.connect(args.db) as connection:
             create_schema(connection, Path(__file__).with_name("schema.sql"))
             keep_esms = [p.name.casefold() for p in esms]
+            if grass:   # a grass plugin catalogued by an earlier run must not keep its records in the conflicts
+                connection.execute(
+                    "DELETE FROM esm_record WHERE lower(source_file) IN (" + ",".join("?" for _ in grass) + ")",
+                    [p.name.casefold() for p in grass])
             if args.append:
                 connection.execute(
                     "DELETE FROM esm_record WHERE lower(source_file) IN (" + ",".join("?" for _ in keep_esms) + ")",

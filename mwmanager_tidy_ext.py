@@ -609,12 +609,9 @@ def plan_mod(mod_dir):
                 reason = "OpenMW-only file or confirmed normal map retained under Off/<Vortex mod name>/OpenMW"
                 move(source, os.path.join(mod_dir, "Off", off_owner, "OpenMW", relative),
                      reason, force=openmw_path)
-            optional_payload = any(
-                (match := re.match(r"^(\d{1,2})(?:\s+|[_-])", part))
-                and int(match.group(1)) > 0
-                for part in relative_parts[:-1])
-            if (os.path.splitext(filename)[1].casefold() == ".esp" and is_grass_plugin(source)
-                    and not optional_payload):
+            # A grass plugin goes to Grass\ wherever it is: a numbered optional BAIN/FOMOD folder, Extras, or an
+            # unused option. Grass placement wins over optional/unused FOMOD placement (Rem-TOTSP.esp, CR-28).
+            if os.path.splitext(filename)[1].casefold() == ".esp" and is_grass_plugin(source):
                 move(source, os.path.join(mod_dir, existing(mod_dir, "Grass"), filename),
                      "MGE XE grass plugin -> Grass\\ (read by MGE XE's distant land generator, not loaded by the game)")
 

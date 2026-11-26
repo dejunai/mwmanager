@@ -1302,14 +1302,28 @@ def _apply_plugin_choices(mod_dir: Path, records: list[dict], chosen: set[str]) 
                 parked = any(source.resolve().is_relative_to(root.resolve()) for root in parked_roots)
             except (OSError, ValueError, AttributeError):
                 parked = False
+            if _is_grass_plugin(source):
+                destination = mod_dir / "Grass" / Path(rel).name
             if item["key"] in chosen:
-                if parked:
-                    if destination.exists():
+                if parked or destination != (mod_dir / rel):
+                    if destination.exists() and destination.resolve() != source.resolve():
                         print(f"  Could not restore selected plugin {rel}: a file already occupies its path.")
                         continue
-                    destination.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.move(str(source), str(destination))
-                    changed += 1
+                    if source.exists() and source.resolve() != destination.resolve():
+                        destination.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.move(str(source), str(destination))
+                        changed += 1
+            elif source.exists() and _is_grass_plugin(source):
+                # not chosen, still a grass plugin: Grass\ wins over unused-option placement, even one an
+                # older version parked (Rem-TOTSP.esp, CR-28); one already there stays put
+                target = mod_dir / "Grass" / Path(rel).name
+                if target.exists() and target.resolve() == source.resolve():
+                    continue
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if target.exists():
+                    target = target.with_name(f"{target.stem}.mwmanager-{int(time.time())}{target.suffix}")
+                shutil.move(str(source), str(target))
+                changed += 1
             elif not parked and source.exists():
                 target = unused_root / Path(rel).name if root_esp else unused_root / rel
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -2869,7 +2883,7 @@ def _mark_grass_options(records: list[dict], mod_dir: Path, data_files: Path | N
         note = (f"MGE XE grass plugin: read by MGE XE's distant land generator from Data Files\\Grass, never "
                 f"loaded by the game. For {name}, which is "
                 + ("staged, so it is chosen." if present else "not staged: choose it only if you will install it. "
-                   "Not chosen, it stays in the package's Extras and is never deployed."))
+                   "Either way the plugin is placed in this package's Grass folder, not among unused options."))
         record["docs"] = note + ("\n\n" + record["docs"] if record.get("docs") else "")
 
 
@@ -3039,8 +3053,9 @@ def _activate(mod_dir: Path, plugin: str, records: list[dict], chosen: set[str],
     for option in records:
         if option["key"] in chosen and not option.get("plugin_choice"):
             for rel, source in _payload_files(option).items():   # ascending number: higher groups win
-                # an MGE XE grass plugin goes to Grass\, never the package root: the game must not load it
-                if len(Path(rel).parts) == 1 and _is_grass_plugin(source):
+                # an MGE XE grass plugin goes to Grass\, even when the option left it in a numbered
+                # folder: the game must not load it, and unused-option placement must not win
+                if _is_grass_plugin(source):
                     rel = str(Path("Grass") / Path(rel).name)
                 desired[rel] = source
     new_state = {}

@@ -247,7 +247,8 @@ class Companions(unittest.TestCase):
             payload = mock_fomod._companion_options(root, record, package, self.root / "out", set())
         grass = next(r for r in shown["records"] if "Groundcover" in r["label"])
         self.assertEqual((grass["group_label"], grass["recommended"]), ("Grass (MGE XE groundcover)", False))
-        self.assertIn("never deployed", grass["docs"])
+        self.assertIn("Grass folder", grass["docs"])
+        self.assertNotIn("never deployed", grass["docs"])
         self.assertEqual(sorted(Path(rel).name for rel in payload), ["core.dds", "hd.dds"])   # no grass plugin
         answer = mock_fomod._load_answer_file(self.root / "out", "companion:Solstheim Graphical Replacer-46810.7z")
         self.assertTrue(answer["selected"])                                                  # asked once
