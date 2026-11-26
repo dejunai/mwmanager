@@ -1,3 +1,180 @@
+# docs: README and MORE_INFO cover the last day of work (2026-11-26)
+
+- vortex_tidy: the OpenMW converter (omw2mwse) is described: when it runs (OpenMW-only mods, `hardcode` by default,
+  `--convert-omwscripts` / `--no-convert-omwscripts`), the verdict (`blocked` undone at once, `partial` converted with
+  a NOTE), the 0.2.3 plugin `placement` / `status` contract (only root plugins on by default, one NOTE for the rest),
+  `--undo` of a conversion, the whole-package move to `Off\<plugin name>\OpenMW\` (the entries below dated
+  2026-11-25 still name `Off\OpenMW\<mod>\` for it; 193acde moved it), and the cleanup of empty `bugreports\` folders.
+  A new README section and a MORE_INFO subsection point to the OpenMW Converter project
+  (https://github.com/dejunai/openmw-mwse) as experimental, in early development and private for now, and keep it
+  apart from tidy's own `.omwaddon` / `Off\OpenMW\` handling.
+- `--cell-conflicts`: the `[7]` / `[8]` "<plugin> always loses" choices, the tool-managed
+  `mwdialog_check.conflict.blacklist.txt` (made by the first pick, with `OAAB_Saplings.esm` built in; reading never
+  makes it; remove a plugin by hand), and `mwdialog_incompatible_losers.txt` (holds
+  while the winner is active, lapses when it is gone).
+- `--play`: the lua tools deploy is described by SHA-256 lineage (`generated\mwdialog_lua_manifest.json`, up to 16
+  earlier hashes per file), with file times only for content no record knows. It said older / newer by time before.
+- luafix: README lists the generic tuning rules (G2, G2S, G8, U1, M1) and the `skipRules` key; MORE_INFO's M1 row
+  notes that M1 and G2 share a handler's first line.
+- Corrections: mwhangwatch has no Mod Config tab of its own (its settings are on mwguard's Guard & Hang Watch page,
+  saved in `mwhangwatch.json`); mwguard's `EnableLogTimestamps` is off by default and has a `logTimestampMode`
+  (`wallclock` or `elapsed`); the suite is tested on Python 3.9 and 3.15 (the luafix `lupa` tests on 3.14), not only
+  3.15; the empty-`bugreports\` rule (removed when empty and made or emptied during the run; one already empty at the
+  start stays).
+
+# luafix's lock check uses its own module copy; two suite tests made deterministic (2026-11-26)
+
+- `mwdialog_luafix.main()` and `find_checker()` each re-imported `mwdialog_paths` inside the function. That resolves
+  through `sys.modules` at call time, so when something replaces the module set between import and call (MWManager's
+  combined run `pytest tests tools/steam-upstream/tests` swaps and recomposes copies per test folder) luafix got a
+  fresh copy of `mwdialog_paths` while the lock was stubbed on, or held by, the copy it was loaded with. The lock
+  check itself was already the first thing `main()` does (before `--undo`, before any write), but it asked the wrong
+  copy, so a held game lock was not refused and `--undo` printed "Nothing to undo (no journal)." Both local imports
+  are gone: luafix uses its module-level `MP`. New test `test_luafix_lock_check_uses_the_module_it_was_loaded_with`
+  removes `mwdialog_paths` from `sys.modules` and still expects the refusal.
+- `test_fix_refreshes_the_suite_data_from_the_load_order_file_last` read `inspect.getsource(m._main)` and searched the
+  text; that goes through `linecache` and the code object's line number, so it returned other text when the file or
+  the module set changed after the import (once in about six runs in MWManager). It now parses the module's own file
+  with `ast` and checks the order of the calls (multipatch and sound patch before the aux-only cell-conflicts run, on
+  `resolve()`'s order) - same assertions, no source-text search.
+
+# vortex_tidy sets an unconverted OpenMW-only mod aside as Off\<plugin name>\OpenMW (2026-11-26)
+
+- The whole-package move (blocked by omw2mwse, conversion failed, converter missing, `--no-convert-omwscripts`)
+  now goes to `Off\<plugin name>\OpenMW\`, omw2mwse's own place and name, not `Off\OpenMW\<mod name>\`. The name is
+  copied from the converter (`mod_name_for` in 3d372b3): the stem of the first `*.omwscripts` in the package folder
+  (pathlib order), everything but letters, digits, `_` and `-` removed, `OpenMWMod` if nothing is left, the folder's
+  own name when it has no `.omwscripts`. Example: `Wild Attacks-54448-1-9` holding `wildlife_attacks_npc.omwscripts`
+  -> `Off\wildlife_attacks_npc\OpenMW\` (before: `Off\OpenMW\Wild Attacks\`). The root package takes the name of the
+  `.omwscripts` at the mod root, else the one in an `OpenMW\` folder, else the package already under
+  `Off\<name>\OpenMW\`, so leftovers (`Docs\`, `Screenshots\`, ...) join it. `Docs\` and `Screenshots\` go inside the
+  package, so a later omw2mwse run finds it at its canonical place and moves nothing (it used to leave `Docs\` behind).
+- Migration: an `Off\OpenMW\<x>\` folder from an earlier tidy run is moved to `Off\<its plugin name>\OpenMW\` in the same
+  pass, the emptied folders are removed, and a second run finds nothing to do. Moves and removed folders are
+  journaled like any move, so `--undo` restores everything byte for byte, and journals written before the change
+  (they only hold source and destination) still undo.
+- Hybrids (real MWSE Lua) are unchanged: their OpenMW-specific files still go to `Off\OpenMW\<mod name>\`.
+  Tidy's own `Extras\<mod name>\` for other mods is unchanged. A converter-placed `Extras\<plugin>\` is ignored by tidy
+  (`Extras` is one of its own folders), listed in the manifest and removed by `--undo`; it cannot collide with
+  another mod's `Extras\<mod name>\`, and inside one mod a same-named folder would only share a folder.
+
+# vortex_tidy follows omw2mwse 0.2.3's plugin placement (2026-11-26)
+
+- omw2mwse 3d372b3 replaced the `optional` boolean with `placement` (`root`, `extras`, `off`), `status` (`required`,
+  `undetermined`, `obsolete`), `path` and `sourceRel` on each entry of `mods[].plugins[]` (`--json`) and `plugins`
+  in `omw2mwse-manifest.json`. Tidy reads them, the JSON first, then the manifest on disk. Only placement `root` is
+  enabled by default; `extras` (`Extras\<Mod>\`) and `off` (`Off\<Mod>\OpenMW\`) are never auto-enabled.
+- At `--apply`, one NOTE per non-root plugin: where the converter put it and its reason. Dry runs stay quiet.
+  Tidy never moves, renames or enables a plugin, and never reads readmes or FOMOD text for this.
+- Fallbacks: the 0.2.2 boolean `optional: true` counts as not-root (the earlier NOTE); a manifest with no `plugins`
+  key falls back to the scan for root plugins with no `.omwaddon`/`.omwgame` source.
+- Converter-placed files in `Extras\<Mod>\` and `Off\<Mod>\OpenMW\` are listed in the manifest, so `--undo`
+  removes the copies (each only while its hash matches) and puts the obsolete root plugin back from `Off\`.
+  A blocked mod's conversion is undone first, then its whole package goes to tidy's `Off\OpenMW\<mod>\`.
+- Folder names differ by design: tidy sets a package aside at `Off\OpenMW\<mod name from the Vortex folder>\` and
+  keeps its own files in `Extras\<mod name>\`; omw2mwse uses `Off\<plugin name from the .omwscripts>\OpenMW\` and
+  `Extras\<plugin name>\`. The converter accepts tidy's layout and moves the package (the mod's `Docs\` stays
+  behind in tidy's folder); `--undo` reverses both steps exactly.
+
+# --cell-conflicts remembers who lost an INCOMPATIBLE choice (2026-11-25)
+
+- The plugin you turn off in an INCOMPATIBLE pair is recorded with the plugin it lost to, in the new
+  generated file `mwdialog_incompatible_losers.txt` (`loser<TAB>lost to<TAB>when`; edit by hand to take a line back).
+  While the plugin it lost to is still active, the loser is resolved: any other incompatibility it is in
+  (Himmelryn against Anthology Solstheim after it lost to The Snow Prince) turns it off again without a question, even
+  when a saved answer for that pair picks the other side. When the winner is gone the line lapses and the loser is
+  asked about afresh (the existing re-enable of a plugin whose winner is gone is unchanged). It is a record of its
+  own, not the always-loses list: that list also makes `--sort` load a plugin early and drops its conflicts, which
+  is wrong for a plugin that is turned off. Names compare without regard to case (`.ESP` / `.esp`).
+
+# vortex_tidy reads omw2mwse's optional-plugin flag (2026-11-25)
+
+- omw2mwse 166252b lists every root plugin it emits or leaves in `mods[].plugins[]` (`--json`) and under `plugins` in
+  `omw2mwse-manifest.json`: `{name, source, kind, optional, reason}`. Tidy reads the flag (JSON first, then the
+  manifest on disk) and prints one NOTE per optional plugin with the converter's reason; a required plugin gets no
+  note. Tidy still never enables or renames a converted mod's plugins. Checked against the real converter:
+  `wildlife_getfight.esp` is optional and `No Fires in Bad Weather.esp` is not.
+- The earlier guess (a root `.esp`/`.esm` with no `.omwaddon` source) is kept only as a fallback for a manifest
+  with no `plugins` key. `plugin-rename-clash` handling is unchanged.
+
+# omw2mwse verdicts, Vortex title and author, optional plugins, empty bugreports (2026-11-25)
+
+Follows f31470a (already pushed, so a second commit).
+
+- An OpenMW-only mod that is not converted now has its ENTIRE package moved to `Off\OpenMW\<mod>\` (same relative
+  paths): plugins, scripts, `textures\`, `meshes\`, `sound\`, `icons\`, `fonts\`, tidy's own `Docs\` and
+  `Screenshots\`, everything. The staging root keeps only `Off\` (and Vortex's `__folder_managed_by_vortex`), so a mod
+  that stays enabled in Vortex deploys nothing but `Off\`. This covers: omw2mwse not found, a conversion that fails
+  (conflict, refusal, error), a conversion omw2mwse judges `blocked`, and `--no-convert-omwscripts`. An `OpenMW\`
+  folder an earlier run made is unpacked there, not nested; omw2mwse's generated output is never moved (it is
+  removed). `--undo` puts every file back to its original place from the journal. Hybrids (real MWSE Lua) are
+  unchanged: MWSE-first, only their OpenMW-specific files go to `Off\OpenMW\<mod>\`.
+- The converter's verdict (`mods[].verdict` in its `--json`) is honoured. `blocked`: it exits 0 and still writes an
+  active loader, so tidy does not ship it. The plan lists it up front; at `--apply` the converter output is undone
+  straight away from its manifest (nothing is journaled), the whole package is set aside as above, and there is one
+  WARNING line (verdict, blocker count, first message). `partial` is converted, with one NOTE.
+- `--title` and `--author` are passed to omw2mwse from Vortex's mod info (`modName`, else the logical or custom
+  file name; `author`) when Vortex has them (`mwdialog_paths.vortex_mod_info`); no flags otherwise.
+- omw2mwse renames `.omwaddon` to `.esp` and `.omwgame` to `.esm` itself and keeps the originals under `Off\`;
+  tidy never renames a converted mod's plugins. A plugin the converter flags (`plugin-rename-clash`) or that the
+  manifest shows at the mod root with no `Off\...` source is reported in a NOTE and never enabled. This goes by
+  the converter's own report and manifest, never by name. The converter has no explicit "optional plugin" flag
+  yet: one is needed for plugins such as `wildlife_getfight.esp`.
+- `--undo` takes the omw2mwse conversions of a run out first (they were the last thing `--apply` did), then the
+  asset repairs, the Lua patches and the moves. Before, a bug report the asset pass had written in a converted
+  mod could come back from `Off\` after its repair was undone.
+- A `bugreports\` folder is removed at the end of a run (`--apply`, dry run, `--undo`) when it is empty and was
+  not there when the run began, so tidy only removes one it made. A folder that was already there stays, empty or
+  not. (The converter also sweeps a tidy bug report in a mod root into `Off\<Mod>\OpenMW\bugreports\`, which
+  leaves the folder empty.)
+
+# vortex_tidy --undo reverses an omw2mwse conversion (2026-11-25)
+
+- `--apply` journals each conversion with the converter's own report: where the original package was
+  (`relocatedFrom`, or `source` when it was not moved), where omw2mwse keeps it (`Off\<Mod>\OpenMW\`), the folder
+  and manifest it wrote and the manifest's file list with hashes. The record shares the `--apply` id, so one
+  `--undo` undoes the moves, the Lua patches, the asset repairs and the conversions of that run.
+- `--undo` puts the original package back from `Off\<Mod>\OpenMW\` at its original paths (a file already there
+  with the same content just lets the Off copy go; a different one is kept, with one WARNING line), then deletes
+  what omw2mwse wrote, from its manifest (the manifest on disk, else the journaled copy, else whatever carries its
+  markers plus `MWSE\config\omwcompat_<Mod>.json`). A generated file whose hash is no longer the manifest's was
+  edited: it stays, with one WARNING line, and so does the manifest. Never deleted: a path of the original
+  package, anything under the Off package, anything a manifest path points outside the mod folder at, or a
+  file the manifest does not list (your own MWSE mods, the game's config). Emptied folders go.
+- The shared `MWSE\lib\omwcompat` runtime goes, in every mod it was deferred in, only once no converted mod is
+  left in any mod folder of staging or in Data Files (a deployed copy of a mod just undone does not count).
+- A second `--undo` finds nothing to do. Checked end to end against the real omw2mwse (a package at the mod root, one
+  set aside under `Off\OpenMW\<Mod>\`, both modes, two mods sharing the runtime): the mod folders come back
+  byte for byte, folder for folder.
+
+# OpenMW converter output is recognised by its markers; tidy converts OpenMW-only mods (2026-11-25)
+
+- `mwdialog_paths.omw_generated` / `omw_generated_dir`: a folder is omw2mwse output when it holds
+  `omw2mwse-manifest.json`, or its `main.lua` has the generated-loader header ("generated by omw2mwse",
+  "Generated file: re-run omw2mwse") or requires / registers `omwcompat`; every file in it is too, and so is the
+  runtime, `MWSE\lib\omwcompat.lua` and `MWSE\lib\omwcompat\`. Markers, not folder names.
+- `--play`: never lists a converted mod under "aren't in lua tools ... Delete them if unwanted", and its prune
+  keeps (and reports) a recorded file that is converter output now.
+- luafix: never checks or patches converter output or the runtime, also with `--include-own` or when pointed
+  straight at the folder or a file in it (not even Known Bugs repairs); the converter fixes them at the source.
+- vortex_tidy: `.omwgame` stays at the mod root. OpenMW scripts set aside under `Off\<mod>\OpenMW\` (omw2mwse)
+  or `Off\OpenMW\<mod>\` (earlier tidy runs) count, so such an `.omwaddon` is flagged OpenMW-only, not renamed
+  `.esp`. In a mod omw2mwse converted, its `.omwaddon` (the converter's copy) is left as it is, with a plan NOTE.
+  `Off\` and `MWSE\` were already never moved.
+- The unused-asset name scan and the Lua orphan scan also read `.omw` (`main.lua.omw`) and `.omwscripts` files.
+- vortex_tidy hands OpenMW-only mods to the converter: a mod with OpenMW scripts (an `*.omwscripts` at its root,
+  in `OpenMW\` or set aside under `Off\`) and no real MWSE Lua is converted on `--apply` by
+  `omw2mwse --convert-omwscripts=<mode> <mod> --json`, `hardcode` by default (with
+  `--accept-hardcode-conversions`), `--convert-omwscripts=normal` for the converter's other mode,
+  `--no-convert-omwscripts` for the old move. The converter lays the mod out itself, so nothing else in it moves
+  that run; the plan lists `convert with omw2mwse (<mode>)` as an action and a dry-run preview. A conflict
+  (exit 4), refusal (3) or error is one WARNING line, the run goes on and the mod stays in the plan. The
+  converter is found on PATH or beside these tools (this folder, its `tools\` or the folder above: an
+  `omw2mwse(.exe/.cmd/.bat/.py)`, a checkout's `bin\omw2mwse`, or the `omw2mwse` package); not found: one
+  WARNING line and the usual `Off\OpenMW\` move.
+- Hybrid mods (real MWSE Lua: a `.lua` under `MWSE\` that omw2mwse did not generate) are never converted:
+  their OpenMW files go to `Off\OpenMW\<mod>\` as before.
+
 # luafix: generic tuning rules for throttles (2026-11-25)
 
 - `G2S`: a per-frame handler `G2` used to leave at medium (unseen calls or state writes) is gated at high when

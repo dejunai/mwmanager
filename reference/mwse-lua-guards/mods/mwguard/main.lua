@@ -18,10 +18,13 @@
        written to Data Files\MWSE\logs\mwguard.log.
     4. Non-Intrusive Logging:
        Other mods' logs and error tracebacks remain in MWSE.log.
-    5. Clock times in MWSE.log (EnableLogTimestamps, on by default):
-       MWSE 2.1 has no timestamp setting for MWSE.log, so global print and mwse.log are wrapped once, as
-       mwguard loads (before other mods), to put the wall-clock time ("[17:42:33] ") in front of each line.
-       Nothing else about a line changes. Off in mwguard.json: MWSE.log stays as MWSE writes it.
+    5. Timestamps on MWSE.log (EnableLogTimestamps, off by default):
+       MWSE 2.1 has no timestamp setting for MWSE.log, so when this is on, global print and mwse.log are
+       wrapped once, as mwguard loads (before other mods). The style is logTimestampMode (default
+       "wallclock"): wall clock ("[17:42:33] ") or "elapsed" whole seconds since start ("[000042] ",
+       six digits; the width stays fixed until 999999 s, about 11.5 days, then the number grows).
+       Nothing else about a line changes. The Mod Config menu is "Guard & Hang Watch", shared with
+       mwhangwatch.
 ]]
 
 local CONFIG_NAME = "mwguard"
@@ -34,7 +37,8 @@ local defaults = {
     costMs = 0.75,               -- average ms per call to flag as a bottleneck
     logNoticeToMWSE = true,      -- output summary notices of costly handlers to MWSE.log
     showAddressSpace = true,     -- on-screen address-space percentage, profiling on or off
-    EnableLogTimestamps = true,  -- prefix every MWSE.log line written through print / mwse.log with [HH:MM:SS]
+    EnableLogTimestamps = false, -- prefix every MWSE.log line (style: logTimestampMode)
+    logTimestampMode = "wallclock", -- "wallclock" ([17:42:33]) or "elapsed" ([000042] since start)
     exemptMods = {
         "mwguard", "mwcriminal", "mwcompanions", "mwhangwatch", "mwfloatfix", "mwstranded", "mwcollide",
         "mwperformers", "mwinfoloop", "mwsoundguard", "mwsoundfix", "mwsaveguard", "mwwarnsuppression",
@@ -50,14 +54,21 @@ local defaults = {
 
 local config = mwse.loadConfig(CONFIG_NAME, defaults)
 
--- clock times in MWSE.log: wrap print and mwse.log once, before other mods load (mwguard's load priority), so
+-- timestamps on MWSE.log: wrap print and mwse.log once, before other mods load (mwguard's load priority), so
 -- their lines (and the luafix log shim's, which forwards through the print it finds) carry the time too
 local function installLogTimestamps()
-    if config.EnableLogTimestamps == false or rawget(_G, "__mwsuite_log_timestamps") then return end
+    if config.EnableLogTimestamps ~= true or rawget(_G, "__mwsuite_log_timestamps") then return end
     local origPrint = print
     if type(origPrint) ~= "function" then return end
     rawset(_G, "__mwsuite_log_timestamps", true)
-    local date, select, tostring, concat, format = os.date, select, tostring, table.concat, string.format
+    local select, tostring, concat, format, date, time = select, tostring, table.concat, string.format, os.date, os.time
+    local logStart = time()
+    local function stamp()
+        if config.logTimestampMode == "elapsed" then
+            return format("[%06d] ", math.max(0, time() - logStart))
+        end
+        return date("[%H:%M:%S] ")
+    end
     print = function(...)
         local n = select("#", ...)
         local body
@@ -68,11 +79,11 @@ local function installLogTimestamps()
             for i = 1, n do t[i] = tostring((select(i, ...))) end
             body = concat(t, "\t")
         end
-        return origPrint(date("[%H:%M:%S] ") .. body)
+        return origPrint(stamp() .. body)
     end
     mwse.log = function(fmt, ...)
         local ok, msg = pcall(format, tostring(fmt), ...)
-        return origPrint(date("[%H:%M:%S] ") .. (ok and msg or tostring(fmt)))
+        return origPrint(stamp() .. (ok and msg or tostring(fmt)))
     end
 end
 pcall(installLogTimestamps)
@@ -440,52 +451,100 @@ origRegister(tes3.event.initialized, startHudTimer)
 origRegister(tes3.event.loaded, startHudTimer)          -- MWSE cancels every timer right before `loaded`
 origRegister(tes3.event.uiActivated, safeUpdateHud, { filter = "MenuMulti" })
 
--- Mod Config Menu --------------------------------------------------------------------------------
+-- Mod Config Menu: one "Guard & Hang Watch" entry, shared with mwhangwatch --------------------
 event.register(tes3.event.modConfigReady, function()
-    local template = mwse.mcm.createTemplate({ name = "mwguard" })
-    template:saveOnClose(CONFIG_NAME, config)
-    local page = template:createSideBarPage({
-        label = "Settings",
-        description = "mwguard measures how much time other Lua mods take every frame and writes the slowest ones to "
-            .. "MWSE\\logs\\mwguard.log, so you can find a mod that slows the game down. It only watches: it never "
-            .. "changes or slows down other mods.",
+    local hang = include("mwhangwatch.mcm")
+    local template = mwse.mcm.createTemplate({ name = "Guard & Hang Watch" })
+    template.onClose = function()
+        mwse.saveConfig(CONFIG_NAME, config)
+        if hang and hang.config then
+            mwse.saveConfig("mwhangwatch", hang.config)
+            if hang.applySettings then hang.applySettings() end
+            if hang.startMemCheck then hang.startMemCheck() end
+        end
+    end
+
+    local page1 = template:createSideBarPage({
+        label = "Memory & Hang Log",
+        description = "Memory tools show how full Morrowind's 4 GB limit is, and can warn you before a crash. "
+            .. "The hang log writes what the game is doing to Data Files\\MWSE\\logs\\mwhangwatch.log, "
+            .. "so a freeze, slowdown or sound problem can be tracked down.\n\n"
+            .. "Memory tools work even with the hang log off. Hang log changes apply right away. "
+            .. "The hang log starts fresh each time the game starts.",
     })
-    page:createOnOffButton({
-        label = "Enable Passive Profiler",
-        description = "Turns the performance monitor on. Restart the game after turning it on; turning it off stops "
-            .. "the reports right away. While it is off at start-up, mwguard does nothing at all.",
-        variable = mwse.mcm.createTableVariable({ id = "enabled", table = config }),
-    })
-    page:createOnOffButton({
+    local memory = page1:createCategory("Memory")
+    memory:createOnOffButton({
         label = "Show address space on screen",
         description = "Shows a small number in the top-right corner: how full Morrowind's 4 GB memory limit is, in "
-            .. "percent. The game crashes near 100%, so save and restart when it gets high. Works even with the monitor off.",
+            .. "percent. The game crashes near 100%, so save and restart when it gets high. Works even with the "
+            .. "profiler and the hang log off.",
         variable = mwse.mcm.createTableVariable({ id = "showAddressSpace", table = config }),
     })
-    page:createSlider({
+    if hang and hang.addMemoryWarning and hang.config then
+        hang.addMemoryWarning(memory)
+    end
+    if hang and hang.addHangLog and hang.config then
+        hang.addHangLog(page1)
+    end
+
+    local page2 = template:createSideBarPage({
+        label = "Lua Profiler",
+        description = "The Lua profiler measures how much time other Lua mods take every frame and writes the "
+            .. "slowest ones to MWSE\\logs\\mwguard.log, so you can find a mod that slows the game down. "
+            .. "It only watches: it never changes or slows down other mods.\n\n"
+            .. "Turn the profiler on and restart the game; turning it off stops the reports right away. "
+            .. "While it is off at start-up, no handlers are wrapped.",
+    })
+    page2:createOnOffButton({
+        label = "Enable Passive Profiler",
+        description = "Turns the performance monitor on. Restart the game after turning it on; turning it off stops "
+            .. "the reports right away. While it is off at start-up, no handlers are wrapped.",
+        variable = mwse.mcm.createTableVariable({ id = "enabled", table = config }),
+    })
+    page2:createSlider({
         label = "Flag handlers taking more than (ms)",
         description = "A mod that takes longer than this each frame, on average, is marked as slow in the log. Lower it "
             .. "to catch smaller slowdowns.",
         min = 0.25, max = 5.0, step = 0.25, decimalPlaces = 2,
         variable = mwse.mcm.createTableVariable({ id = "costMs", table = config }),
     })
-    page:createSlider({
+    page2:createSlider({
         label = "Report interval (seconds)",
         description = "How often a new report is written to MWSE\\logs\\mwguard.log.",
         min = 10, max = 120, step = 5,
         variable = mwse.mcm.createTableVariable({ id = "reportSeconds", table = config }),
     })
-    page:createSlider({
+    page2:createSlider({
         label = "Sample rate (1 in N frames)",
         description = "Only 1 frame in this many is timed, so the monitor itself doesn't slow the game. 8 is accurate "
             .. "enough; 1 times every frame.",
         min = 1, max = 32, step = 1,
         variable = mwse.mcm.createTableVariable({ id = "sampleEvery", table = config }),
     })
-    page:createOnOffButton({
+    page2:createOnOffButton({
         label = "Output notices to MWSE.log",
         description = "Also writes a short note to MWSE.log whenever a slow mod is found.",
         variable = mwse.mcm.createTableVariable({ id = "logNoticeToMWSE", table = config }),
+    })
+    page2:createOnOffButton({
+        label = "Enable timestamps",
+        description = "Prefixes every MWSE.log line with a timestamp. Off until you turn it on. Restart the game "
+            .. "after turning this on or off.\n\n"
+            .. "The style is set below: wall clock ([17:42:33]) or whole seconds since launch ([000042]).",
+        variable = mwse.mcm.createTableVariable({ id = "EnableLogTimestamps", table = config }),
+    })
+    page2:createDropdown({
+        label = "Timestamp style",
+        description = "Wall clock writes the time of day, as [17:42:33]. Seconds since launch writes whole seconds "
+            .. "since the game started, zero-padded to six digits ([000042]); the width stays fixed until "
+            .. "999999 seconds (about 11.5 days), then the number grows.\n\n"
+            .. "If timestamps are already on, a change of style applies to the next log line. Turning timestamps "
+            .. "on or off still needs a restart.",
+        options = {
+            { label = "Wall clock", value = "wallclock" },
+            { label = "Seconds since launch", value = "elapsed" },
+        },
+        variable = mwse.mcm.createTableVariable({ id = "logTimestampMode", table = config }),
     })
     template:register()
 end)

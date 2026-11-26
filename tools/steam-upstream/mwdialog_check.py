@@ -102,7 +102,8 @@ from mwdialog_records import (  # noqa: E402,F401
     rewrite_cell_refs, SPEAKER_SUBS, split_cell, unresolved_refs,
     late_scales, misplaced_duplicates, drop_cell_refs, deleted_refs_cell)
 from mwdialog_state import (  # noqa: E402,F401
-    ADDED_MASTERS_RECORD, CELL_WINNER_PATCH, CELL_WINNERS_FILE, CONFLICT_ANSWERS_FILE, CONFLICT_BLACKLIST_DEFAULT, CONFLICT_BLACKLIST_FILE, conflict_blacklisted,
+    add_conflict_blacklist, add_incompatible_loser, ADDED_MASTERS_RECORD, CELL_WINNER_PATCH, CELL_WINNERS_FILE, CONFLICT_ANSWERS_FILE, CONFLICT_BLACKLIST_BUILTIN, CONFLICT_BLACKLIST_FILE, CONFLICT_BLACKLIST_HEADER, CONFLICT_BLACKLIST_MARK,
+    conflict_blacklisted, INCOMPATIBLE_LOSERS_FILE, migrate_conflict_blacklist, read_incompatible_losers,
     CONFLICT_RULE_NOTE, CONFLICT_RULES_HEADER, DISABLED_RECORD, mark_merge_rebuild, MERGE_REBUILD_RECORD, MERGE_RECORD, merged_away,
     NORMAL_MAP_RE, note_promoted_rules, PROMOTED_END, PROMOTED_START, read_added_masters, read_cell_winners, read_conflict_answers,
     read_conflict_blacklist, read_disabled, read_generated_record, read_merge_rebuild, read_merge_record, read_redundant, record_bases,
@@ -1503,6 +1504,8 @@ class World:
                         self.r.add("WARN", plugin, f"script {sname}", "",
                                    f"{m.group(1)}: {prob} (the game skips it when this line runs)")
 
+    # what a Lua mod's names are read from; .omw / .omwscripts: OpenMW Lua hosted by omw2mwse (main.lua.omw, ...)
+    LUA_NAME_EXT = (".lua", ".json", ".toml", ".omw", ".omwscripts")
     LUA_ASSET_RE = re.compile(r'["\']([^"\'\n]{3,200}\.(?:nif|dds|tga|bmp|kf))["\']', re.I)
     LUA_DIR_RE = re.compile(r'["\']([A-Za-z0-9_ #\-]{3,40})[\\/]+[^"\'\n]*["\']')
     SHARED_DIRS = {"a", "b", "c", "d", "e", "f", "i", "k", "l", "m", "n", "o", "r", "s", "w", "x", "bm", "xbase",
@@ -1519,7 +1522,7 @@ class World:
         exact, dirs = set(), set()
         for dp, _d, fns in os.walk(mwse):
             for fn in fns:
-                if not fn.lower().endswith((".lua", ".json", ".toml")):
+                if not fn.lower().endswith(self.LUA_NAME_EXT):
                     continue
                 try:
                     with open(os.path.join(dp, fn), encoding="utf-8", errors="replace") as f:
@@ -5956,6 +5959,7 @@ def _conflict_session(args, ranked, name_of, masters, total_new, plugins=(), lab
                                 for k in cs)
 
     new_rules, turned_off = [], []
+    lost = []                                        # plugins that now always lose (not asked about again)
     active_names = {n.lower(): n for n, _p in plugins}
     active_merges = ({AUTO_MERGE_NAME.lower()} | {n.lower() for n in read_merge_record(game_dir)}) & active_names.keys()
     generated = [n for n, _p in plugins if is_our_patch(n)]
@@ -6033,6 +6037,15 @@ def _conflict_session(args, ranked, name_of, masters, total_new, plugins=(), lab
         return 0
     # a plugin kept against an incompatible partner wins its other incompatible pairs without asking
     kept_winners = set()
+    # plugins that already lost an INCOMPATIBLE choice (loser, winner): resolved for as long as the winner is active
+    loss_records = read_incompatible_losers(game_dir)
+    present = {n.lower() for n in active_names} | merged_away(game_dir, os.path.abspath(args.data_dir))
+
+    def standing_wins(n):
+        """The plugins `n` lost an incompatibility to that are still here (active, and not turned off in this run)."""
+        gone = {x.lower() for x, _w in turned_off}
+        return [w for l, w in loss_records if l == n and w in present and w not in gone]
+
     strict_saves = preserve_saves(args) == "strict"    # no plugin is turned off: such answers are reported only
     for (a_, b_), c_ in ranked:
         last_ = answers.get("|".join(sorted((a_, b_)))) or {}
@@ -6051,6 +6064,8 @@ def _conflict_session(args, ranked, name_of, masters, total_new, plugins=(), lab
     for i, ((a, b), c) in enumerate(ranked, 1):
         if a in {x.lower() for x, _w in turned_off} or b in {x.lower() for x, _w in turned_off}:
             continue
+        if a in {x.lower() for x in lost} or b in {x.lower() for x in lost}:
+            continue                                 # one of them now always loses: nothing left to decide
         A, B = name_of[a], name_of[b]
         kind = ("INCOMPATIBLE" if c.get("incompatible") else "DOUBLED" if c.get("doubled") else
                 "MAJOR" if (any(p[6] for p in c["place"]) or len(c["refs"]) >= 20) else "minor")
@@ -6058,7 +6073,14 @@ def _conflict_session(args, ranked, name_of, masters, total_new, plugins=(), lab
         last = answers.get(pair_key) or {}
         if last.get("do") == "skip":
             last = {}                                # skipped = postponed: asked again, never an answer
-        synthetic = ""
+        synthetic, because = "", ""
+        if c.get("incompatible"):
+            la, lb = standing_wins(a), standing_wins(b)
+            if bool(la) != bool(lb) or (la and lb and (b in la) != (a in lb)):
+                a_loses = bool(la) and (not lb or b in la)
+                (loser, winner), seen = ((A, B), la) if a_loses else ((B, A), lb)
+                last, synthetic = {"do": "off", "plugin": loser}, winner
+                because = f"{loser} already lost an incompatibility to {name_of.get(seen[0], seen[0])} ({INCOMPATIBLE_LOSERS_FILE})"
         if not last and c.get("incompatible") and (a in kept_winners) != (b in kept_winners):
             winner, loser = (A, B) if a in kept_winners else (B, A)
             last, synthetic = {"do": "off", "plugin": loser}, winner   # it already won: no need to ask
@@ -6161,6 +6183,11 @@ def _conflict_session(args, ranked, name_of, masters, total_new, plugins=(), lab
                 if lua_affected:
                     say("      WARNING: MWSE Lua or metadata also names: " + ", ".join(lua_affected)
                           + "; review those mods separately")
+            if not c.get("incompatible"):
+                # the plugin never takes part in a cell conflict again (the generated conflict blacklist)
+                opts["7"] = ("lose", A, B, f"{A} always loses")
+                opts["8"] = ("lose", B, A, f"{B} always loses")
+                say(f"  [7] {A} always loses   [8] {B} always loses")
             return opts, off_plans, blockers
 
         def pick(opts, off_plans):
@@ -6185,7 +6212,7 @@ def _conflict_session(args, ranked, name_of, masters, total_new, plugins=(), lab
             default = pick(opts, off_plans)
             if default:
                 print(f"[{i}/{len(ranked)}] {A} vs {B}: "
-                      + (f"{synthetic} was kept against another incompatible plugin: " if synthetic else
+                      + (f"{because or synthetic + ' was kept against another incompatible plugin'}: " if synthetic else
                          "last time's answer: ") + opts[default][3])
             else:
                 quick = False                         # it no longer fits: show everything and ask
@@ -6258,8 +6285,27 @@ def _conflict_session(args, ranked, name_of, masters, total_new, plugins=(), lab
                     forget_now(pair_key)
             continue
         what, x, y, label = opts[ans]
+        if what == "lose":
+            try:
+                if not args.dry_run:
+                    add_conflict_blacklist(game_dir, x, f"vs {y}")
+            except OSError as e:
+                print(f"ERROR: could not save {x} as always losing: {e}", file=sys.stderr)
+                continue
+            lost.append(x)
+            more = sum(1 for k, _c in ranked[i:] if x.lower() in k)
+            print(f"    -> {x} always loses" + (f" ({more} more conflict(s) of it dropped)" if more else "")
+                  + (" (dry run: not saved)" if args.dry_run else f" (saved in {CONFLICT_BLACKLIST_FILE})"))
+            continue
         if what == "off" and c.get("incompatible"):
             kept_winners.add(y.lower())
+            if not because and (x.lower(), y.lower()) not in loss_records:      # a loss that came from a record is not a new one
+                loss_records.append((x.lower(), y.lower()))
+                if not args.dry_run:
+                    try:
+                        add_incompatible_loser(game_dir, x, y)
+                    except OSError as e:
+                        print(f"ERROR: could not save that {x} lost to {y}: {e}", file=sys.stderr)
         answered[pair_key] = {"do": what, "plugin": x, "pair": [A, B], "when": time.strftime("%Y-%m-%d %H:%M")}
         if what == "off":
             answered[pair_key]["affected"] = [active_names.get(n, name_of.get(n, n)) for n in off_plans[ans]]
@@ -6302,7 +6348,7 @@ def _conflict_session(args, ranked, name_of, masters, total_new, plugins=(), lab
         winners.update(new_winners)
         write_cell_winners(game_dir, winners)
         print(f"\nRecorded {len(new_winners)} rebuilt interior choice(s) in {CELL_WINNERS_FILE}.")
-    if not new_rules and not turned_off and not new_winners:
+    if not new_rules and not turned_off and not new_winners and not lost:
         print("\nNo new rules and no plugins turned off." + (" (Earlier runs' conflict rules were removed; run --sort so the order follows your own rules.)" if remove_earlier else ""))
         if unresolved and not strict_saves:
             print("ERROR: incompatible plugins remain active; choose a side before building patches.")
@@ -8833,7 +8879,7 @@ def compute_order(plugins, rule_sets, current_order):
     # Hard rule: plugins in the conflict blacklist always lose: each loads as early as its masters allow
     # (an .esm among the .esm files, an .esp right after them / the ESM fixes patch)
     try:
-        black = read_conflict_blacklist(os.path.dirname(os.path.dirname(os.path.abspath(plugins[0][1]))), create=False)
+        black = read_conflict_blacklist(os.path.dirname(os.path.dirname(os.path.abspath(plugins[0][1]))))
     except (IndexError, OSError):
         black = []
     if black:

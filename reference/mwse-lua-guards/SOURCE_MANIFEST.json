@@ -1,6 +1,6 @@
 {
   "Description": "The user's mw* MWSE Lua suite as it is in the Steam Morrowind install, copied byte for byte. dejespreplacements (formerly mwespreplacements) is excluded (user's personal load-order patches).",
-  "CopiedAt": "2026-11-25 (sync.py)",
+  "CopiedAt": "2026-11-26 (sync.py)",
   "Files": [
     {
       "Path": "metadata/mwcustomclasspersistence-metadata.toml",
@@ -110,16 +110,16 @@
     {
       "Path": "mods/mwguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwguard\\main.lua",
-      "SHA256": "8eec987b14c335e2fd3b18cacb3cd611967fed35a0a93c7677e2172e2dbb11ab",
-      "Length": 21145,
-      "SourceModified": "2026-11-25T19:04:24"
+      "SHA256": "5d6e477f084ccd262db1ac006afc05743e8c0530bacdbe775ef55680248520f8",
+      "Length": 24315,
+      "SourceModified": "2026-11-25T21:43:00"
     },
     {
       "Path": "mods/mwhangwatch/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwhangwatch\\main.lua",
-      "SHA256": "893b94d56342a9a641700f56753548e8c47d06c4b66e09ec64ed64b054b88c41",
-      "Length": 38732,
-      "SourceModified": "2026-11-25T16:12:42"
+      "SHA256": "27511dbf6a47b5af49c486a3be3f897b3584588af750c6a9ac5db43a54d85d34",
+      "Length": 35856,
+      "SourceModified": "2026-11-25T21:28:01"
     },
     {
       "Path": "mods/mwinfoloop/main.lua",
@@ -715,6 +715,13 @@
       "SHA256": "a853e51560083e926468ce9986859b8102070b89a0721696dd04d986bd9bd132",
       "Length": 1073,
       "SourceModified": "2026-11-25T20:24:04"
+    },
+    {
+      "Path": "mods/mwhangwatch/mcm.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwhangwatch\\mcm.lua",
+      "SHA256": "b2fc0de32b83ad19b206b5c22073c2d7fb4f97807c7afa215f9f9811e72555cf",
+      "Length": 2988,
+      "SourceModified": "2026-11-25T21:28:01"
     }
   ]
 }
