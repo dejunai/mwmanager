@@ -324,16 +324,6 @@
       "source_sha256": "3816215942a00f87a5c031b2f929736926a0d56469054c1d09e4ddc3d446eff9",
       "snapshot_sha256": "3816215942a00f87a5c031b2f929736926a0d56469054c1d09e4ddc3d446eff9",
       "working_sha256": "3816215942a00f87a5c031b2f929736926a0d56469054c1d09e4ddc3d446eff9"
-    },
-    {
-      "name": "dialog conflict blacklist",
-      "source": "<Steam Morrowind>\\mwdialog_check.conflict.blacklist.txt",
-      "snapshot": "tools\\steam-upstream\\mwdialog_check.conflict.blacklist.txt",
-      "working": "mwmanager_conflict_blacklist.txt",
-      "working_copy_action": "preserve Morrowind-manager filename and local comments; merge plugin patterns from Steam source",
-      "source_sha256": "f898f0b6151b238210f2b601abc6bdc7563bcd283cb7808c590b8aadb140cc98",
-      "snapshot_sha256": "f898f0b6151b238210f2b601abc6bdc7563bcd283cb7808c590b8aadb140cc98",
-      "working_sha256": "181ada2e4214520444661f0fcd3b6ab639333b0e7cee63e4131494f63983a1d4"
     }
   ],
   "tracked_assets": [],

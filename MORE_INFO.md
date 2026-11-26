@@ -1,6 +1,6 @@
 # MWManager: more information
 
-This is the detailed companion to [`README.md`](README.md). First-run checks, tools you install yourself, and OpenMW-in-staging behaviour stay in [`PREREQUISITES.md`](PREREQUISITES.md). The Steam tools MWManager runs unchanged have their own [`tools/steam-upstream/README.md`](tools/steam-upstream/README.md) and [`tools/steam-upstream/MORE_INFO.md`](tools/steam-upstream/MORE_INFO.md).
+This is the detailed companion to [`README.md`](README.md). First-run checks, tools you install yourself, and OpenMW-in-staging behaviour stay in [`PREREQUISITES.md`](PREREQUISITES.md). The Steam tools MWManager runs unchanged have their own [`tools/steam-upstream/README.md`](tools/steam-upstream/README.md) and [`tools/steam-upstream/docs/MORE_INFO.md`](tools/steam-upstream/docs/MORE_INFO.md).
 
 MWManager needs **Python 3.9 or newer**.
 
