@@ -74,6 +74,7 @@ class NoNewToolStateInTheGameFolder(unittest.TestCase):
             (game / "Morrowind.ini").write_text("[Game Files]\n", encoding="utf-8")
             manager = Path(tmp) / "manager"
             with mwmanager_upstream.use_manager_dir(manager) as scanner:
+                self.assertEqual(Path(mwdialog_hashes.RECORD_DIR), Path(scanner.OUTPUT_DIR))
                 record = mwdialog_hashes.record_path(str(game / "Data Files"))
                 self.assertEqual(Path(record), Path(scanner.OUTPUT_DIR) / "mwdialog_play_hashes.json")
                 self.assertNotEqual(Path(record).parent, game)

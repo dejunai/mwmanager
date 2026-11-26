@@ -115,6 +115,7 @@ def module_state_names(manager_dir):
                                  "SIZES_RECORD": own("mwmanager_master_sizes.json"),
                                  "FACTS_FILE": own("mwmanager_mastercheck_facts.json")},
         "mwdialog_longpaths": {"RECORD": os.path.join(manager_dir, "outputs", "mwmanager_longpaths.json")},
+        "mwdialog_hashes": {"RECORD_DIR": os.path.join(manager_dir, "outputs")},
         "mwdialog_assets": {"CACHE_DB": os.path.join(manager_dir, "outputs", "mwmanager_asset_cache.sqlite"),
                             "CACHE_FILE": os.path.join(manager_dir, "outputs", "mwmanager_asset_cache.json"),
                             "UNUSED_RECORD": os.path.join(manager_dir, "outputs", "mwmanager_unused_assets.txt"),
@@ -194,8 +195,8 @@ def cell_fixes_report_path(_game_dir):
 # folder. MWManager keeps them out of the game install, with its own records and reports: the older upstream
 # records already have absolute MWManager paths (state_names), these two have their own place, and any other
 # record, cache, log or report a sync adds is never created in a game folder; it goes to outputs. A file that is
-# already there (one the player keeps in the game folder) is still used where it is. Without the rule each new
-# upstream record landed in the game root (mwdialog_play_hashes.json, CR-28 stress run).
+# already there (one the player keeps in the game folder) is still used where it is. The --play hash record is set through mwdialog_hashes.RECORD_DIR
+# (outputs), which also moves an older copy out of the game folder.
 _STATE_ROUTES = {"mwdialog_soundfix_report.txt": output_file, "mwdialog_patch_inputs.json": manager_file}
 
 
