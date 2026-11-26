@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import contextlib
 import sqlite3
 import stat
 import subprocess
@@ -1252,6 +1253,19 @@ def settle_altered_assets(data_dir: Path, label: str, choice: str) -> int:
     return len(files)
 
 
+
+@contextlib.contextmanager
+def _catalog(path):
+    """sqlite3.connect(path) as a context that also closes the connection. A bare sqlite3 connection used as a
+    context manager only commits: the file stayed open, so removing a deployment could not delete its catalog
+    rollback copy and failed after the removal itself had finished (WinError 32, CR-28 stress run)."""
+    connection = sqlite3.connect(path)
+    try:
+        with connection:
+            yield connection
+    finally:
+        connection.close()
+
 def _op_key(op: dict) -> str:
     return str(op.get("target_relative") or op.get("target") or "").replace("/", "\\").casefold()
 
@@ -1340,7 +1354,7 @@ def index_deployment(manager: Path, data_dir: Path, plugins: list[str], archives
     except OSError:
         pass
     priority = {name.casefold(): index + 3 for index, name in enumerate(active_order)}
-    with sqlite3.connect(db_path) as db:
+    with _catalog(db_path) as db:
         catalog_module.create_schema(db, schema)
         for index, plugin in enumerate(plugins):
             path = data_dir / plugin
@@ -1376,7 +1390,7 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
     catalog_backup = None
     if catalog_path.is_file():
         catalog_backup = manager / f".{catalog_path.name}.{uuid.uuid4().hex}.rollback"
-        with sqlite3.connect(catalog_path) as source, sqlite3.connect(catalog_backup) as destination:
+        with _catalog(catalog_path) as source, _catalog(catalog_backup) as destination:
             source.backup(destination)
 
     try:
@@ -1452,7 +1466,7 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
                                "label": deployment.get("label"), "mod": deployment.get("mod")})
             unregister_archives(ini_path, deployment.get("registered_archives", []))
             if catalog_path.is_file():
-                with sqlite3.connect(catalog_path) as db:
+                with _catalog(catalog_path) as db:
                     for plugin in deployment.get("plugins", []):
                         db.execute("DELETE FROM esm_record WHERE lower(source_file)=lower(?)", (plugin,))
                     for archive in deployment.get("archives", []):
@@ -1461,14 +1475,14 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
         restored_plugins = [plugin for plugin in touched_plugins if (data_dir / plugin).is_file()]
         if touched_plugins and catalog_path.is_file():
             absent_plugins = [plugin for plugin in touched_plugins if not (data_dir / plugin).is_file()]
-            with sqlite3.connect(catalog_path) as db:
+            with _catalog(catalog_path) as db:
                 for plugin in absent_plugins:
                     db.execute("DELETE FROM esm_record WHERE lower(source_file)=lower(?)", (plugin,))
                 db.commit()
         restored_archives = [name for name in touched_archives if (data_dir / name).is_file()]
         absent_archives = [name for name in touched_archives if not (data_dir / name).is_file()]
         if catalog_path.is_file() and absent_archives:
-            with sqlite3.connect(catalog_path) as db:
+            with _catalog(catalog_path) as db:
                 for archive in absent_archives:
                     db.execute("DELETE FROM bsa_asset WHERE lower(archive_file)=lower(?)", (archive,))
                 db.commit()
@@ -1527,7 +1541,10 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
         raise
     finally:
         if catalog_backup:
-            catalog_backup.unlink(missing_ok=True)
+            try:
+                catalog_backup.unlink(missing_ok=True)
+            except OSError:
+                pass       # a leftover rollback copy is harmless; failing a finished removal over it is not
     for recovery, _target, _backup in recoveries:
         if recovery:
             recovery.unlink(missing_ok=True)

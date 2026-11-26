@@ -136,9 +136,13 @@ _TOP_LEVEL_RE = re.compile(r"^(?:(?:Tidy|Options) [^:]+: |Tidy changes: |Running
                            r"|Extracting |Staged |Asset |Missing assets |Applying |Deploy|Cataloguing|# --full|--full"
                            r"|==== |MWMANAGER-STAGE:)")
 _DROP_TOP_RE = re.compile(r"^(?:={10,}\s*$|ASSET CHECK\b|vortex_tidy plan,|Full plan:|Plan\s*$|Lua check:"
-                          r"|Nothing changed\. Purge in Vortex|The plan matches the one you reviewed)")
+                          r"|Nothing changed\. Purge in Vortex|The plan matches the one you reviewed"
+                          # a refused --apply MWManager retries itself ("Tidy found more to do on that pass; starting
+                          # again"): the CLI's "run vortex_tidy.py --apply again" is not for the GUI user (CR-28)
+                          r"|REFUSED: the plan |The plan you reviewed was saved as|Review \S.* then run vortex_tidy"
+                          r"|\(--undo --only )")
 _DROP_DETAIL_RE = re.compile(r"^\s+(?:ERROR|WARNING|WARN|INFO|NOTE|FIXED|REPAIRED|PATCHED|NOT PATCHED|SKIPPED)\b"
-                             r"|^\s+->|^\s+\d+ texture\(s\) without mipmaps")
+                             r"|^\s+->|^\s+\d+ texture\(s\) without mipmaps|^\s+0 asset issue\(s\), 0 repairable\s*$")
 
 
 # The --all check / Generate Patches report outside Tidy (CR-28 stress run: the job window showed all of it).
@@ -260,7 +264,9 @@ class UserOutput:
                 or (self.package and stripped == self.package):
             self.skip_children_of = indent
             return []
-        if stripped.endswith("Journal:"):
+        if stripped.endswith("Journal:") or re.search(r"\. Journal: [A-Za-z]:[\\/]", stripped):
+            # "... applied. Journal:" with the path on the next line, or (a shorter line, CR-28 stress run) on this
+            # one: either way the path and its --undo hint go to the detail log
             self.skip_children_of = indent
             return [text[:text.rfind("Journal:")].rstrip()]
         text = re.sub(r"\s*\((?:details in|run with --apply)[^)]*\)", "", text)

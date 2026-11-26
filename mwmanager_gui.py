@@ -1194,6 +1194,14 @@ def play_blocked_reason(settings):
             "then Play.")
 
 
+def chosen_rows(ticked, highlighted, known):
+    """The rows a "...Selected" button acts on: the ticked ones, or, when none is ticked, the highlighted ones. In
+    the CR-28 stress run a row clicked outside its tick box was highlighted (blue, "selected") and its scan notes
+    shown, but Deploy All Except Selected deployed it anyway and Deploy Selected said nothing was selected."""
+    rows = [iid for iid in known if iid in ticked]
+    return rows or [iid for iid in known if iid in set(highlighted)]
+
+
 def deployed_files_line(label, linked, skipped):
     """The job-window line for one deployed package. "Deployed 0 files from X" read as a failure in the CR-28
     stress run: it meant every file was already in place (a re-run after a stop), or the options chosen left
@@ -1216,6 +1224,10 @@ def staged_folder_choices(others):
         choices.insert(1, (f"Reprocess this and the {others} other left-over folder{'' if others == 1 else 's'}",
                            "reprocess_all"))
     return choices
+
+
+PATCHES_UP_TO_DATE = ("Patches are already up to date for this load order, so there is nothing to generate. "
+                      "Ctrl-click Generate Patches to rebuild them anyway.")
 
 
 def startup_ready_status(settings, play_enabled):
@@ -3017,10 +3029,13 @@ class ManagerGUI(tk.Tk):
             self._install_plugin_archives(chosen)
 
         ttk.Button(footer, text="Deploy Selected",
-                   command=lambda: close_then_install([by_id[i] for i in sorted(selected, key=lambda x: list(by_id).index(x))])).pack(side="right")
+                   command=lambda: close_then_install([by_id[i] for i in chosen_rows(selected, tree.selection(), by_id)])
+                   ).pack(side="right")
         ttk.Button(footer, text="Deploy All Except Selected",
-                   command=lambda: close_then_install([item for iid, item in by_id.items()
-                                                        if iid not in selected and not item["blocked"]])).pack(side="right", padx=(0, 6))
+                   command=lambda: close_then_install([
+                       item for iid, item in by_id.items()
+                       if iid not in chosen_rows(selected, tree.selection(), by_id) and not item["blocked"]])
+                   ).pack(side="right", padx=(0, 6))
         ttk.Button(footer, text="Auto Deploy",
                    command=lambda: close_then_install([item for item in items if not item["blocked"]])).pack(side="right", padx=(0, 6))
         ttk.Button(footer, text="Skip", command=dialog.destroy).pack(side="right", padx=(0, 6))
@@ -3552,7 +3567,7 @@ class ManagerGUI(tk.Tk):
         tree.bind("<Button-1>", toggle)
 
         def remove_selected():
-            chosen = [by_id[iid] for iid in by_id if iid in selected]
+            chosen = [by_id[iid] for iid in chosen_rows(selected, tree.selection(), by_id)]
             if not chosen:
                 messagebox.showinfo("Nothing selected", "Select one or more tracked deployments.", parent=dialog)
                 return
@@ -3661,6 +3676,9 @@ class ManagerGUI(tk.Tk):
             signature = self._current_generation_signature()
             if (not self.new_plugins()
                     and signature == self.gui_state.get("generated_signature")):
+                # the click did nothing and said nothing (CR-28 stress run round 3)
+                self.status.set(PATCHES_UP_TO_DATE)
+                messagebox.showinfo("Patches are up to date", PATCHES_UP_TO_DATE, parent=self)
                 return
         if not self.save():
             return
@@ -3849,12 +3867,12 @@ class ManagerGUI(tk.Tk):
         import mwmanager_core_game_files as core_files
         if self.play_button.instate(["disabled"]):
             # The button looked enabled (files changed since the last refresh) and the click did nothing: say why
-            # (CR-28 stress run). An altered core file is often the reason, so that check still runs first.
-            core_files.ensure_core_game_files_for_play(
-                self.settings["game_dir"], notify="gui", parent=self, cli=False)
+            # (CR-28 stress run).
             title, text = play_blocked_reason(self.settings)
             self.status.set(text)
-            messagebox.showinfo(title, text, parent=self)
+            # the core check's own dialog said "Play will continue." while Play stayed unavailable (CR-28 round 3):
+            # an altered core file leads this message instead
+            messagebox.showinfo(title, core_file_hint(self.settings["game_dir"], APP_DIR) + text, parent=self)
             return
         core_files.ensure_core_game_files_for_play(
             self.settings["game_dir"], notify="gui", parent=self, cli=False)
