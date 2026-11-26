@@ -3214,6 +3214,26 @@ def record_pending_options(output_dir: Path, mod_dir: Path, records: list[dict],
     return waiting
 
 
+ACTIVE_BATCH_FILE = "mwmanager_active_batch.json"      # mwmanager_batch.ACTIVE_MANIFEST, under outputs
+
+
+def _batch_selected_masters(output_dir: Path) -> set[str] | None:
+    """The masters the running major-master batch stages (the confirmed Review major masters selection, required
+    masters included), casefolded; None when no major-master batch is running or it names no masters."""
+    try:
+        manifest = json.loads((Path(output_dir) / ACTIVE_BATCH_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(manifest, dict) or manifest.get("kind", "major_masters") != "major_masters":
+        return None
+    packages = manifest.get("packages")
+    if not isinstance(packages, dict):
+        return None
+    chosen = {str(name).casefold() for package in packages.values() if isinstance(package, dict)
+              for name in (package.get("selected_masters") or [])}
+    return chosen or None
+
+
 def held_options(records: list[dict], chosen: set[str], installed: set[str]) -> set[str]:
     """Chosen options held back: one of their plugins needs a master that is neither installed nor staged."""
     from needed_mods import names_mod
@@ -3311,9 +3331,16 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
     # Masters later in this install batch (TR, PC, SHotN, ...) are not staged yet but will be installed.
     try:
         plan = json.loads((output_dir / "mwmanager_core_addon_plan.json").read_text(encoding="utf-8"))
-        installed.update(m.casefold() for m in plan.get("ordered_install_masters", []))
+        planned = {m.casefold() for m in plan.get("ordered_install_masters", [])}
     except (OSError, ValueError, AttributeError):
-        pass
+        planned = set()
+    coming = _batch_selected_masters(output_dir)
+    if coming is not None:
+        # the plan lists every master the downloads scan found, also the ones unticked in Review major masters:
+        # only the masters the running batch stages are coming (CR-27 loop 1: Wares 'OAAB to Wares' / PC options
+        # deployed without OAAB_Data / Cyr_Main because the plan still listed them)
+        planned &= coming
+    installed.update(planned)
     eligible = []
     for p in sorted(staging.iterdir(), key=lambda x: x.name.casefold()):
         if p.name.startswith("."):
