@@ -16,6 +16,20 @@ import core_addons  # noqa: E402
 import mock_fomod  # noqa: E402
 import plugin_install  # noqa: E402
 
+
+def _selector(test, *args):
+    """mock_fomod._show_selector, skipping the test when Tk could not start: the selector reports that itself
+    (prints "Tk option window unavailable" and leaves the selection unchanged) instead of raising, and the 3.9
+    venv's Tk now and then fails to read init.tcl."""
+    out = io.StringIO()
+    with mock.patch("sys.stdout", out):
+        chosen = mock_fomod._show_selector(*args)
+    if "Tk option window unavailable" in out.getvalue() or "Tk is unavailable" in out.getvalue():
+        test.skipTest(f"Tk unavailable: {out.getvalue().strip()[:200]}")
+    sys.stdout.write(out.getvalue())
+    return chosen
+
+
 MASTER = "OAAB_Data 49042 2.7.5 2026-11-05T04-50Z sZJEZCNJ.zip"
 HD = "OAAB_Data (HD) 49042 2.7.0 2026-09-25T18-23Z AbOYby57.zip"
 VOICE = "OAAB Data 60274 4 2026-11-02T08-23Z 8MahMSPa.zip"
@@ -153,7 +167,7 @@ class Companions(unittest.TestCase):
         with mock.patch.object(tk.Tk, "mainloop", click_select_all), \
                 mock.patch("mwmanager_dialogs._prompt", return_value=True):
             try:
-                chosen = mock_fomod._show_selector("TR", records, set(), set(), {"companion:voice"})
+                chosen = _selector(self, "TR", records, set(), set(), {"companion:voice"})
             except tk.TclError as exc:
                 self.skipTest(f"Tk unavailable: {exc}")
         self.assertEqual(chosen, {r["key"] for r in records})
@@ -279,7 +293,7 @@ class Companions(unittest.TestCase):
                     "group_key": "companion:voice", "group_label": "Voice packs", "selection_type": "SelectAny"}]
         with mock.patch.object(tk.Tk, "mainloop", lambda window: window.destroy()),                 mock.patch("mwmanager_dialogs._prompt", return_value=True):
             try:
-                mock_fomod._show_selector("Tamriel Data", records, set(), set())
+                _selector(self, "Tamriel Data", records, set(), set())
             except tk.TclError as exc:
                 self.skipTest(f"Tk unavailable: {exc}")
         self.assertNotIn("utility_folder", records[0])
@@ -315,11 +329,9 @@ class Companions(unittest.TestCase):
 
         with mock.patch.object(tk.Tk, "mainloop", look), mock.patch("mwmanager_dialogs._prompt", return_value=True):
             try:
-                mock_fomod._show_selector("X", records, set(), set())
+                _selector(self, "X", records, set(), set())
             except tk.TclError as exc:
                 self.skipTest(f"Tk unavailable: {exc}")
-        if not found:                                         # Tk failed to start: the selector said so and left
-            self.skipTest("Tk unavailable: the option window never opened")   # the selection unchanged
         self.assertEqual(found["radios"], 8)                  # both one-choice groups rendered as radios
         self.assertEqual(found["boxes"], [])
 

@@ -1530,21 +1530,29 @@ def _write_package_asset_bug_reports(ares):
         ah.update_bug_report(report_path, "vortex_tidy (files)", header, lines)
 
 
-def _ensure_dummy_assets(data_files, log=print):
-    """Copy the stand-ins (mwmanager_dummy*.nif/.kf) out of the game's Morrowind.bsa before the missing-asset pass.
-    A staged Tidy runs outside the game folder with no mwdialog_check run behind it, so upstream's dummy_path
-    can't find Morrowind.bsa by itself; given the game folder it copies each stand-in once and keeps it."""
+def _stand_ins_from_game(data_files):
+    r"""While the missing-asset pass runs, a stand-in (mwmanager_dummy*.nif/.kf) is copied out of this game's
+    Morrowind.bsa the first time one is needed, into MWManager's generated outputs\dummy folder (never the game
+    install, never shipped). A staged Tidy runs outside the game folder with no mwdialog_check run behind it, so
+    upstream's dummy_path can't find Morrowind.bsa by itself: this gives it the game folder of data_files."""
+    import contextlib
     if not data_files:
-        return []
+        return contextlib.nullcontext()
     import mwdialog_media as media
-    game_dir = os.path.dirname(os.path.abspath(data_files))
-    made = []
-    for name in sorted(media.DUMMY_SOURCES):
+    game = os.path.dirname(os.path.abspath(data_files))
+    upstream = media.dummy_path
+
+    def dummy_path(name, game_dir=None):
+        return upstream(name, game_dir or game)
+
+    @contextlib.contextmanager
+    def scope():
+        media.dummy_path = dummy_path
         try:
-            made.append(media.dummy_path(name, game_dir))
-        except OSError as exc:
-            log(f"Stand-in {name} not available ({exc}).")
-    return made
+            yield
+        finally:
+            media.dummy_path = upstream
+    return scope()
 
 
 def assets_apply(args, ares, moved_mods=()):
@@ -1594,9 +1602,9 @@ def assets_apply(args, ares, moved_mods=()):
         result = _upstream_assets_apply(args, ares, moved_mods)
         _write_package_asset_bug_reports(ares)
         try:
-            _ensure_dummy_assets(GAME_DATA_FILES or ares.get("data_dir"))
-            ops = resolve_missing_assets(args.staging, sorted(ares["mods"]), ares["data_dir"],
-                                         ah.shared_cache(game_dir))
+            with _stand_ins_from_game(GAME_DATA_FILES or ares.get("data_dir")):   # copied when first needed
+                ops = resolve_missing_assets(args.staging, sorted(ares["mods"]), ares["data_dir"],
+                                             ah.shared_cache(game_dir))
             for plugin, operations in ops.items():
                 by_plugin.setdefault(plugin, []).extend(operations)
         except Exception as e:                       # never stops Tidy: --full resolves whatever is left

@@ -100,6 +100,8 @@ def state_names(manager_dir):
         "PATHGRID_CACHE_FILE": os.path.join(out, "mwmanager_pathgrid_cache.json"),
         "MISSING_NORMALS_RECORD": os.path.join(out, "mwmanager_missing_normal_maps.txt"),
         "FULLSIZE_DIR": os.path.join(manager_dir, "backups", "fullsize_textures"),
+        # stand-ins copied out of Morrowind.bsa when first needed: generated, never shipped, never in a game install
+        "DUMMY_DIR": os.path.join(out, "dummy"),
     }
     names["LOAD_ORDER_PATH"] = names["LOAD_ORDER_FILE"]
     names["IGNORED_NORMALS_RECORD"] = names["MISSING_NORMALS_RECORD"]
@@ -116,6 +118,7 @@ def module_state_names(manager_dir):
                                  "FACTS_FILE": own("mwmanager_mastercheck_facts.json")},
         "mwdialog_longpaths": {"RECORD": os.path.join(manager_dir, "outputs", "mwmanager_longpaths.json")},
         "mwdialog_hashes": {"RECORD_DIR": os.path.join(manager_dir, "outputs")},
+        "mwdialog_media": {"DUMMY_DIR": os.path.join(manager_dir, "outputs", "dummy")},   # see state_names
         "mwdialog_assets": {"CACHE_DB": os.path.join(manager_dir, "outputs", "mwmanager_asset_cache.sqlite"),
                             "CACHE_FILE": os.path.join(manager_dir, "outputs", "mwmanager_asset_cache.json"),
                             "UNUSED_RECORD": os.path.join(manager_dir, "outputs", "mwmanager_unused_assets.txt"),
@@ -253,7 +256,8 @@ EARLY_CELL = "mwmanager early placeholders"
 FIX_TAG = "; [mwmanager] "
 PROMOTED_START = ";; ==== MWManager content rules promoted to masters (written by mwmanager --sort; don't edit) ===="
 # Stand-ins: the game's own files, never shipped. Upstream's dummy_path copies each out of the player's
-# Morrowind.bsa into "dummy assets" the first time it is needed (icons and textures are made in code)
+# Morrowind.bsa the first time it is needed, into DUMMY_DIR = outputs\dummy (state_names; icons and textures are
+# made in code). Nothing in the manifests: the folder exists only once a stand-in was needed.
 DUMMY_NIF = "mwmanager_dummy.nif"
 DUMMY_KF = "mwmanager_dummy.kf"
 DUMMY_MARKER_NIF = "mwmanager_dummy_marker.nif"

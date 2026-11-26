@@ -49,14 +49,16 @@ def propagate(home, before, names):
     home did not have before: the value the upstream modules have, all of them the same one)."""
     mods = [m for m in upstream_modules() if m is not home]
     for name in names:
+        new = vars(home)[name]
         if name in before:
             old = before[name]
         else:
-            held = [vars(m)[name] for m in mods if name in vars(m)]
+            # a module whose name means something else (another type: vortex_tidy's DUMMY_SOURCES is a file name,
+            # mwdialog_media's the stand-in table) is not a copy and must not stop the others from being replaced
+            held = [vars(m)[name] for m in mods if name in vars(m) and type(vars(m)[name]) is type(new)]
             if not held or any(not _same(h, held[0]) for h in held):
                 continue
             old = held[0]
-        new = vars(home)[name]
         for mod in mods:
             d = vars(mod)
             if name in d and _same(d[name], old):
