@@ -1,3 +1,116 @@
+# docs/dev: pre-implementation design notes removed (2026-11-26)
+
+- Removed `docs/dev/MWCRIMINAL_DESIGN.md`, `MWCOMPANIONS_DESIGN.md` and `MWCONSOLE_DESIGN.md`: notes written before the
+  code, not for users. The credits stay on each mod's MCM Credits page. `test_mwsuite_credits.py` no longer reads them
+  (`test_doc_credits_list_every_mcm_entry` removed; the MCM Credits and self-credit tests are unchanged).
+  `docs/dev/LUA_MOD_BUGS.md`, `LUAFIX_KP_HANDOFF.md` and `TODO.md` stay.
+
+# luafix: general rules first, Known Bugs only where no rule matches; KP1-KP4 removed (2026-11-26)
+
+- Rule order: the general rules run before the Known Bugs table. A Known Bugs part whose text a high-confidence rule
+  edit also changes is dropped (the rule fixes it); a whole-or-nothing entry keeps its text and the overlapping rule
+  edit is reported (`not applied: Known Bugs KBn repairs this text`). `RULES_REV` 5, so cached plans are re-read.
+- New rules: `Y1` (syntax LuaJIT always rejects: a call's `(` on a later line than the function, moved up with the
+  line break kept; two literals on separate lines in a table with no `,`; this repair runs only on a file LuaJIT
+  rejects and is kept only if the file then compiles), `F3` (a value that can only be true/false concatenated into
+  log text: `tostring()`).
+- Extended: `I1` looks in `icons\` and in the loaded BSAs (`Morrowind.bsa`, `Morrowind.ini` `[Archives]`), fixes
+  `x.dds.dds`, and at medium points a path at its only file one folder off. `A3` covers `tes3.getCurrentWeather`
+  (high) and `tes3.getPlayerCell` / `tes3.getPlayerRef` (medium). `R1` is a fix (a safe handle when the timer starts;
+  the callback returns once the reference is gone). At medium: `H2` cancels a kept timer handle before restarting,
+  `H4` reads a top-level `local X = tes3.worldController.y` in `main.lua` again where it is used, `A1` covers a name
+  that is a reference by its fields (writes guarded with `supportsLuaData`).
+- Retired (a rule now makes the same repair, every part "same" in a read-only comparison over the installed mods):
+  `KB5`, `KB51`, `KB28` (`Y1`); `KB21`, `KB22`, `KB24`, `KB27` (`I1`). They are regression fixtures:
+  `tests/fixtures/luafix_retired_kb.py`, `tests/test_luafix_retired_kb.py`. 46 Known Bugs ids remain.
+- Removed: `KP1`-`KP4` (frame-drain patches of Attend Me, Keg Drip and G7 Containers): they fixed no bug. Handoff to
+  mwsuite as intercept candidates: `docs/dev/LUAFIX_KP_HANDOFF.md`. A file already patched keeps the patch (luafix no
+  longer applies or removes it); `--undo` of that run or a reinstall restores the original. No mod loses a bug fix.
+- Policy: a new `KB`/`KR` entry must end its description with `(no rule can express this: <why>)`;
+  `tests/test_luafix_kb_policy.py` enforces it for every id not in the 2026-11-26 table.
+- `diag/luafix_kb_compare.py` (dev, read-only): compares each Known Bugs part with what the rules alone make of the
+  released text and lists the new rules' findings outside Known Bugs files. Tests: `tests/test_luafix_general_rules.py`.
+
+# tes3conv is vendored under third_party/tes3conv, with its licenses (2026-11-26)
+
+- The official v0.4.1 Windows `tes3conv.exe` (Greatness7, MIT; SHA-256 `3c259868...0b40`, the pin `tes3diff.py` already
+  used; 2.9 MB) is now in the repository at `third_party/tes3conv/`, with `LICENSE` (tes3conv), `LICENSE-tes3` (the tes3
+  library it is built on), `LICENSE-mimalloc_rust` and a `NOTICE.md` (source URL, tag `v0.4.1` = `6dc51f7`, the build's
+  tes3 and mimalloc revisions, checksums). tes3conv's v0.4.1 tag has no license file: `LICENSE` is the one added nine
+  minutes later by the next commit (`0d66873`, a LICENSE-only change). The tes3 crate says "MIT OR Apache-2.0" but its
+  repository holds only the MIT text, which is what ships.
+- `deploy_manifest.txt` ships `third_party/**`; `sync.py` always carries `third_party/` into MWManager (listed in
+  COPY_MANIFEST.json); a program is now compared byte for byte (only text ignores a CRLF/LF difference). Either way
+  the program and its license files go together. `tests/test_tes3conv_vendored.py`: the hash is the pin, the licenses
+  and notice exist, every program under `third_party` has licenses beside it, git tracks all of it (no LFS, not
+  ignored), and deploy's list carries them with the program. `tests/test_sync.py`: sync carries the program and all
+  licenses byte for byte and lists them.
+- `tes3diff.py` looks in `third_party\tes3conv\` right after `--tes3conv` (then `TES3CONV`, `PATH`, the dev folders;
+  `TES3CONV=off` still switches all but `--tes3conv` off). tes3diff.py itself is still repository-only; the golden
+  tests now run wherever the repository does instead of skipping.
+
+# F1 report: shimmed, high only where a patch is planned; the cache knows the shim version (2026-11-26)
+
+- Seen in tidy's Lua check: "F1: 138 high" with no repair planned. Cause (read only, Dej's real staging and the real
+  asset cache): the cache said, per file, whether the embedded log shim is out of date, but not which shim version
+  that was judged against. 61 files had been cached while their v6 shim was current; after the v7 shim shipped the
+  cache still said "current", so no upgrade was planned (want_shim false, no patch) while the file's F1 triggers
+  were still promoted to high. Judged fresh, 136 of the 138 are v6 shims that the plan upgrades to v7; no mod has a
+  current shim yet; the other 2 (The Crafting Framework: handlers that log through a logger made elsewhere, which
+  the shim cannot wrap) could never be patched.
+- The cache key now includes the shim version and text (`cfg_hash`), and an entry records the shim state of the file
+  (none / current / old); older entries are read again once.
+- F1 triggers are now settled after the patch decision: `high` only where the shim patch reaches them (their file
+  gets it, or the mod has a logger the patch wraps; a refused patch still counts: it is the action the plan wants); `shimmed` ("already handled by the log shim (v7)") where the current shim
+  is already embedded - not counted as high, listed apart in the summary lines and the plan, no patch, no effect on
+  `--lua-level` or the plan; `report` ("no repair planned: ...") where no patch can reach it. After `--apply` a
+  shimmed line reads SHIMMED. Plan and `--apply` agree (cached or not).
+- Tests: `tests/test_logshim.py` (shimmed, needs shim, old shim upgrades, stale cache after a version change,
+  cached = uncached lines, unreachable logger, status after apply).
+
+# Multipatch: beast skeleton for beast-race NPCs (2026-11-26; rule by dej / dejunai)
+
+- `--multipatch` now gives an NPC the beast skeleton when its race is a beast race (the winning RACE record's RADT
+  beast flag, so a later race override is followed; no list of ids) and its winning NPC_ record has no model, an
+  empty one, or a humanoid skeleton (`base_anim.nif`, `base_anim_female.nif` and their 1st-person/`x` forms). The
+  record (or the Multipatch's own merged record for that NPC) goes into the Multipatch with only MODL changed; the
+  patch hash record covers it as before. A beast skeleton (`animkna` in the file name) and any other model (a mod's
+  sitting, working or death pose) are left alone. The skeleton given: the one the NPC's plugin, else the race's
+  plugin, uses for most of its NPCs of that race when it is the mod's own `*animkna*` file; otherwise vanilla
+  `base_animkna.nif`, which Morrowind.esm uses for every Khajiit and Argonian NPC, women and men alike (there is no
+  female beast skeleton). `--no-beast-skeleton` turns it off; `--full` passes it on. A dry run lists each NPC.
+- Real load order (993 plugins, read only): 39 NPCs - 27 in MCA - Khajiit Diversity Revamped Addon (25 with no
+  model, two with base_anim/base_anim_female), 3 Telvanni Teleport Network, 3 Troxulgia, 2 Uvirith's Legacy,
+  2 Secrets of the Crystal City, 1 companionLeveler, 1 Balmora, The Weary Guar.
+- Tests: `tests/test_beast_skeleton.py`.
+
+# Stand-in files move to generated\dummy, created on first use; never shipped or synced (2026-11-26)
+
+- `mwdialog_media.dummy_path` kept the stand-ins (the Dwemer coin, an animation, the editor marker: the game's own
+  files, copied out of `Morrowind.bsa` when first needed) in a `dummy assets` folder next to the script. They now go
+  to `<tools>\generated\dummy\` (`conflict-tools\generated\` when installed), made only when the first one is
+  written. A caller can choose the folder with `mwdialog_media.DUMMY_DIR` or the `MWDIALOG_DUMMY_DIR` environment
+  variable, or route it through `mwdialog_paths.state_path(game, "dummy")` (MWManager: `outputs\dummy`); a route
+  into the game folder is ignored. An old `dummy assets` folder is left where it is and no longer used.
+- `deploy.py` never ships a `dummy`, `dummy assets` or `generated` folder, `tes3diff.py` or `gather_steam_lua.py`
+  (also excluded in `deploy_manifest.txt`); `sync.py` skips any path in such a folder and drops a manifest entry for
+  one (the file in MWManager is left alone). Tests: `tests/test_dummy_dir.py`, `tests/test_deploy.py`,
+  `tests/test_sync.py`; the suite keeps the stand-ins in each test's own folder (`conftest.py`).
+
+# tes3diff.py: record-level plugin diffs and golden tests through the optional tes3conv (2026-11-26)
+
+- New dev tool `tes3diff.py` (repository only: `deploy_manifest.txt` excludes it, documented under "Developer Tools").
+  It converts two plugins to JSON with Greatness7's tes3conv (https://github.com/Greatness7/tes3conv, MIT; pinned to
+  v0.4.1) and prints a normalized record-level diff (records matched by type and id, `path: old -> new` per changed
+  field). tes3conv is optional everywhere: found through `--tes3conv`, the `TES3CONV` environment variable (`off`
+  disables it), `PATH`, then an untracked dev tools folder beside the repository (`.devtools\`, `_devtools\`). The
+  program's SHA-256 is compared with the official v0.4.1 release asset's and a warning is printed on a mismatch. It
+  may lag the tes3 library, so newer records or fields may not round-trip. No shipped tool uses it.
+- `tests/test_tes3conv_golden.py`: golden tests on plugins vortex_tidy (a shortened model path edits one field of the
+  .esp) and mwdialog_check (the ESM patch, a text-fix patch, `write_patch`) write, built from fixtures; they use the
+  new `tes3conv` fixture in `conftest.py` and skip when the program is not found. `tests/test_tes3diff.py` tests the
+  lookup, the pin check and the diff without it.
+
 # sync.py is a repository tool, one way: repository -> MWManager (2026-11-26)
 
 - `sync.py` moved from the Steam install into the repository (dev only: `deploy_manifest.txt` excludes it, `deploy.py`

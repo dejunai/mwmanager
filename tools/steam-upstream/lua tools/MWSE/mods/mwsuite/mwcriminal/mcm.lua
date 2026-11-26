@@ -125,4 +125,23 @@ blacklist:createCategory({
     end,
 })
 
+-- Credits: the mods whose ideas mwcriminal borrows (listed with their authors and pages)
+local CREDITS = {
+    { mod = "Accidental Theft Protection", author = "Merlord",
+      idea = "Owned items and containers can only be taken or opened while sneaking, with a list of things that may be taken standing.",
+      url = "https://www.nexusmods.com/morrowind/mods/48264" },
+    { mod = "Door Locks (abotDoorLocks)", author = "abot",
+      idea = "Homes lock by time of day, place, faction and owner while public places stay open; knocking on a locked door and someone answering it; opening doors with keys kept on a keyring.",
+      url = "https://www.nexusmods.com/morrowind/mods/54754" },
+    { mod = "mwcompanionsneak", author = "dej (dejunai)",
+      idea = "Companion and creature sneak detection: followers, escorts and blacklisted actors never notice you sneaking (inspector, blacklist and settings), now part of mwcriminal." },
+}
+local credits = template:createPage({ label = "Credits" })
+credits:createInfo({ text = "mwcriminal is by dejunai. It borrows ideas from the mods below. Each link opens the original mod's page; please support their authors." })
+for _, c in ipairs(CREDITS) do
+    local cat = credits:createCategory(c.mod .. " - by " .. c.author)
+    cat:createInfo({ text = c.idea })
+    if c.url then cat:createHyperlink({ text = c.url, url = c.url }) end
+end
+
 template:register()

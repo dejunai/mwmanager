@@ -93,4 +93,24 @@ template:createExclusionsPage({
     },
 })
 
+-- Credits: the mods whose ideas mwcompanions borrows (listed with their authors and pages)
+local CREDITS = {
+    { mod = "Smart Companions", author = "abot",
+      idea = "Who counts as a follower; warping followers to you and moving them with you through doors; levitating and water walking with you; follower traits; no friendly fire; followers who collapse instead of dying; companions who join your fights; quiet followers after a cell change; not activating a follower while sneaking.",
+      url = "https://www.nexusmods.com/morrowind/mods/49848" },
+    { mod = "Easy Escort", author = "NullCascade",
+      idea = "Warping followers who fall far behind or get left in another cell, and the list of actors that are never followers (its ignore list was imported).",
+      url = "https://www.nexusmods.com/morrowind/mods/45712" },
+    { mod = "Attend Me Expanded MWSE", author = "drekar51 (MWSE port of Attend Me by urm)",
+      idea = "Spreading warped followers in an arc behind you, and reading the companion variable safely so it cannot crash the game.",
+      url = "https://www.nexusmods.com/morrowind/mods/60810" },
+}
+local credits = template:createPage({ label = "Credits" })
+credits:createInfo({ text = "mwcompanions is by dejunai. It borrows ideas from the mods below. Each link opens the original mod's page; please support their authors." })
+for _, c in ipairs(CREDITS) do
+    local cat = credits:createCategory(c.mod .. " - by " .. c.author)
+    cat:createInfo({ text = c.idea })
+    if c.url then cat:createHyperlink({ text = c.url, url = c.url }) end
+end
+
 template:register()
