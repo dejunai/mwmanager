@@ -783,11 +783,6 @@ def read_settings() -> dict:
             data[key] = ini.getboolean("Staging", key, fallback=True)
         except ValueError:
             data[key] = True
-    # REMOVE BEFORE SHIPPING: developer machine only, set by hand: diff staged mod Lua against the Steam copies
-    try:
-        data["compare_steam_lua"] = ini.getboolean("Dev", "compare_steam_lua", fallback=False)
-    except ValueError:
-        data["compare_steam_lua"] = False
     try:        # --remove before shipping: [Dev] dev_options turns on developer-only steps
         data["dev_options"] = ini.getboolean("Dev", "dev_options", fallback=False)
     except ValueError:
@@ -3085,7 +3080,7 @@ class ManagerGUI(tk.Tk):
         from plugin_install import (apply_plugin_compatibility, check_deploy_path_lengths, count_bsa_assets,
                                     deploy_package, extract_archive, deployment_label, has_altered_assets,
                                     altered_assets, settle_altered_assets,
-                                    pack_package_assets, pull_updated_steam_luas,
+                                    pack_package_assets,
                                     index_deployment, record_deployment, remove_superseded_plugins)
         from major_master_deploy import register_archives
         from core_addons import extraction_status
@@ -3250,11 +3245,6 @@ class ManagerGUI(tk.Tk):
                                 f"{altered_assets(data_dir, deployed_label)}\n\nWhat should happen to them?",
                                 [("Restore them over the fresh files", "restore"), ("Delete them", "delete"),
                                  ("Skip (leave them in Off)", "skip")], "skip")))
-                        # REMOVE BEFORE SHIPPING: [Dev] compare_steam_lua, developer machine only
-                        if self.settings.get("compare_steam_lua"):
-                            imported = pull_updated_steam_luas(package, progress.ask_yes_no)
-                            if imported:
-                                progress(f"Imported {len(imported)} Lua file(s) from the Steam game for {label}.")
                         linked, skipped, operations = deploy_package(
                             package, data_dir, label, APP_DIR / "protected_replacer_textures.json",
                             transaction=transaction)
