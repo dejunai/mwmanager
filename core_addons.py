@@ -1435,23 +1435,60 @@ def _archive_rank(path: Path) -> tuple:
     return (version is not None, version_key, upload_key, mtime, path.name.casefold())
 
 
+
+def _nexus_version_numbers(text: str) -> tuple:
+    return tuple(int(value) for value in re.findall(r"\d+", str(text) or ""))
+
+
+def _newer_nexus_version_text(*texts: str) -> str:
+    """The version string with the highest numeric parts; empty texts are ignored."""
+    best = ""
+    best_key = ()
+    for text in texts:
+        text = str(text or "").strip()
+        if not text:
+            continue
+        key = _nexus_version_numbers(text)
+        if not best or key > best_key:
+            best, best_key = text, key
+    return best
+
+
+def _choose_newest_main_file(files) -> dict | None:
+    """Newest MAIN file by upload date, then version; primary is only a tiebreak.
+
+    ARCHIVED, OLD_VERSION, and REMOVED files are ignored even when Nexus still
+    marks one of them primary.
+    """
+    main = [item for item in files or []
+            if str(item.get("category") or "").upper() == "MAIN"]
+    if not main:
+        return None
+    return max(main, key=lambda item: (
+        int(item.get("date") or 0),
+        _nexus_version_numbers(item.get("version") or ""),
+        bool(item.get("primary")),
+    ))
+
+
 def nexus_file_page(mod_id: int, file_id: int) -> str:
     """The Nexus page that offers one file's download button."""
     return f"https://www.nexusmods.com/morrowind/mods/{int(mod_id)}?tab=files&file_id={int(file_id)}"
 
 
 def nexus_main_file(mod_id: int, timeout: float = 8) -> dict:
-    """A Nexus mod's primary file (else its newest MAIN file): fileId, name, version, sizeInBytes."""
+    """A Nexus mod's newest MAIN file: fileId, name, version, sizeInBytes.
+
+    Archived, old-version, and removed files are ignored even if one is still marked primary.
+    """
     game = _nexus_query('query { game(domainName: "morrowind") { id } }', {}, timeout)
     data = _nexus_query('query($g: ID!) { f: modFiles(modId: "%d", gameId: $g) '
                         '{ fileId name version date primary category sizeInBytes } }' % int(mod_id),
                         {"g": str(game["game"]["id"])}, timeout)
-    files = data.get("f") or []
-    main = [f for f in files if f.get("primary")] or \
-        [f for f in files if str(f.get("category", "")).upper() == "MAIN"]
-    if not main:
+    chosen = _choose_newest_main_file(data.get("f") or [])
+    if not chosen:
         raise RuntimeError(f"Nexus lists no main file for mod {mod_id}")
-    return max(main, key=lambda f: int(f.get("date") or 0))
+    return chosen
 
 
 def nexus_page(master: str, archive_name: str = "") -> str | None:
@@ -1543,7 +1580,7 @@ def _scrape_nexus_versions(found: set[str], progress_callback, timeout: float, i
 
 
 def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8) -> dict:
-    """Annotate found major-master archives with latest Nexus primary-file status."""
+    """Annotate found major-master archives with latest Nexus MAIN-file status."""
     progress_callback = progress_callback or (lambda _message: None)
     ids = {master.casefold(): master_mod_id(master, Path(item["archive"]).name)
            for item in plan.get("archives", []) for master in item.get("core_masters", [])}
@@ -1568,12 +1605,11 @@ def verify_nexus_versions(plan: dict, progress_callback=None, timeout: float = 8
         for i, master in enumerate(sorted(found)):
             files = data.get(f"m{i}") or []
             mod_version = str((data.get(f"v{i}") or {}).get("version") or "").strip()
-            candidates = [item for item in files if item.get("primary")]
-            if not candidates:
-                candidates = [item for item in files if str(item.get("category", "")).upper() == "MAIN"]
-            if files or mod_version:
-                latest = dict(max(candidates or files, key=lambda item: int(item.get("date") or 0))) if files else {}
-                latest["version"] = mod_version or latest.get("version")
+            chosen = _choose_newest_main_file(files)
+            if chosen or mod_version:
+                latest = dict(chosen or {})
+                latest["version"] = _newer_nexus_version_text(
+                    mod_version, str(latest.get("version") or "").strip())
                 latest_by_master[master] = latest
     except Exception as exc:
         latest_by_master = {}

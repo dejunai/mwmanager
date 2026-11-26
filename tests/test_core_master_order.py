@@ -192,6 +192,92 @@ class PriorityList(unittest.TestCase):
         identity = core_addons._stage_plugin_identity(item, ["Tamriel_Data.esm"])
         self.assertEqual(identity["PLUGIN_VERSION"], "26.08")
 
+
+class NewestMainFile(unittest.TestCase):
+    """Nexus can leave an archived file marked primary; Update must still use the newest MAIN file."""
+
+    # GraphQL shape for OAAB_Data (mod 49042) after the 2.7.6 MAIN upload:
+    # archived 2.7.1 is still primary, 2.7.6 is the current MAIN file.
+    OAAB_FILES = [
+        {"fileId": 1000071398, "name": "OAAB Data", "version": "2.7.1",
+         "date": 1700000000, "primary": True, "category": "ARCHIVED"},
+        {"fileId": 1000074664, "name": "OAAB Data", "version": "2.7.6",
+         "date": 1764082320, "primary": False, "category": "MAIN"},
+        {"fileId": 1000070001, "name": "OAAB Data", "version": "2.7.5",
+         "date": 1760000000, "primary": False, "category": "OLD_VERSION"},
+        {"fileId": 1000000001, "name": "removed", "version": "9.9.9",
+         "date": 1999999999, "primary": False, "category": "REMOVED"},
+        {"fileId": 1000000002, "name": "optional", "version": "8.0.0",
+         "date": 1888888888, "primary": False, "category": "OPTIONAL"},
+    ]
+
+    def test_chooser_skips_archived_primary_and_retired_categories(self):
+        chosen = core_addons._choose_newest_main_file(self.OAAB_FILES)
+        self.assertEqual(chosen["fileId"], 1000074664)
+        self.assertEqual(chosen["version"], "2.7.6")
+
+    def test_chooser_orders_by_date_then_version_then_primary(self):
+        files = [
+            {"fileId": 1, "version": "2.0.0", "date": 100, "primary": True, "category": "MAIN"},
+            {"fileId": 2, "version": "1.0.0", "date": 200, "primary": False, "category": "MAIN"},
+        ]
+        self.assertEqual(core_addons._choose_newest_main_file(files)["fileId"], 2)
+        files = [
+            {"fileId": 1, "version": "2.0.0", "date": 200, "primary": True, "category": "MAIN"},
+            {"fileId": 2, "version": "3.0.0", "date": 200, "primary": False, "category": "MAIN"},
+        ]
+        self.assertEqual(core_addons._choose_newest_main_file(files)["fileId"], 2)
+        files = [
+            {"fileId": 1, "version": "3.0.0", "date": 200, "primary": False, "category": "MAIN"},
+            {"fileId": 2, "version": "3.0.0", "date": 200, "primary": True, "category": "MAIN"},
+        ]
+        self.assertEqual(core_addons._choose_newest_main_file(files)["fileId"], 2)
+        self.assertIsNone(core_addons._choose_newest_main_file([
+            {"fileId": 1, "version": "9.0.0", "date": 999, "primary": True, "category": "ARCHIVED"},
+        ]))
+
+    def test_nexus_main_file_ignores_archived_primary(self):
+        responses = [{"game": {"id": "100"}}, {"f": self.OAAB_FILES}]
+        with mock.patch.object(core_addons, "_nexus_query", side_effect=responses) as query, \
+                mock.patch.object(core_addons.urllib.request, "urlopen") as urlopen:
+            chosen = core_addons.nexus_main_file(49042)
+        self.assertEqual((chosen["fileId"], chosen["version"]), (1000074664, "2.7.6"))
+        urlopen.assert_not_called()
+        self.assertEqual(query.call_count, 2)
+
+    def test_update_target_is_newest_main_when_primary_is_archived(self):
+        plan = {"archives": [{"archive": "OAAB_Data 49042 2.7.5.7z",
+                              "core_masters": ["OAAB_Data.esm"]}]}
+        responses = [{"game": {"id": "100"}},
+                     {"v0": {"version": "2.7.6"}, "m0": self.OAAB_FILES}]
+        with mock.patch.object(core_addons, "_scrape_nexus_versions") as scrape, \
+                mock.patch.object(core_addons, "_nexus_query", side_effect=responses), \
+                mock.patch.object(core_addons.urllib.request, "urlopen") as urlopen:
+            core_addons.verify_nexus_versions(plan)
+        scrape.assert_not_called()
+        urlopen.assert_not_called()
+        status = plan["archives"][0]["nexus"]["oaab_data.esm"]
+        self.assertEqual(status["status"], "outdated")
+        self.assertEqual(status["latest"], "2.7.6")
+        self.assertEqual(status["file_id"], 1000074664)
+        self.assertIn("file_id=1000074664", core_addons.nexus_file_page(status["mod_id"], status["file_id"]))
+
+    def test_file_version_marks_outdated_when_mod_header_lags(self):
+        plan = {"archives": [{"archive": "Wares-Ultimate-52013-2-1-1.7z",
+                              "core_masters": ["Wares-base.esm"]}]}
+        responses = [{"game": {"id": "100"}},
+                     {"v0": {"version": "2.1.1"},
+                      "m0": [{"fileId": 99, "name": "Wares Ultimate", "version": "2.1.3",
+                              "date": 1760000100, "primary": False, "category": "MAIN"}]}]
+        with mock.patch.object(core_addons, "_scrape_nexus_versions") as scrape, \
+                mock.patch.object(core_addons, "_nexus_query", side_effect=responses):
+            core_addons.verify_nexus_versions(plan)
+        scrape.assert_not_called()
+        status = plan["archives"][0]["nexus"]["wares-base.esm"]
+        self.assertEqual((status["status"], status["latest"], status["file_id"]),
+                         ("outdated", "2.1.3", 99))
+
+
 class SortPlacesIt(unittest.TestCase):
     def test_shipped_rules_do_not_contain_install_specific_master_order(self):
         # no rules are shipped: the file is each install's own, and a rollback sets it aside
