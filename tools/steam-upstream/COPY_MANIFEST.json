@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-25T18:03:53",
+  "SyncedAt": "2026-11-25T19:24:44",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -524,10 +524,10 @@
     },
     {
       "RelativePath": "mwdialog_luafix.py",
-      "Bytes": 233632,
-      "SHA256": "bc8e562314f7f0e9485294835e522ed4d28bb0d26cbcb2a7a7a1284004e80b76",
-      "Source": "<Steam Morrowind>\\mwdialog_luafix.py",
-      "SourceModified": "2026-11-25T16:57:19"
+      "Bytes": 242501,
+      "SHA256": "8c044f8f3f285e559d0e88fec3eeb2e8fbbae4c5eacb84d53e9d6ab954f56e17",
+      "Source": "<morrowind-conflict-tools>\\mwdialog_luafix.py",
+      "SourceModified": "2026-11-25T19:12:15"
     },
     {
       "RelativePath": "mwdialog_mastercheck.py",
@@ -643,17 +643,17 @@
     },
     {
       "RelativePath": "README.md",
-      "Bytes": 54997,
-      "SHA256": "530cfad853a758e17bc0610bc959a7a6b170db842d61523b104a3243a1be4a25",
-      "Source": "<Steam Morrowind>\\README.md",
-      "SourceModified": "2026-11-25T17:04:48"
+      "Bytes": 56184,
+      "SHA256": "c74747b2c34ce35e9891d496c3cf556a1227648280a2ccf8b2c5bffe817482c8",
+      "Source": "<morrowind-conflict-tools>\\README.md",
+      "SourceModified": "2026-11-25T19:12:15"
     },
     {
       "RelativePath": "MORE_INFO.md",
-      "Bytes": 97465,
-      "SHA256": "427d56bb2296910ad2b26c9f7022c1eb719839ee77e1d844e36f9ae76f112b99",
+      "Bytes": 100939,
+      "SHA256": "e2f6fec46c0cceeac0709cce2b43138f2e9b8578cfe911d745a5da3f2ba5b153",
       "Source": "<morrowind-conflict-tools>\\MORE_INFO.md",
-      "SourceModified": "2026-11-25T17:04:51"
+      "SourceModified": "2026-11-25T19:12:15"
     },
     {
       "RelativePath": "LICENSE",
@@ -738,6 +738,13 @@
       "SHA256": "96b3faf441cc29f520304a7df74c9329eabccfac5c7427b70efe119cb8d4ac92",
       "Source": "<Steam Morrowind>\\tests\\test_luafix.py",
       "SourceModified": "2026-11-25T16:57:19"
+    },
+    {
+      "RelativePath": "tests\\test_luafix_core_only.py",
+      "Bytes": 15344,
+      "SHA256": "72985970735d50171bc27257276e7303a30b32d2e1850548a0265bbf9d69fa39",
+      "Source": "<morrowind-conflict-tools>\\tests\\test_luafix_core_only.py",
+      "SourceModified": "2026-11-25T19:12:15"
     },
     {
       "RelativePath": "tests\\test_luafix_frame_patches.py",

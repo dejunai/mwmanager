@@ -8,6 +8,23 @@ sky plugin kept before the generated tail. Everything else comes from upstream u
 """
 from mwdialog_check import *  # noqa: F401,F403  (names resolve in mwdialog_check when composed)
 
+_upstream_launch_game = launch_game
+
+
+def launch_game(args):
+    """--play / Play: cheap local MWSE core stamp check, then the upstream launcher."""
+    import mwmanager_mwse_core as mwse_core
+    game_dir = os.path.dirname(os.path.abspath(args.data_dir))
+    check = mwse_core.ensure_core_patches_for_play(
+        game_dir, play_anyway=bool(getattr(args, "play_anyway", False)))
+    if check.get("block"):
+        return check.get("code", mwse_core.PLAY_BLOCK_CODE)
+    import mwmanager_core_game_files as core_files
+    already = os.environ.get(core_files.CHECKED_ENV)
+    core_files.ensure_core_game_files_for_play(
+        game_dir, cli=not already, notify=None)
+    return _upstream_launch_game(args)
+
 
 def move_doubled_plugins(args, names):
     return move_plugins_to_disabled(args.data_dir, names)
@@ -1265,7 +1282,8 @@ def _main(argv=None):
                          "given, e.g. --sort --play). Sets SteamAppId so Steam doesn't redirect to the Launcher")
     gm.add_argument("--steam-appid", default=STEAM_APPID, help=f"with --play: Steam app id (default {STEAM_APPID})")
     gm.add_argument("--play-anyway", action="store_true",
-                    help="with --play: start the game even if a plugin's master is missing or loads after it")
+                    help="with --play: start the game even if a plugin's master is missing or loads after it, "
+                         "or MWSE core patches could not be reapplied")
     gm.add_argument("--exe", default="Morrowind.exe", help="with --play: the game executable (default Morrowind.exe)")
     tc.add_argument("--cell-conflicts", action="store_true",
                     help="report plugins that don't know about each other but build in the same spot, change the "

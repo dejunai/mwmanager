@@ -31,6 +31,8 @@ ASSET_LIMIT_SETTINGS = {"reduce_textures_2048": "Reduce textures larger than 204
 APP_DIR = Path(__file__).resolve().parent
 SETTINGS_FILE = APP_DIR / "mwmanager_gui_settings.json"
 MWMANAGER_INI = APP_DIR / "mwmanager.ini"
+MWSE_SETTING_KEYS = ("check_on_play", "apply_core_patches", "offer_update_on_full")
+INTEGRITY_SETTING_KEYS = ("check_core_game_files",)
 PATH_SETTING_KEYS = {"game_dir", "archive_downloads_dir", "always_elevate_game_dir"}
 # Older mwmanager.ini files called the archive folder downloads_dir; it is still read, never written.
 LEGACY_PATH_KEYS = {"archive_downloads_dir": ("downloads_dir",)}
@@ -760,6 +762,16 @@ def read_settings() -> dict:
         data["dev_options"] = ini.getboolean("Dev", "dev_options", fallback=False)
     except ValueError:
         data["dev_options"] = False
+    for key in MWSE_SETTING_KEYS:
+        try:
+            data[key] = ini.getboolean("MWSE", key, fallback=True)
+        except ValueError:
+            data[key] = True
+    for key in INTEGRITY_SETTING_KEYS:
+        try:
+            data[key] = ini.getboolean("Integrity", key, fallback=True)
+        except ValueError:
+            data[key] = True
     detected_exe = vortex_install_path()
     data["vortex_detected"] = bool(detected_exe or vortex_registered())
     data["vortex_exe"] = str(detected_exe) if detected_exe else ""
@@ -804,13 +816,28 @@ def write_settings(settings: dict) -> None:
     for key in ASSET_LIMIT_SETTINGS:
         if key in settings:
             ini.set("Staging", key, "true" if settings[key] else "false")
+    if not ini.has_section("MWSE"):
+        ini.add_section("MWSE")
+    for key in MWSE_SETTING_KEYS:
+        if key in settings:
+            ini.set("MWSE", key, "true" if settings[key] else "false")
+        elif not ini.has_option("MWSE", key):
+            ini.set("MWSE", key, "true")
+    if not ini.has_section("Integrity"):
+        ini.add_section("Integrity")
+    for key in INTEGRITY_SETTING_KEYS:
+        if key in settings:
+            ini.set("Integrity", key, "true" if settings[key] else "false")
+        elif not ini.has_option("Integrity", key):
+            ini.set("Integrity", key, "true")
     stream = io.StringIO()
     ini.write(stream)
     _atomic_write(MWMANAGER_INI, stream.getvalue().encode("utf-8"))   # a crash mid-write never empties it
 
     preferences = {key: value for key, value in settings.items()
                    if key not in PATH_SETTING_KEYS and key not in (BSA_OFFER_SETTING, ALWAYS_BSA_SETTING)
-                   and key not in ASSET_LIMIT_SETTINGS
+                   and key not in ASSET_LIMIT_SETTINGS and key not in MWSE_SETTING_KEYS
+                   and key not in INTEGRITY_SETTING_KEYS
                    and key not in RUNTIME_KEYS and key not in LEGACY_PREFERENCE_KEYS}
     _atomic_write(SETTINGS_FILE, (json.dumps(preferences, indent=2) + "\n").encode("utf-8"))
 
@@ -1394,6 +1421,7 @@ class ManagerGUI(tk.Tk):
         tools_menu.add_command(label="Recovery center…", command=self.show_recovery_center)
         tools_menu.add_separator()
         tools_menu.add_command(label="Update rules…", command=self.update_rules)
+        tools_menu.add_command(label="Update MWSE…", command=self.update_mwse)
         tools_menu.add_command(label="Integrity report…", command=self.show_integrity_report)
         tools_menu.add_command(label="Capture integrity snapshot…", command=self.capture_integrity_snapshot)
         tools_menu.add_command(label="Compare integrity snapshot…", command=self.compare_integrity_snapshot)
@@ -1452,6 +1480,27 @@ class ManagerGUI(tk.Tk):
             self.status.set("mlox rules update finished.")
 
         self._run_progress_job("Update rules", "Checking for newer mlox rules…", worker, completed)
+
+    def update_mwse(self):
+        """Tools > Update MWSE: same path as preflight / --init / --full."""
+        import mwmanager_mwse_core as mwse_core
+        game_dir = self.settings.get("game_dir")
+        if not game_dir:
+            messagebox.showinfo("Update MWSE", "Choose a game folder in Options first.", parent=self)
+            return
+
+        def worker(progress):
+            return mwse_core.offer_mwse_update(game_dir, force=True, progress=progress)
+
+        def completed(result, error):
+            if error:
+                messagebox.showerror("Update MWSE", "The MWSE updater could not be run.", parent=self)
+                self.status.set("Update MWSE stopped with an error.")
+                return
+            message = (result or {}).get("message") or "MWSE update finished."
+            self.status.set(message)
+
+        self._run_progress_job("Update MWSE", "Checking the installed MWSE build…", worker, completed)
 
     def show_integrity_report(self):
 
@@ -3424,7 +3473,7 @@ class ManagerGUI(tk.Tk):
                            str(data_dir), "--sort", "--all", "--yes"]
                 process = managed_processes.run(
                     command, cwd=str(APP_DIR), text=True, encoding="utf-8", errors="replace", timeout=7200,
-                    env=dict(os.environ, MWMANAGER_GUI="1", MWMANAGER_CONFLICT_GUI="1"), **quiet)
+                    env=dict(os.environ, MWMANAGER_GUI="1", MWMANAGER_CONFLICT_GUI="1", MWMANAGER_CORE_FILES_CHECKED="1"), **quiet)
                 if process.returncode:
                     raise RuntimeError((process.stderr or process.stdout or "MWManager checks failed")[-4000:])
                 return result
@@ -3679,6 +3728,9 @@ class ManagerGUI(tk.Tk):
         self._update_action_buttons()
         if self.play_button.instate(["disabled"]):
             return
+        import mwmanager_core_game_files as core_files
+        core_files.ensure_core_game_files_for_play(
+            self.settings["game_dir"], notify="gui", parent=self, cli=False)
         run_full = messagebox.askyesno(
             "Full check before playing",
             "Run --full before launching? This rebuilds the auto-merge patch and may take a while.\n\n"
@@ -3731,7 +3783,8 @@ class ManagerGUI(tk.Tk):
             startup.wShowWindow = subprocess.SW_HIDE
             quiet = {"startupinfo": startup, "creationflags": subprocess.CREATE_NO_WINDOW}
         try:
-            subprocess.Popen(command, cwd=str(APP_DIR), **quiet)
+            env = dict(os.environ, MWMANAGER_CORE_FILES_CHECKED="1")
+            subprocess.Popen(command, cwd=str(APP_DIR), env=env, **quiet)
             self.status.set("Starting Morrowind…")
         except OSError as exc:
             messagebox.showerror("Could not start Morrowind", str(exc), parent=self)
@@ -5187,6 +5240,7 @@ class ManagerGUI(tk.Tk):
         else:
             description = {
                 "Update rules": "Check for newer mlox community rules, download them only if they have changed, then comment out conflicting rules in the live mlox files and, if it already exists, obsolete rules in mwmanager_rules.txt. Your mlox_my_rules.txt is not overwritten by a download.",
+                "Update MWSE": "Compare mwse-version.txt with the official build-automatic release, run MWSE-Update.exe if you confirm, then re-apply KnownBug patches on MWSE core Lua files.",
                 "First-run preflight": "Check the game and prerequisites. Only setup and configuration choices need your input.",
                 "Initial setup": "Sort and tidy the shipped files. Safe fixes apply automatically; output is shown below.",
                 "Catalog": "Build the plugin and archive catalog. Completed setup checkpoints will be kept.",
