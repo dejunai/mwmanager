@@ -1202,6 +1202,47 @@ def chosen_rows(ticked, highlighted, known):
     return rows or [iid for iid in known if iid in set(highlighted)]
 
 
+def recovery_words(code):
+    """A recovery-center kind, status or action code as words: plugin_deployment -> "Plugin deployment",
+    needs-review -> "Needs review". The center showed the raw codes, and its report said "Action:
+    remove_plugin_deployment" (CR-28 stress run)."""
+    words = re.sub(r"[_\-]+", " ", str(code or "")).strip()
+    return words[:1].upper() + words[1:]
+
+
+def recovery_result_lines(item, result):
+    """The "Recovery complete" report: what was done to which item, then only the counts that are not zero."""
+    lines = [f"{recovery_words(result.get('action') or item.get('action'))}: {item.get('label', '')}".rstrip(": ")]
+    counts = [f"{key.capitalize()}: {result[key]}" for key in ("removed", "restored", "recovered", "pending")
+              if isinstance(result.get(key), int) and not isinstance(result.get(key), bool) and result[key]]
+    return lines + (counts or ["Nothing needed changing."])
+
+
+def removal_summary(result):
+    """(status line, dialog text) after Remove Deployed Plugins. Only the counts that are not zero: the status read
+    "0 changed file(s) remain tracked; 0 altered asset(s) kept in Off; 0 staged folder(s) not unpacked again." and
+    the dialog named a literal "Data Files\\Off\\<plugin>\\Altered Assets" folder (CR-28 stress run)."""
+    altered = len(result.get("altered", []))
+    failures = list(result.get("unpack_failures", []))
+    pending = result.get("pending", 0)
+    status = f"Removed {result['removed']:,} file(s); restored {result['restored']:,}."
+    extra = []
+    if pending:
+        extra.append(f"{pending:,} changed file(s) stay tracked for review in the recovery center")
+    if altered:
+        extra.append(f"{altered:,} file(s) changed since deployment were set aside in the mod's Off folder")
+    if failures:
+        extra.append(f"{len(failures):,} staged folder(s) could not be unpacked again from the archive")
+    if extra:
+        status += " " + "; ".join(extra) + "."
+    report = f"Removed files: {result['removed']:,}\nRestored files: {result['restored']:,}"
+    if extra:
+        report += "\n\n" + "\n".join(line[:1].upper() + line[1:] + "." for line in extra)
+    if failures:
+        report += "\n\nNot unpacked again from the archive:\n" + "\n".join(failures[:5])
+    return status, report
+
+
 def deployed_files_line(label, linked, skipped):
     """The job-window line for one deployed package. "Deployed 0 files from X" read as a failure in the CR-28
     stress run: it meant every file was already in place (a re-run after a stop), or the options chosen left
@@ -1796,9 +1837,11 @@ class ManagerGUI(tk.Tk):
                                f"{summary['needs_review']} need review"),
                   style="Muted.TLabel").pack(anchor="w", pady=(4, 10))
         columns = ("kind", "status", "label", "id")
-        tree = ttk.Treeview(frame, columns=columns, show="headings", selectmode="browse")
-        for name, title, width in (("kind", "Kind", 145), ("status", "Status", 105),
-                                   ("label", "Item", 450), ("id", "ID", 160)):
+        # the id column stays for lookups but is not shown: "plugin:009df6..." means nothing to the user
+        tree = ttk.Treeview(frame, columns=columns, show="headings", selectmode="browse",
+                            displaycolumns=("kind", "status", "label"))
+        for name, title, width in (("kind", "Kind", 170), ("status", "Status", 120),
+                                   ("label", "Item", 560), ("id", "ID", 160)):
             tree.heading(name, text=title)
             tree.column(name, width=width, stretch=name == "label")
         scroll = ttk.Scrollbar(frame, command=tree.yview)
@@ -1808,7 +1851,7 @@ class ManagerGUI(tk.Tk):
         by_id = {}
         for item in inventory["items"]:
             iid = tree.insert("", "end", values=(
-                item["kind"], item["status"], item["label"], item["id"]))
+                recovery_words(item["kind"]), recovery_words(item["status"]), item["label"], item["id"]))
             by_id[iid] = item
         footer = ttk.Frame(dialog, padding=(16, 0, 16, 16))
         footer.pack(fill="x")
@@ -1826,7 +1869,7 @@ class ManagerGUI(tk.Tk):
                 return
             if not messagebox.askyesno(
                     "Recover selected item",
-                    f"Recover this item?\n\n{item['label']}\n\n"
+                    f"{recovery_words(item.get('action'))}?\n\n{item['label']}\n\n"
                     "MWManager will retain any modified file that cannot be safely restored.",
                     parent=dialog):
                 return
@@ -1843,12 +1886,7 @@ class ManagerGUI(tk.Tk):
             self.active_names = {name.casefold() for name in self.order}
             self.major_masters = set(configured_major_masters())
             self.refresh()
-            self._show_tool_report("Recovery complete", [
-                f"Action: {result.get('action')}",
-                f"Removed: {result.get('removed', 0)}",
-                f"Restored: {result.get('restored', 0)}",
-                f"Pending: {result.get('pending', 0)}",
-            ])
+            self._show_tool_report("Recovery complete", recovery_result_lines(item, result))
 
         ttk.Button(footer, text="Recover selected", command=recover_selected).pack(side="right")
         ttk.Button(footer, text="Close", command=dialog.destroy).pack(side="right", padx=(0, 8))
@@ -3621,19 +3659,9 @@ class ManagerGUI(tk.Tk):
                 self.gui_state["generated_signature"] = None
                 write_gui_state(self.gui_state)
                 self._update_action_buttons()
-                self.status.set(f"Removed {result['removed']:,} files; restored {result['restored']:,}. "
-                                f"{result['pending']:,} changed file(s) remain tracked; "
-                                f"{len(result.get('altered', [])):,} altered asset(s) kept in Off; "
-                                f"{len(result.get('unpack_failures', [])):,} staged folder(s) not unpacked again.")
-                tidy_note = ""
-                if result.get("unpack_failures"):
-                    tidy_note = "\n\nNot unpacked again from the archive:\n" + "\n".join(
-                        result["unpack_failures"][:5])
-                messagebox.showinfo("Plugin deployments removed",
-                                    f"Removed files: {result['removed']:,}\nRestored files: {result['restored']:,}\n"
-                                    f"Altered assets kept in Data Files\\Off\\<plugin>\\Altered Assets: "
-                                    f"{len(result.get('altered', [])):,}\n"
-                                    f"Still tracked for review: {result['pending']:,}{tidy_note}", parent=self)
+                status, report = removal_summary(result)
+                self.status.set(status)
+                messagebox.showinfo("Plugin deployments removed", report, parent=self)
 
             self._run_progress_job("Remove Deployed Plugins", "Removing selected tracked deployments…",
                                    worker, completed)

@@ -1,5 +1,6 @@
 """Soundfix's report and the patch-inputs record stay out of the game install under MWManager: they go to its
-outputs and its own folder. Every other state file keeps the path upstream gives it."""
+outputs and its own folder. Outside a game folder every other state file keeps the path upstream gives it
+(tests/test_stress28_round4.py covers game folders)."""
 import os
 import sys
 import unittest

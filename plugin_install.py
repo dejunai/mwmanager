@@ -997,6 +997,7 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
                 rel = Path(name)
             target = _safe_child(data_dir, rel, label="Deployment target")
             target.parent.mkdir(parents=True, exist_ok=True)
+            target = _on_disk_name(target)
             rel_key = str(rel).replace("\\", "/").casefold()
             is_texture = source.suffix.casefold() in {".dds", ".tga", ".bmp", ".png", ".jpg", ".jpeg"}
             if is_texture and target.exists() and rel_key in protected and not protect_this_package:
@@ -1265,6 +1266,20 @@ def _catalog(path):
             yield connection
     finally:
         connection.close()
+
+def _on_disk_name(path: Path) -> Path:
+    """path under the name its file already has on disk, when only the letter case differs. A mod file deployed
+    over Meshes\\f\\Furn_shrine_vivec_01.nif as furn_shrine_vivec_01.nif took the mod's case, and removing the mod
+    restored the original under that case too (CR-28 stress run): the replacement keeps the on-disk name instead."""
+    try:
+        with os.scandir(path.parent) as entries:
+            for entry in entries:
+                if entry.name != path.name and entry.name.casefold() == path.name.casefold():
+                    return path.with_name(entry.name)
+    except OSError:
+        pass
+    return path
+
 
 def _op_key(op: dict) -> str:
     return str(op.get("target_relative") or op.get("target") or "").replace("/", "\\").casefold()

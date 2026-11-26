@@ -191,15 +191,31 @@ def cell_fixes_report_path(_game_dir):
 
 
 # Newer upstream files go through mwdialog_paths.state_path, which (outside conflict-tools\) means the game
-# folder. MWManager keeps them out of the game install, with its own records and reports. The older upstream
-# records already go through MWManager's own readers and writers, so only these names are routed.
+# folder. MWManager keeps them out of the game install, with its own records and reports: the older upstream
+# records already have absolute MWManager paths (state_names), these two have their own place, and any other
+# record, cache, log or report a sync adds is never created in a game folder; it goes to outputs. A file that is
+# already there (one the player keeps in the game folder) is still used where it is. Without the rule each new
+# upstream record landed in the game root (mwdialog_play_hashes.json, CR-28 stress run).
 _STATE_ROUTES = {"mwdialog_soundfix_report.txt": output_file, "mwdialog_patch_inputs.json": manager_file}
+
+
+def _state_route(base, name):
+    """MWManager's place for upstream state `name` asked for in `base`, or None for upstream's own place."""
+    if os.path.isabs(name):
+        return None
+    route = _STATE_ROUTES.get(name.lower())
+    if route:
+        return route(name)
+    if MP.is_game_dir(base) and not os.path.exists(os.path.join(base, name)):
+        return output_file(name)
+    return None
+
+
 if not getattr(MP.state_path, "mwmanager_routed", False):
     _upstream_state_path = MP.state_path
 
     def _routed_state_path(base, name):
-        route = None if os.path.isabs(name) else _STATE_ROUTES.get(name.lower())
-        return route(name) if route else _upstream_state_path(base, name)
+        return _state_route(base, name) or _upstream_state_path(base, name)
 
     _routed_state_path.mwmanager_routed = True
     MP.state_path = _routed_state_path
