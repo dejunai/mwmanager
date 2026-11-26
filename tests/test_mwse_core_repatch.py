@@ -113,6 +113,10 @@ class Repo(unittest.TestCase):
         self.manager = self.root / "MWManager"
         self.game = self.root / "Morrowind"
         self.manager.mkdir()
+        # Unit tests must not depend on whether Morrowind.exe is running on the host.
+        proc = mock.patch.object(core, "morrowind_process_running", return_value=False)
+        proc.start()
+        self.addCleanup(proc.stop)
         write(self.game / "Morrowind.ini", "[General]\n")
         write(self.game / "Morrowind.exe", b"MZ")
         write(self.game / "MWSE.dll", b"MZ")
@@ -226,6 +230,26 @@ class ApplyAndPlay(Repo):
         self.assertEqual(result["status"], "current")
         pending.assert_not_called()
         apply.assert_not_called()
+
+    def test_live_morrowind_process_does_not_change_unit_tests(self):
+        # The real guard stays in production code; tests inject the process check.
+        self.write_stock()
+        before = self.core_lua.read_bytes()
+        runner = mock.Mock()
+        write(self.game / "mwse-version.txt", OLD_BUILD)
+        with mock.patch.object(core, "morrowind_process_running", return_value=True), \
+                mock.patch("mwmanager_prereqs.latest_mwse_build", return_value=(LATEST, None)):
+            result = core.reapply_core_patches(
+                self.game, manager_dir=self.md(), checker=AcceptChecker())
+            offer = core.offer_mwse_update(
+                self.game, yes=True, manager_dir=self.md(), runner=runner,
+                checker=AcceptChecker())
+        self.assertEqual(result["status"], "refused", result)
+        self.assertTrue(any("Morrowind.exe is running" in line for line in result["detail"]))
+        self.assertEqual(self.core_lua.read_bytes(), before)
+        self.assertFalse(offer["updated"])
+        self.assertIn("Morrowind.exe is running", offer["message"])
+        runner.assert_not_called()
 
     def test_play_applies_stock_core_then_allows_launch(self):
         self.write_stock()
