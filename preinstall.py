@@ -453,7 +453,7 @@ def confirm_first_launch(game_dir: Path, progress, overrides: list, *, launcher=
                     "Skip the first launch?",
                     "Without a first launch MWManager cannot confirm that the Code Patch, MGE XE and MWSE start "
                     "correctly, and problems may only show up after mods are installed. Skip anyway?"):
-                progress("Preflight: first launch skipped by the user; the setup is not confirmed.")
+                progress(f"{DETAIL_PREFIX}Preflight: first launch skipped by the user; the setup is not confirmed.")
                 overrides.append("first-launch-skipped")
                 return True
             continue
@@ -507,7 +507,7 @@ def _offer_baseline(game_dir: Path, manager_dir: Path, progress) -> bool:
         return False
     progress("Recording the starting state of the install (reading every file)…")
     record = journal.capture_baseline(game_dir)
-    progress(f"Starting state recorded: {len(record['files'])} files, {journal.baseline_file}")
+    progress(f"{DETAIL_PREFIX}Starting state recorded: {len(record['files'])} files, {journal.baseline_file}")
     for warning in record["warnings"]:
         progress("Preflight: " + warning)
     return True
@@ -1043,7 +1043,7 @@ def run_preinstall(game_dir: Path, manager_dir: Path, progress, *,
         return False
     import mwmanager_journal
     prerequisite_record = mwmanager_journal.Journal(manager_dir / "journal").capture_prerequisites(game_dir)
-    progress(f"Prerequisite checkpoint recorded: {len(prerequisite_record['files'])} files, "
+    progress(f"{DETAIL_PREFIX}Prerequisite checkpoint recorded: {len(prerequisite_record['files'])} files, "
              f"{manager_dir / 'journal' / 'prerequisites' / 'prerequisites.json'}")
     if first_run:
         for line in move_official_addon_docs(game_dir, manager_dir):
@@ -1056,5 +1056,5 @@ def run_preinstall(game_dir: Path, manager_dir: Path, progress, *,
     statuses.extend(mwmanager_prereqs.startup_log_lines(mwmanager_prereqs.startup_logs(game_dir)))
     _record_preflight(manager_dir, game_dir, overrides, statuses)
     offer_mlox_rules(progress, game_dir, manager_dir, first_run=first_run)
-    progress("Preflight passed.")
+    progress(f"{DETAIL_PREFIX}Preflight passed.")    # confirmations go to the detail log (CR-28 stress run)
     return True

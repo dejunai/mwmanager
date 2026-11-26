@@ -189,7 +189,8 @@ class MloxRulesDownload(unittest.TestCase):
         self.assertTrue(mlox.offer_mlox_rules(progress, self.game, self.manager,
                                               first_run=False, opener=opener))
         self.assertEqual(progress.prompts, [])
-        self.assertIn("Preflight: using the mlox rules already in MWManager.", progress.shown())
+        self.assertNotIn("Preflight: using the mlox rules already in MWManager.", progress.shown())
+        self.assertIn("MWMANAGER-DETAIL: Preflight: using the mlox rules already in MWManager.", progress.details())
         opener.assert_not_called()
 
     def test_later_preflight_does_not_ask_when_rules_are_missing(self):

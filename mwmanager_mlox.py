@@ -423,7 +423,7 @@ def offer_mlox_rules(progress, game_dir, manager_dir, *, first_run=False, opener
 
     if not first_run:
         if present and not missing_mlox_rules(folder):
-            _status(progress, "Preflight: using the mlox rules already in MWManager.")
+            _detail(progress, "Preflight: using the mlox rules already in MWManager.")   # routine: detail log only
         return True
 
     choice = _ask_mlox_choice(progress)

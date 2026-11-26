@@ -1252,6 +1252,50 @@ def settle_altered_assets(data_dir: Path, label: str, choice: str) -> int:
     return len(files)
 
 
+def _op_key(op: dict) -> str:
+    return str(op.get("target_relative") or op.get("target") or "").replace("/", "\\").casefold()
+
+
+def _merge_redeployment(deployments: list[dict], entry: dict) -> dict:
+    """Record a deployment, folding it into the record of an earlier deployment of the same archive (or, for a
+    staged-only package, the same staging folder). Deploying a package again after a stop or a restart added a
+    second record with no operations (every file was already linked), so the recovery center and Remove Deployed
+    Plugins listed the mod twice and removing one record left the other claiming the mod (CR-28 stress run).
+    The merged record keeps the first record's id and, for a file both runs placed, the first run's backup: that
+    is the file the mod replaced, not the mod's own earlier copy."""
+    def same(other):
+        if entry.get("archive"):
+            return str(other.get("archive") or "").casefold() == str(entry["archive"]).casefold()
+        return (not other.get("archive") and str(other.get("staging_package") or "").casefold()
+                == str(entry.get("staging_package") or "").casefold())
+
+    earlier = [other for other in deployments if same(other)]
+    if not earlier:
+        deployments.append(entry)
+        return entry
+    merged = earlier[0]
+    operations = {}
+    for other in earlier:
+        for op in other.get("operations") or []:
+            operations.setdefault(_op_key(op), op)
+    for op in entry.get("operations") or []:
+        key = _op_key(op)
+        first = operations.get(key)
+        operations[key] = ({**op, "backup": first.get("backup"), "backup_relative": first.get("backup_relative")}
+                           if first else op)
+    registered = []
+    for other in earlier + [entry]:
+        for name in other.get("registered_archives") or []:
+            if name not in registered:
+                registered.append(name)
+    merged.update({key: entry[key] for key in ("label", "deployed_at", "nexus_mod_id", "nexus_file_id", "rank",
+                                               "plugins", "staging_package", "archives") if key in entry})
+    merged["registered_archives"] = registered
+    merged["operations"] = list(operations.values())
+    deployments[:] = [other for other in deployments if other is merged or not same(other)]
+    return merged
+
+
 def record_deployment(manager: Path, item: dict, package: Path, operations: list[dict],
                       archives: list[Path], registrations: list[str], data_dir: Path | None = None) -> dict:
     state = _read_deployment_state(manager)
@@ -1266,7 +1310,7 @@ def record_deployment(manager: Path, item: dict, package: Path, operations: list
              "staging_package": str(package.resolve()),
              "archives": [path.name for path in archives],
              "registered_archives": registrations, "operations": operations}
-    state["deployments"].append(entry)
+    entry = _merge_redeployment(state["deployments"], entry)
     _write_deployment_state(manager, state)
     if data_dir is not None:
         import mwmanager_journal

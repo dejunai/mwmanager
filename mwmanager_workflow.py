@@ -141,10 +141,34 @@ _DROP_DETAIL_RE = re.compile(r"^\s+(?:ERROR|WARNING|WARN|INFO|NOTE|FIXED|REPAIRE
                              r"|^\s+->|^\s+\d+ texture\(s\) without mipmaps")
 
 
+# The --all check / Generate Patches report outside Tidy (CR-28 stress run: the job window showed all of it).
+# Kept: ERROR/WARN findings with their plugin headers, fix plans, results and anything not listed here. Dropped
+# (detail log only) with their wrapped continuation lines: banners and ALL-CAPS section headings, "Load order from"
+# lines, reading/indexing chatter, "nothing found" confirmations, data-file notes and lines naming where a log or
+# backup was saved.
+_REPORT_BANNER_RE = re.compile(r"^(?:={10,}|-{10,})$")
+_REPORT_DROP_RE = re.compile(
+    r"^(?:Load order from |Reading cells in |Reading plugins |Reading every plugin|Looking for |Working through "
+    r"|indexing master |\[\d+/\d+\] reading |Loaded \d+ plugin\(s\)|Floating items: checking |Pathgrids: "
+    r"|content: \d+ patch-after-mod |mw\w+ data: |Fix log appended to |Dates set on \d+ plugin"
+    r"|Morrowind\.ini's \[Game Files\] updated from |CLEAN: checking |Bug reports: "
+    r"|None\.$|Nothing to (?:change|clean|move|do)\.$|No conflicts found\b|Nothing rebuilt twice\b"
+    r"|Rebuilt interiors: none chosen|Reading objects |Generated patch order saved to |\.\.[\\/]"
+    r"|\(\d+ issue\(s\) in masters are already fixed |Final check \(patches in their load-order positions\):$"
+    r"|[^:]+: 0 ERROR\(s\)(?: remaining)?$|.+\): \d+ fix\(es\) already in the patch, carried over$)")
+_REPORT_KEEP_RE = re.compile(r"^(?:ERROR|WARN|WARNING)\b")
+_SENTENCE_END = (".", ":", ")", "\u2026", "!", "?")
+
+
 def _short_package(name):
     """'Patch for Purists 45096 5.0.7 2026-09-30T01-36Z Le0Pe4QA' -> 'Patch for Purists' (Nexus id onward cut)."""
     short = re.split(r"[ _-]\d{3,6}(?=[ _-])", name, maxsplit=1)[0].strip(" _-")
     return short or name
+
+
+# A clean asset scan ("... 0 in need of repairs") is a confirmation with nothing to act on: detail log only (CR-28
+# stress run; it printed once per staged archive). A scan that found repairs is still shown.
+_CLEAN_ASSET_SCAN_RE = re.compile(r"^(?:.*: )?Asset scan complete: [\d,]+ files? checked; 0 in need of repairs\.?$")
 
 
 class UserOutput:
@@ -158,6 +182,7 @@ class UserOutput:
         self.in_lua = False
         self.skip_children_of = None       # indent of a dropped line: its wrapped continuation lines go too
         self.lua_files, self.lua_codes = set(), set()
+        self.report_wrap = False           # the last dropped report line wraps onto the next, indented line
 
     def _lua_summary(self, files=None):
         count = len(self.lua_codes)
@@ -176,6 +201,8 @@ class UserOutput:
             return [text]
         if text.startswith("MWMANAGER-DETAIL:"):
             return []                      # detail-log only (append() has already recorded it there)
+        if _CLEAN_ASSET_SCAN_RE.match(text.strip()):
+            return []
         indent = len(_INDENT_RE.match(text).group(0))
         stripped = text.strip()
         package = _PACKAGE_RE.match(text)
@@ -210,6 +237,24 @@ class UserOutput:
             self.skip_children_of = indent
             return self._lua_summary(int(summary.group(1)))
         if not self.in_tidy:
+            wrapped, self.report_wrap = self.report_wrap, False
+            if wrapped and indent and stripped:
+                # the wrapped rest of a dropped top-level sentence ("... kept as X.bak), so MGE XE's ... and other"
+                # / "tools see this load order.")
+                self.report_wrap = not stripped.endswith(_SENTENCE_END)
+                return []
+            if _REPORT_KEEP_RE.match(stripped):
+                return [text]
+            if (_REPORT_BANNER_RE.match(stripped) or _REPORT_DROP_RE.match(stripped)
+                    or (indent == 0 and re.fullmatch(r"[A-Z][A-Z ,&/'-]{3,}", re.split(r"[(:]", stripped)[0].strip())
+                        is not None)
+                    or (indent and _DRIVE_PATH_RE.match(stripped))):
+                # an indented line's wrapped continuation goes with it; a banner or heading has no children
+                self.skip_children_of = indent if indent else None
+                self.report_wrap = (not indent and _REPORT_DROP_RE.match(stripped) is not None
+                                    and not stripped.startswith("Load order from ")
+                                    and not stripped.endswith(_SENTENCE_END))
+                return []
             return [text]
         if _DROP_TOP_RE.match(stripped) or _DRIVE_PATH_RE.match(stripped) or _DROP_DETAIL_RE.match(text) \
                 or (self.package and stripped == self.package):

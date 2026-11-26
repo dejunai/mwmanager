@@ -77,6 +77,35 @@ def _display_line(raw: str, limit: int = 600) -> str:
     return line if len(line) <= limit else line[:limit - 1] + "…"
 
 
+def tool_output_tail(recent, limit=12):
+    """The last lines of a Tidy run for a failure message, as the job window would put them: no MWMANAGER-
+    markers, banners, file paths or command-line hints (the CR-28 stress run showed the raw CLI report, paths
+    and "--longpaths-undo" included). The detail log keeps every line."""
+    lines = []
+    for line in recent:
+        line = str(line).strip()
+        if line.startswith("MWMANAGER-PROGRESS:"):
+            line = line.split(":", 1)[1].strip()
+        elif line.startswith("MWMANAGER-"):
+            continue
+        if (not line or set(line) <= set("=-_") or re.search(r"(?<![A-Za-z])[A-Za-z]:[\\/]", line)
+                or re.search(r"(?:^|\s)--[a-z]", line) or line.casefold() in ("plan", "nothing to move.")):
+            continue
+        lines.append(line)
+    return lines[-limit:]
+
+
+def tidy_failure_text(label, code, recent, *, step="Tidy"):
+    """What a failed Tidy step tells the user: what happened, what to do, then Tidy's own last lines."""
+    archive = label.split(" for ", 1)[1] if " for " in label else label
+    text = (f"{label}: {step} failed (exit code {code}), so this batch was not deployed. Batches deployed "
+            f"before it stay deployed.\n\nTo deploy the others, choose Deploy Plugins again, select {archive} "
+            "in the list and choose Deploy All Except Selected. Every line of the failed run is in "
+            "outputs\\mwmanager_status_detail.log.")
+    tail = tool_output_tail(recent)
+    return text + ("\n\nLast lines from Tidy:\n" + "\n".join(tail) if tail else "")
+
+
 TIDY_SCRIPT = APP_DIR / "mwmanager_install.py"
 TIDY_REFUSED = 2                                      # mwmanager_install.py --apply: plan missing or changed
 
@@ -289,7 +318,7 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
     if code == 3:
         raise TidyPlanPaused(f"{label}: option selection was cancelled. Staged files were preserved.")
     if code:
-        raise RuntimeError(f"{label}: the option step failed (exit code {code}).\n\n" + "\n".join(recent)[-4000:])
+        raise RuntimeError(tidy_failure_text(label, code, recent, step="the option step"))
     if ask_only:
         return mods
     refusals, refusal_series = 0, 1
@@ -306,8 +335,7 @@ def run_tidy_steps(py, staging: Path, data_files: Path, progress, label: str, *,
         if code == 0:
             break
         if code != TIDY_REFUSED:
-            raise RuntimeError(f"{label}: Tidy failed (exit code {code}); automatic retry was stopped.\n\n"
-                               + "\n".join(recent)[-4000:])
+            raise RuntimeError(tidy_failure_text(label, code, recent))     # exit 1 is never retried
         # Only the documented plan-mismatch refusal is retryable. Exit 1 and
         # unknown failures retain their diagnostics and never become success.
         refusals += 1
@@ -1166,6 +1194,39 @@ def play_blocked_reason(settings):
             "then Play.")
 
 
+def deployed_files_line(label, linked, skipped):
+    """The job-window line for one deployed package. "Deployed 0 files from X" read as a failure in the CR-28
+    stress run: it meant every file was already in place (a re-run after a stop), or the options chosen left
+    nothing to install."""
+    def files(count):
+        return f"{count:,} file{'' if count == 1 else 's'}"
+    if linked:
+        return f"Deployed {files(linked)} from {label}" + (f" ({skipped:,} already in place)." if skipped else ".")
+    if skipped:
+        return f"{label} was already deployed: its {files(skipped)} are in place."
+    return f"Nothing to deploy from {label}: the options chosen leave no files to install."
+
+
+def staged_folder_choices(others):
+    """Choices for a staging folder an earlier run left (MWManager was closed or stopped mid-batch). others is how
+    many later archives in this batch also left one: after a restart mid-deploy every archive asked the same
+    question, one dialog each (16 in the CR-28 stress run), so one answer can cover them all."""
+    choices = [("Reprocess", "reprocess"), ("Accept staged files as ready", "ready"), ("Cancel", "cancel")]
+    if others:
+        choices.insert(1, (f"Reprocess this and the {others} other left-over folder{'' if others == 1 else 's'}",
+                           "reprocess_all"))
+    return choices
+
+
+def startup_ready_status(settings, play_enabled):
+    """The status line once startup has reconciled the game state. Without it "MWManager loaded; reconciling the
+    current game state..." stayed up for the whole session whenever nothing else spoke (the CR-28 stress run: a
+    clean background integrity check says nothing), so a finished startup looked stuck."""
+    if play_enabled:
+        return "Ready to play."
+    return play_blocked_reason(settings)[1]
+
+
 def core_file_hint(game_dir, manager_dir=None):
     """A first paragraph for a failure message when a shipped ESM/BSA is altered or missing (a plugin check that
     cannot read Tribunal.esm can only be fixed by restoring it), else "". Never writes to the game folder; hashes
@@ -1293,6 +1354,8 @@ class ManagerGUI(tk.Tk):
                 self.after(150, self._open_detected_paths)
         else:
             self.refresh()
+            # reconciled: say so (a resume step below replaces this with its own line)
+            self.status.set(startup_ready_status(self.settings, self.play_button.instate(["!disabled"])))
         from major_master_deploy import recovery_pending
         if not first_run and recovery_pending(APP_DIR):
             self.after(150, self._resume_interrupted_major_masters)
@@ -3139,7 +3202,7 @@ class ManagerGUI(tk.Tk):
                             imported = pull_updated_steam_luas(package, progress.ask_yes_no)
                             if imported:
                                 progress(f"Imported {len(imported)} Lua file(s) from the Steam game for {label}.")
-                        linked, _skipped, operations = deploy_package(
+                        linked, skipped, operations = deploy_package(
                             package, data_dir, label, APP_DIR / "protected_replacer_textures.json",
                             transaction=transaction)
                         archives = sorted(package.glob("*.bsa"), key=lambda path: path.name.casefold())
@@ -3149,7 +3212,7 @@ class ManagerGUI(tk.Tk):
                         record_deployment(APP_DIR, item, package, operations, archives, registrations, data_dir)
                         index_deployment(APP_DIR, data_dir, plugins, archives)
                         _remove_ready_plugin_stage(package)
-                        progress(f"Deployed {linked:,} files from {label}.")
+                        progress(deployed_files_line(label, linked, skipped))
                     transaction.commit()
                 except BaseException:
                     transaction.rollback()
@@ -3178,6 +3241,7 @@ class ManagerGUI(tk.Tk):
             batch_names = []                 # packages Tidy staged so far in this install: they ship missing assets
 
             unpacking = {}                   # archive -> (thread, result, folder): the next one, unpacked early
+            leftover_answer = []             # "reprocess" once the user chose it for every left-over folder
 
             def destination_for(index, item):
                 """staging/plugins/<short mod name>-<Nexus id>. A folder an earlier run named after the whole
@@ -3239,12 +3303,22 @@ class ManagerGUI(tk.Tk):
                 if early:
                     package = result["package"]
                 elif destination.exists():
-                    action = progress.ask_choice(
-                        "Staged folder already exists",
-                        f"A staging folder exists for {archive.name}:\n\n{destination}\n\n"
-                        "Choose how to continue.",
-                        [("Reprocess", "reprocess"), ("Accept staged files as ready", "ready"),
-                         ("Cancel", "cancel")], "cancel")
+                    action = leftover_answer[0] if leftover_answer else None
+                    if action is None:
+                        others = 0
+                        for later_index, later in enumerate(items[index:], index + 1):
+                            later_folder, later_stage = destination_for(later_index, later)
+                            if later_folder.exists() and not (
+                                    later_stage and Path(later_stage.get("staging_package", "")).is_dir()):
+                                others += 1
+                        action = progress.ask_choice(
+                            "Staged folder already exists",
+                            f"A staging folder exists for {archive.name}:\n\n{destination}\n\n"
+                            "Choose how to continue.",
+                            staged_folder_choices(others), "cancel")
+                    if action == "reprocess_all":
+                        leftover_answer.append("reprocess")
+                        action = "reprocess"
                     if action == "cancel":
                         return {"processed": 0, "stopped": True, "cancelled": True, "staging": str(destination)}
                     package = destination
