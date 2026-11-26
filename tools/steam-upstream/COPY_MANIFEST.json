@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-26T03:01:59",
+  "SyncedAt": "2026-11-26T03:13:59",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -20,10 +20,10 @@
     },
     {
       "RelativePath": "CHANGES.md",
-      "Bytes": 82933,
-      "SHA256": "cc5e11871f27c5948c550c18553a6ef62eb8f613ec4b5aeac5246e8f0666df30",
+      "Bytes": 83701,
+      "SHA256": "22e414d0a1496cd3fe4e3bd7ea4e1f85833b34f0c1c620d8a9d5be3a34fdd108",
       "Source": "<morrowind-conflict-tools>\\CHANGES.md",
-      "SourceModified": "2026-11-26T02:58:04"
+      "SourceModified": "2026-11-26T03:10:20"
     },
     {
       "RelativePath": "lua tools\\mwcustomclasspersistence-metadata.toml",
@@ -608,10 +608,10 @@
     },
     {
       "RelativePath": "README.md",
-      "Bytes": 66719,
-      "SHA256": "f92a9b9b637031cc56964572e24bdea1f9fc34b631090c2caed679f6de5e2754",
+      "Bytes": 66664,
+      "SHA256": "17bd190747e476312a3b599f033bf70885306e5f66dfd6e6046cb20a97c16a21",
       "Source": "<morrowind-conflict-tools>\\README.md",
-      "SourceModified": "2026-11-26T02:58:04"
+      "SourceModified": "2026-11-26T03:08:24"
     },
     {
       "RelativePath": "MORE_INFO.md",
@@ -853,10 +853,10 @@
     },
     {
       "RelativePath": "vortex_tidy.py",
-      "Bytes": 185059,
-      "SHA256": "1717efbb130ad2d2a6ceabce97260b3ac86e6e43a2ece5a5480bf48a034889a4",
+      "Bytes": 184998,
+      "SHA256": "480a5a6fd71dc1b2fecc09628c49b38314a136e55e27eb1f2841b321e1db0f94",
       "Source": "<morrowind-conflict-tools>\\vortex_tidy.py",
-      "SourceModified": "2026-11-26T02:57:31"
+      "SourceModified": "2026-11-26T03:08:24"
     },
     {
       "RelativePath": "vortex_tidy_blacklist.txt",
@@ -881,10 +881,10 @@
     },
     {
       "RelativePath": "mwdialog_offlayout.py",
-      "Bytes": 26412,
-      "SHA256": "979e4f8efa2eb254b1ab8d00359db5a0d1c1d929f1344825f3b1dcfe1a025239",
+      "Bytes": 29144,
+      "SHA256": "cabf125f0170976646b9d73d38c0d1d1e1b16a3e60174ba996b2c5f88c3ecf8d",
       "Source": "<Steam Morrowind>\\mwdialog_offlayout.py",
-      "SourceModified": "2026-11-26T02:33:11"
+      "SourceModified": "2026-11-26T03:08:06"
     },
     {
       "RelativePath": "mwdialog_ownership.py",
@@ -2022,9 +2022,9 @@
     {
       "RelativePath": "tests\\test_tidy_convert_omwscripts.py",
       "Source": "<Steam Morrowind>\\tests\\test_tidy_convert_omwscripts.py",
-      "Bytes": 20677,
-      "SHA256": "d50d81c69bc628b2a9c21788520f2b031990dab2186c5a77b9104616be438b32",
-      "SourceModified": "2026-11-26T02:57:50"
+      "Bytes": 22110,
+      "SHA256": "95ca9fe3c1d45fc11cc6695f541985aaba08904ed152533229c56cabf00ed5d9",
+      "SourceModified": "2026-11-26T03:09:07"
     },
     {
       "RelativePath": "tests\\test_tidy_undo_convert.py",
@@ -2050,9 +2050,9 @@
     {
       "RelativePath": "tests\\test_off_layout.py",
       "Source": "<Steam Morrowind>\\tests\\test_off_layout.py",
-      "Bytes": 15114,
-      "SHA256": "2379d7187a4c4ad22a97fa848504251865e7809c93d34aa9e452d5b31f2936ba",
-      "SourceModified": "2026-11-26T02:47:48"
+      "Bytes": 18113,
+      "SHA256": "2d28f54c48fd39673c70bc0f14faa95920b3c1605849dab434469b6ee789bb72",
+      "SourceModified": "2026-11-26T03:10:20"
     }
   ]
 }
