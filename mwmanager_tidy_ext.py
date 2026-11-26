@@ -581,7 +581,12 @@ def plan_mod(mod_dir):
                     move(source, os.path.join(mod_dir, "Off", off_owner, "redundant splash sources", splash_relative),
                          "redundant TGA splash source retained under Off; matching JPEG is deployed")
                     continue
-            openmw_path = ext == ".omwscripts" or any(part.casefold() in OPENMW_DIRS for part in relative_parts)
+            # OpenMW never reads inside MWSE\ (MWSE's own tree): a folder there named openmw, scripts, l10n... is MWSE
+            # payload, as is the Lua and .omwscripts an omw2mwse conversion hosts there for its omwcompat runtime
+            # (MWSE\mods\mwsuite\openmw\<mod>\omw\...; the CR-28 stress run found main.lua sent to Off for that).
+            under_mwse = any(part.casefold() == "mwse" for part in relative_parts[:-1])
+            openmw_path = not under_mwse and (
+                ext == ".omwscripts" or any(part.casefold() in OPENMW_DIRS for part in relative_parts))
             openmw_option_index = next((i for i, part in enumerate(relative_parts[:-1])
                                         if (option_match := NUMBERED_OPTION.match(part))
                                         and "openmw" in option_match.group(2).casefold()), None)
@@ -937,7 +942,7 @@ def openmw_scripts(mod_dir, entries):
     """Find OpenMW Lua scripts in the package, including a nested Data Files folder."""
     found = []
     for base, dirs, files in os.walk(mod_dir):
-        dirs[:] = [d for d in dirs if d.casefold() != "off"]
+        dirs[:] = [d for d in dirs if d.casefold() not in ("off", "mwse")]     # MWSE\ is never OpenMW's: see plan_mod
         relbase = os.path.relpath(base, mod_dir)
         for directory in dirs:
             if directory.casefold() == "scripts":

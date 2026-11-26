@@ -1157,6 +1157,51 @@ class ToolTip:
             self.window = None
 
 
+def play_blocked_reason(settings):
+    """(title, text) for a Play click while Play is unavailable."""
+    if settings.get("first_run", 0) == 1 or settings.get("init_complete", 0) != 1:
+        return "Finish setup first", "Play is available once setup is complete. Choose File > Resume setup."
+    return ("Generate Patches first",
+            "Plugins or the load order changed since patches were last generated. Choose Generate Patches, "
+            "then Play.")
+
+
+def core_file_hint(game_dir, manager_dir=None):
+    """A first paragraph for a failure message when a shipped ESM/BSA is altered or missing (a plugin check that
+    cannot read Tribunal.esm can only be fixed by restoring it), else "". Never writes to the game folder; hashes
+    are cached by size and modification time."""
+    try:
+        import mwmanager_core_game_files as core_files
+        problems = core_files.inspect_core_game_files(game_dir, manager_dir=manager_dir)["problems"]
+    except Exception:
+        return ""
+    if not problems:
+        return ""
+    return (core_files.short_warning(problems).replace(" Play will continue.", "") + "\n\n"
+            + core_files.recovery_advice(game_dir) + "\n\n")
+
+
+def major_master_note(plugin_masters, major_keys, installed):
+    """One sentence for every plugin's not-yet-deployed major masters (each named once), or "". The CR-28 stress run
+    found one sentence per plugin, so a five-plugin FOMOD repeated the same masters three times."""
+    missing, seen = [], set()
+    for masters in plugin_masters.values():
+        for master in masters:
+            key = master.casefold()
+            if key in major_keys and key not in installed and key not in seen:
+                seen.add(key)
+                missing.append(master)
+    return "Required major master(s) must be deployed first: " + ", ".join(missing) if missing else ""
+
+
+def archive_ready_note(item):
+    """The scan note of an archive with no problem. One with no plugin, no game files and no MWSE has nothing to
+    deploy (a readme-only download); saying "Ready" there (CR-28 stress run) was wrong."""
+    if not item.get("plugins") and not item.get("asset_count") and not item.get("has_mwse"):
+        return "Nothing to deploy: the archive has no plugin, game files or MWSE files."
+    return "Ready. Required masters are ordered before their dependents."
+
+
 class ManagerGUI(tk.Tk):
     def _remember_preflight(self, signature: tuple) -> None:
         self._preflight_signature = signature
@@ -1302,7 +1347,8 @@ class ManagerGUI(tk.Tk):
                     return
                 raise error
             counts = result.get("counts") or {}
-            drift = sum(count for status, count in counts.items() if status != "ok")
+            import mwmanager_integrity
+            drift = sum(count for status, count in counts.items() if status not in mwmanager_integrity.OK_STATUSES)
             if drift:
                 self.status.set(
                     f"Integrity warning: {drift} tracked deployment file(s) are missing, "
@@ -2766,13 +2812,11 @@ class ManagerGUI(tk.Tk):
             installed_now = {name.casefold() for name in plugins_in_data(
                 Path(self.settings["game_dir"]) / "Data Files")}
             for item in items:
-                for plugin, masters in item.get("plugin_masters", {}).items():
-                    missing_major = [master for master in masters
-                                     if master.casefold() in major_keys and master.casefold() not in installed_now]
-                    if missing_major:
-                        item["blocked"] = True
-                        item["problem"] = "; ".join(filter(None, (item.get("problem"),
-                            "Required major master(s) must be deployed first: " + ", ".join(missing_major))))
+                note = major_master_note(item.get("plugin_masters", {}), major_keys, installed_now)
+                if note:
+                    item["blocked"] = True
+                    if note not in (item.get("problem") or ""):
+                        item["problem"] = "; ".join(filter(None, (item.get("problem"), note)))
             unsafe_items = [item for item in items if item.get("blocked_payloads")]
             if unsafe_items:
                 allowed = self._show_blocked_archive_warning(unsafe_items)
@@ -2866,7 +2910,7 @@ class ManagerGUI(tk.Tk):
             item = by_id.get(selection[0]) if selection else None
             notes = item.get("problem") or ("Newer archive selected for duplicate plugin names: " +
                     ", ".join(item.get("superseded_plugins", [])) if item.get("superseded_plugins") else
-                    "Ready. Required masters are ordered before their dependents.")
+                    archive_ready_note(item))
             if item and item.get("personal"):
                 notes = ("Personal mod: never update-checked or searched on Nexus, and marked not distributable "
                          "in exported profiles. " + str(notes))
@@ -3678,7 +3722,8 @@ class ManagerGUI(tk.Tk):
                 if report_changed:
                     self._show_report("MWManager report", report_path)
                 else:
-                    messagebox.showerror("Generate Patches failed", str(error), parent=self)
+                    messagebox.showerror("Generate Patches failed",
+                                         core_file_hint(self.settings["game_dir"]) + str(error), parent=self)
                 log = JobView.detail_log_path(APP_DIR / "outputs" / "mwmanager_status.log")   # every line, Tidy's too
                 if not log.is_file():
                     log = APP_DIR / "outputs" / "mwmanager_status.log"
@@ -3727,9 +3772,16 @@ class ManagerGUI(tk.Tk):
         if not self._resolve_pending_load_order("playing"):
             return
         self._update_action_buttons()
-        if self.play_button.instate(["disabled"]):
-            return
         import mwmanager_core_game_files as core_files
+        if self.play_button.instate(["disabled"]):
+            # The button looked enabled (files changed since the last refresh) and the click did nothing: say why
+            # (CR-28 stress run). An altered core file is often the reason, so that check still runs first.
+            core_files.ensure_core_game_files_for_play(
+                self.settings["game_dir"], notify="gui", parent=self, cli=False)
+            title, text = play_blocked_reason(self.settings)
+            self.status.set(text)
+            messagebox.showinfo(title, text, parent=self)
+            return
         core_files.ensure_core_game_files_for_play(
             self.settings["game_dir"], notify="gui", parent=self, cli=False)
         run_full = messagebox.askyesno(

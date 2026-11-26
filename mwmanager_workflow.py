@@ -72,11 +72,13 @@ def log_tone(message):
 
 
 MIN_COUNTER = 20          # smaller counters ("1 of 1", "3 of 10") are left to the moving bar
+COUNTER_INTERVAL = 20.0   # an "N of M" count reaches the job window at most this often (seconds)
+_COUNTER_RE = re.compile(r"(?:^|\b)(\d[\d,]*)(?:\s+of\s+|\s*/\s*)(\d[\d,]*)\b", re.I)
 
 
 def progress_fraction(message):
     """Only explicit counters are determinate; never invent time estimates."""
-    match = re.search(r"(?:^|\b)(\d[\d,]*)(?:\s+of\s+|\s*/\s*)(\d[\d,]*)\b", message, re.I)
+    match = _COUNTER_RE.search(message)
     if not match:
         return None
     current, total = (int(value.replace(",", "")) for value in match.groups())
@@ -89,6 +91,35 @@ def is_action_line(message):
     line = text.strip()
     return (bool(line) and text[:1] not in (" ", "\t") and re.match(r"[A-Za-z\[]", line) is not None
             and not line.split("(")[0].strip().isupper() and not re.match(r"[A-Za-z]:\\", line))
+
+
+class CounterCadence:
+    """'N of M' progress in the job window at most every COUNTER_INTERVAL seconds (CR-28 stress run: "Inspecting
+    archive 1 of 36" ... "36 of 36" in 13 s, "Applying Tidy moves 0/1/159 of 159" in one second). One count is the
+    lines with the same leading words before the counter and the same M; its first line always shows, then one
+    every interval. Lines held back still go to the detail log and still move the progress bar."""
+
+    def __init__(self, clock=time.monotonic, interval=COUNTER_INTERVAL):
+        self.clock, self.interval, self.shown_at = clock, interval, {}
+
+    @staticmethod
+    def series(text):
+        text = str(text)
+        match = _COUNTER_RE.search(text)
+        if not match or progress_fraction(text) is None:
+            return None
+        lead = re.findall(r"[^\W\d_]+", text[:match.start()])[:2]
+        return " ".join(lead).casefold(), int(match.group(2).replace(",", ""))
+
+    def show(self, text):
+        key = self.series(text)
+        if key is None:
+            return True
+        now, last = self.clock(), self.shown_at.get(key)
+        if last is not None and now - last < self.interval:
+            return False
+        self.shown_at[key] = now
+        return True
 
 
 _INDENT_RE = re.compile(r"[ \t]*")
@@ -297,6 +328,7 @@ class JobView:
         self._record(header)
         self._record(header, detail=True)
         self.user_output = UserOutput()
+        self.cadence = CounterCadence()
         self.control = control
         self.title.set(title)
         self.description.set(description)
@@ -348,7 +380,14 @@ class JobView:
         for text in self.user_output.feed(message):
             self._show(text)
 
+    cadence = None
+
     def _show(self, text):
+        if self.cadence is None:
+            self.cadence = CounterCadence()
+        if not text.startswith("MWMANAGER-STAGE:") and not self.cadence.show(text):
+            self._move_bar(text)                 # held back: detail log only (append recorded it), the bar moves
+            return
         self._record(text)
         stopping = self.control is not None and self.control.cancelled.is_set()
         if text.startswith("MWMANAGER-STAGE:"):
@@ -371,6 +410,9 @@ class JobView:
             if self.follow.get():
                 self.log.see("end")
             self.log.configure(state="disabled")
+        self._move_bar(text)
+
+    def _move_bar(self, text):
         fraction = progress_fraction(text)
         # a counter only fills the bar when it counts enough to show progress; "0 of 1" then "1 of 1" (one per
         # package) flipped it empty to full over and over. Once a counter is done, the bar moves on its own again.

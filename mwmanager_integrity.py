@@ -25,6 +25,20 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+# statuses that are not drift: "disabled" is a deployed plugin MWManager itself moved to disabled_plugins (the
+# CR-28 stress run counted every newly deployed, not yet enabled plugin as "missing")
+OK_STATUSES = frozenset({"ok", "disabled"})
+
+
+def _disabled_copy(manager_dir: Path, data_dir: Path, target: Path) -> Path | None:
+    """Where MWManager keeps the plugin `target` while it is disabled (its own folder, then the older place)."""
+    for folder in (manager_dir / "disabled_plugins", data_dir / "Off" / "Disabled Plugins"):
+        candidate = folder / target.name
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _states(manager_dir: Path) -> list[tuple[str, dict]]:
     return [
         ("plugin", _read_json(manager_dir / "plugin_deployments.json")),
@@ -66,6 +80,8 @@ def inspect(manager_dir: Path, data_dir: Path, *, include_untracked: bool = Fals
                     "source": str(source.resolve()) if source else None,
                     "status": "ok",
                     "expected_sha256": expected,
+                    "deployed_stat": ((operation.get("size"), operation.get("mtime_ns"))
+                                      if operation.get("size") is not None and operation.get("mtime_ns") else None),
                     "deployed_at": deployment.get("deployed_at"),
                     "deployment_index": deployment_index,
                     "operation_index": operation_index,
@@ -94,6 +110,7 @@ def inspect(manager_dir: Path, data_dir: Path, *, include_untracked: bool = Fals
             ambiguous = True
         source = Path(item["source"]) if item.get("source") else None
         expected = item.pop("expected_sha256", None)
+        deployed_stat = item.pop("deployed_stat", None)
         item.pop("deployed_at", None)
         item.pop("deployment_index", None)
         item.pop("operation_index", None)
@@ -106,6 +123,8 @@ def inspect(manager_dir: Path, data_dir: Path, *, include_untracked: bool = Fals
         if ambiguous:
             item.update(status="ownership-ambiguous",
                         detail="historical deployment records lack an ordering timestamp")
+        elif not target.exists() and _disabled_copy(manager_dir, data_dir, target):
+            item.update(status="disabled", detail="disabled by MWManager (kept in disabled_plugins)")
         elif not target.exists():
             item.update(status="missing", detail="deployed target is missing")
         elif not target.is_file():
@@ -124,6 +143,12 @@ def inspect(manager_dir: Path, data_dir: Path, *, include_untracked: bool = Fals
                         item["link"] = "copy"
                 except OSError:
                     item["link"] = "unknown"
+        elif deployed_stat:
+            # current deployments record the size and time as deployed instead of a hash (plugin_install): a
+            # hard-linked file changes both names at once, so a change shows as another size or time
+            now = target.stat()
+            if (now.st_size, now.st_mtime_ns) != tuple(deployed_stat):
+                item.update(status="modified", detail="size or modification time differs from the deployment")
         else:
             item.update(status="unverifiable",
                         detail="deployment predates content hashing and the live source is hard-linked")
@@ -144,7 +169,7 @@ def inspect(manager_dir: Path, data_dir: Path, *, include_untracked: bool = Fals
 
 def changed_only(report: dict) -> list[dict]:
     return [item for item in report.get("items", [])
-            if item.get("status") not in {"ok"}]
+            if item.get("status") not in OK_STATUSES]
 
 
 def render(report: dict) -> list[str]:

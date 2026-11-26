@@ -543,6 +543,24 @@ def _check_staging_archive(archive: Path, seven_zip: str | None) -> None:
         raise ValueError(f"Archive expands beyond the safety limit: {archive.name}")
 
 
+def seven_zip_error(output, path, returncode=None):
+    """7-Zip's complaint about one archive, without the lines that only echo its path ("ERROR: <path> : <path>")
+    or a section header, e.g. "Cannot open the file as [7z] archive; Unexpected end of archive" (the CR-28 stress
+    run showed the raw output, the full path twice, in the archive picker)."""
+    text, own = str(output or ""), {str(path).casefold(), os.path.basename(str(path)).casefold()}
+    parts = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.rstrip(":").casefold() in {"errors", "warnings"}:
+            continue
+        line = re.sub(r"^(?:open\s+)?error:\s*", "", line, flags=re.I).strip()
+        if not line or any(own_name and own_name in line.casefold() for own_name in own):
+            continue
+        if line not in parts:
+            parts.append(line)
+    return "; ".join(parts) or (f"7-Zip exited {returncode}" if returncode else "7-Zip could not read it")
+
+
 def _seven_zip_listing(path: Path, seven_zip: str | None) -> tuple[
         dict[str, str], list[dict[str, str]], str | None]:
     if not seven_zip:
@@ -552,8 +570,7 @@ def _seven_zip_listing(path: Path, seven_zip: str | None) -> tuple[
                                 capture_output=True, text=True, errors="replace", timeout=180,
                                 **_quiet_subprocess_options())
         if result.returncode:
-            return {}, [], (result.stderr or result.stdout or
-                            f"7-Zip exited {result.returncode}").strip()
+            return {}, [], seven_zip_error(result.stderr or result.stdout, path, result.returncode)
         archive, records = _parse_seven_zip_listing(result.stdout)
         # Some 7-Zip versions omit archive-level data with -ba. In that case the
         # first record is the first member, so preserve it rather than losing a path.

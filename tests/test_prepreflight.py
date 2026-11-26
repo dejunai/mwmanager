@@ -473,8 +473,10 @@ class PreflightTests(Base):
         self.assertEqual(progress.asked, [])
         baseline.assert_called_once()
         self.assertEqual(before, snapshot(game))
-        self.assertIn("Preflight: MWSE is the latest build (1dce8de6b87c)", progress.lines)
-        self.assertIn("Preflight: Morrowind.ini found (contents are not checked)", progress.lines)
+        # passing checks go to the detail log only (the job window shows what the user can act on)
+        self.assertIn("MWMANAGER-DETAIL: Preflight: MWSE is the latest build (1dce8de6b87c)", progress.lines)
+        self.assertIn("MWMANAGER-DETAIL: Preflight: Morrowind.ini found (contents are not checked)", progress.lines)
+        self.assertNotIn("Preflight: MWSE is the latest build (1dce8de6b87c)", progress.lines)
 
     def test_report_is_only_the_listed_checks(self):
         game = make_game(self.tmp / "g")

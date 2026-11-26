@@ -82,7 +82,7 @@ def ensure_archive_tool(manager_dir: Path, progress, *, opener=urllib.request.ur
     manager_dir = Path(manager_dir)
     found = _seven_zip(manager_dir)
     if found:
-        progress(f"Preflight: archive tool found at {found} (ZIP, 7z and RAR).")
+        progress(f"{DETAIL_PREFIX}Preflight: archive tool found at {found} (ZIP, 7z and RAR).")
         return True
     if not IS_WINDOWS:
         progress("Preflight: full 7-Zip is required for ZIP, 7z and RAR archives; install 7z and retry.")
@@ -267,13 +267,24 @@ def quarantine_mod_files(game_dir: Path, manager_dir: Path, files: list[Path]) -
     return root
 
 
+# The job window shows only lines the user can act on (CR-28 stress run): a check that passed ("SHA-256 matches",
+# "found", "installed", "is the latest build") goes to the detail log. report["notices"] are the status lines that
+# ask for something (an MWSE update, a first launch), and are shown.
+DETAIL_PREFIX = "MWMANAGER-DETAIL: "
+
+
+def status_line(report, line):
+    """The progress line for one report["status"] entry: shown when it is a notice, else detail-log only."""
+    return ("" if line in report.get("notices", ()) else DETAIL_PREFIX) + "Preflight: " + line
+
+
 def inspect_install(game_dir: Path, manager_dir: Path | None = None, progress=None, *,
                     check_latest=mwmanager_prereqs.latest_mwse_build) -> dict:
     """Read-only. Returns blockers (missing requirements), hash_mismatches, recommendations and status lines."""
     game_dir = Path(game_dir).resolve()
     data_dir = game_dir / "Data Files"
     report = {"game_dir": str(game_dir), "blockers": [], "missing_keys": [], "hash_mismatches": [],
-              "recommendations": [], "status": [], "mwse": {}}
+              "recommendations": [], "status": [], "notices": [], "mwse": {}}
     if _find(game_dir, "Morrowind.exe") is None:
         report["blockers"].append(f"Morrowind.exe was not found in {game_dir}")
     else:
@@ -293,7 +304,7 @@ def inspect_install(game_dir: Path, manager_dir: Path | None = None, progress=No
                 report["blockers"].append(f"Missing core game file: Data Files\\{name}")
                 continue
             if progress:
-                progress(f"Preflight: hashing {name}…")
+                progress(f"{DETAIL_PREFIX}Preflight: hashing {name}…")
             actual = _sha256(path)
             known = mwmanager_prereqs.CORE_FILE_HASHES[name]
             if actual.casefold() in known:
@@ -337,14 +348,18 @@ def inspect_install(game_dir: Path, manager_dir: Path | None = None, progress=No
         elif state == "outdated":
             have = mwse["build"][:12] if mwse.get("build") else "no build recorded (no mwse-version.txt)"
             report["status"].append(f"MWSE is not the latest build: installed {have}, latest {latest[:12]}")
+            report["notices"].append(report["status"][-1])
         else:
             report["status"].append(f"MWSE latest build unknown: {why}")
+            report["notices"].append(report["status"][-1])
         if not mwse.get("updater"):
             report["recommendations"].append(("mwse", "MWSE-Update.exe was not found beside MWSE.dll. Reinstall "
                                               "MWSE so its updater is present; MWManager always recommends the "
                                               "latest MWSE."))
     report["code_patch_log"] = mwmanager_prereqs.code_patch_log(game_dir)        # informational only
     report["status"].append(mwmanager_prereqs.code_patch_log_line(report["code_patch_log"]))
+    if not report["code_patch_log"].get("found"):
+        report["notices"].append(report["status"][-1])          # asks the user to run the game once
     report["missing_keys"] = [k for k in mwmanager_prereqs.missing_keys(found)]
     return report
 
@@ -398,7 +413,7 @@ def confirm_first_launch(game_dir: Path, progress, overrides: list, *, launcher=
     info = mwmanager_prereqs.startup_logs(game_dir)
     if info["fresh"]:
         for line in mwmanager_prereqs.startup_log_lines(info):
-            progress("Preflight: " + line)
+            progress(DETAIL_PREFIX + "Preflight: " + line)           # confirmations: the detail log only
         return True
     if not hasattr(progress, "ask_choice"):
         progress("Preflight: the game has not been started with this setup yet (no fresh mgeXE.log/MWSE.log); "
@@ -972,7 +987,7 @@ def run_preinstall(game_dir: Path, manager_dir: Path, progress, *,
         baseline_ready = True
     while True:
         for line in report["status"]:
-            progress("Preflight: " + line)
+            progress(status_line(report, line))
         if not report["blockers"]:
             break
         if not _offer_missing(report, progress, game_dir, manager_dir, archive_dir,
