@@ -425,13 +425,6 @@
       "SourceModified": "2026-11-25T20:01:01"
     },
     {
-      "RelativePath": "mwdialog_check.conflict.blacklist.txt",
-      "Bytes": 787,
-      "SHA256": "f898f0b6151b238210f2b601abc6bdc7563bcd283cb7808c590b8aadb140cc98",
-      "Source": "<Steam Morrowind>\\mwdialog_check.conflict.blacklist.txt",
-      "SourceModified": "2026-11-10T04:24:27"
-    },
-    {
       "RelativePath": "mwdialog_bugreports.py",
       "Source": "<morrowind-conflict-tools>\\mwdialog_bugreports.py",
       "Bytes": 7550,

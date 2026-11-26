@@ -910,9 +910,10 @@ def restore_disabled_plugins(data_dir, names):
     return restored
 
 
-# CONFLICT_BLACKLIST_DEFAULT is gone: upstream 52296ab stopped using that name. OAAB_Saplings.esm is now
-# CONFLICT_BLACKLIST_BUILTIN (always loses whether or not a file exists). The always-lose file path is still
-# CONFLICT_BLACKLIST_FILE (mwmanager_conflict_blacklist.txt).
+# Upstream builds no plugin into the always-loses list any more (CONFLICT_BLACKLIST_DEFAULT and
+# CONFLICT_BLACKLIST_BUILTIN are gone, and so is the shipped starter file): the list is only what the user's
+# own file holds, empty to begin with. Its path is CONFLICT_BLACKLIST_FILE (mwmanager_conflict_blacklist.txt);
+# its header text comes from upstream's conflict_blacklist_header(path).
 DEFAULT_RULES = f"""; {os.path.basename(RULES_FILE)}: your load order rules for mwmanager.py --sort
 ;
 ; The same format as mlox rules (mlox_user.txt / mlox_base.txt). Rules here win over mlox's own:
