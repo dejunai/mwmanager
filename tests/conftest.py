@@ -15,6 +15,14 @@ import mwdialog_paths  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
+def _reap_tk_after_test():
+    """Free every test's Tcl interpreters on this thread before the next test can call update()."""
+    yield
+    from tk_lifetime import reap_tk
+    reap_tk()
+
+
+@pytest.fixture(autouse=True)
 def _private_temp(tmp_path, monkeypatch):
     temp = tmp_path / "temp"
     temp.mkdir()

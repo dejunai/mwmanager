@@ -199,3 +199,18 @@ def run_in_background(widget, work, done, *, name: str = "MWManager background t
     thread.start()
     PollLoop(widget, interval_ms, tick).start(first_delay_ms=interval_ms)
     return thread
+
+
+
+def reap_tk() -> None:
+    """Collect destroyed Tk objects on this thread.
+
+    Tk widgets and Tcl interpreters sit in reference cycles, so destroy() does not free them right away.
+    If the collector runs during a later update() -- often in the next test -- freeing that interpreter
+    mid-update can abort the process on Windows. Call this on the thread that created the windows, when
+    no update() or mainloop is running.
+
+    Live roots are left alone: destroying the last Tcl interpreter on Python 3.9 can leave the process
+    unable to create another (tcl_findLibrary / auto.tcl). Tests still have to destroy their own windows.
+    """
+    collect_tk_garbage()

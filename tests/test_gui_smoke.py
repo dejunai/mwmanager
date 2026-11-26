@@ -249,19 +249,36 @@ class GuiSmokeTests(unittest.TestCase):
         self.app.report_callback_exception = lambda *exc: self.errors.append(exc)
 
     def tearDown(self):
-        try:
-            self.app.destroy()
-        except Exception:
-            pass
+        app = getattr(self, "app", None)
+        if app is not None:
+            for name in ("_major_master_dialog",):
+                dialog = getattr(app, name, None)
+                if dialog is not None:
+                    try:
+                        dialog.destroy()
+                    except tk.TclError:
+                        pass
+            try:
+                app.destroy()
+            except tk.TclError:
+                pass
+            self.app = None
         for attr, value in self._saved.items():
             setattr(self.g, attr, value)
         self.tmp.cleanup()
+        # reap_tk in the autouse fixture runs after this, once no update() is in progress
 
     def pump(self, seconds=0.4):
         end = threading.Event()
-        self.app.after(int(seconds * 1000), end.set)
+        try:
+            self.app.after(int(seconds * 1000), end.set)
+        except tk.TclError:
+            return
         while not end.is_set():
-            self.app.update()
+            try:
+                self.app.update()
+            except tk.TclError:
+                return
 
     def test_main_window_lists_plugins_and_marks_new_ones(self):
         self.pump()

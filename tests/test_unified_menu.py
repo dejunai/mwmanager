@@ -12,13 +12,55 @@ SUITE = ROOT / "reference" / "mwse-lua-guards" / "mods"
 LUAJIT = ROOT / "tools" / "luajit" / ("luajit.exe" if os.name == "nt" else "luajit")
 
 
+
+def _registers_own_mcm(mod_dir: Path) -> bool:
+    """True when this mod registers its own Mod Config page, not a UI widget or another mod's page."""
+    owns = re.compile(r"(?:^|\W)(?:[\w.]+):register\s*\(\s*\)|mwse\.registerModConfig\s*\(")
+    for path in mod_dir.rglob("*.lua"):
+        if owns.search(path.read_text(encoding="utf-8")):
+            return True
+    return False
+
+def _settings_still_in_folder(mod_dir: Path) -> bool:
+    """The hosted mod still ships its own settings (an mcm.lua, or settings built in main.lua)."""
+    return (mod_dir / "mcm.lua").is_file() or "createTableVariable" in (mod_dir / "main.lua").read_text(encoding="utf-8")
+
+
+def _host_includes_guest_settings(host_dir: Path, guest: str) -> bool:
+    """The host's Lua loads the guest's settings module (include/require), so the guest is on its tab."""
+    wanted = re.compile(rf"""(?:include|require)\(\s*["']{re.escape(guest)}(?:\.mcm)?["']\s*\)""")
+    return any(wanted.search(path.read_text(encoding="utf-8")) for path in host_dir.rglob("*.lua"))
+
+
+
 class UnifiedMenu(unittest.TestCase):
     def test_its_tab_list_is_the_suite(self):
         text = MENU.read_text("utf-8")
         block = text[text.index("local SUITE = {"):]
         block = block[:block.index("}")]
-        names = sorted(p.name for p in SUITE.iterdir() if (p / "main.lua").is_file())
-        self.assertEqual(sorted(re.findall(r'"([^"]+)"', block)), names)
+        listed = sorted(re.findall(r'"([^"]+)"', block))
+        # A suite mod gets a tab when it registers its own MCM page (template:register or
+        # mwse.registerModConfig). A mod the menu declares as "has no tab of its own: its
+        # settings are in <host>'s ... menu" is still part of the suite: its settings file
+        # stays in its own folder and the host's tab includes it, so the guest is covered
+        # rather than omitted.
+        own_page = sorted(p.name for p in SUITE.iterdir()
+                          if (p / "main.lua").is_file() and _registers_own_mcm(p))
+        self.assertEqual(listed, own_page)
+        hosted = re.findall(r"(\w+) has no tab of its own:\s*its settings are in (\w+)'s", text)
+        on_disk = {p.name for p in SUITE.iterdir() if (p / "main.lua").is_file()}
+        covered = set(listed)
+        for guest, host in hosted:
+            self.assertIn(guest, on_disk)
+            self.assertIn(host, listed, f"{guest}'s settings should be on {host}'s tab")
+            self.assertNotIn(guest, listed)
+            self.assertFalse(_registers_own_mcm(SUITE / guest), guest)
+            self.assertTrue(_settings_still_in_folder(SUITE / guest),
+                            f"{guest} must keep its own settings file")
+            self.assertTrue(_host_includes_guest_settings(SUITE / host, guest),
+                            f"{host} should include {guest}'s settings on its tab")
+            covered.add(guest)
+        self.assertEqual(sorted(covered), sorted(on_disk))
 
     def test_it_ships_with_a_metadata_file_that_loads_it_before_the_suite(self):
         toml = (ROOT / "reference" / "mwmanager-menu" / "metadata" / "mwmanagermenu-metadata.toml").read_text("utf-8")
