@@ -2887,6 +2887,77 @@ def _mark_grass_options(records: list[dict], mod_dir: Path, data_files: Path | N
         record["docs"] = note + ("\n\n" + record["docs"] if record.get("docs") else "")
 
 
+
+def _grass_dir(mod_dir: Path) -> Path | None:
+    """The package's Grass folder, if it already exists (any letter case)."""
+    try:
+        return next((p for p in Path(mod_dir).iterdir() if p.is_dir() and p.name.casefold() == "grass"), None)
+    except OSError:
+        return None
+
+
+def _represented_plugin_names(records: list[dict]) -> set[str]:
+    """Plugin file names already owned by an option, so a Grass\\ copy is not listed twice."""
+    names = set()
+    for record in records:
+        payload = record.get("payload_files") or {}
+        extra = record.get("all_payload_files") or {}
+        for rel, src in list(payload.items()) + list(extra.items()):
+            try:
+                names.add(Path(rel).name.casefold())
+            except (OSError, TypeError):
+                pass
+            try:
+                names.add(Path(src).name.casefold())
+            except (OSError, TypeError):
+                pass
+    return names
+
+
+def _discover_grass_plugins(mod_dir: Path, records: list[dict] | None = None,
+                            installed: set[str] | None = None) -> list[dict]:
+    r"""Optional entries for MGE XE grass plugins tidy has already moved into this package's Grass\
+    folder. Grass\ is otherwise skipped by option discovery, so without this a plugin such as
+    Rem-TOTSP.esp would vanish from the mock FOMOD after tidy. The FOMOD description is left empty
+    (no ModuleConfig.xml text is invented, and a blank TES3 header is not used as a stand-in)."""
+    folder = _grass_dir(mod_dir)
+    if not folder:
+        return []
+    installed = installed or set()
+    represented = _represented_option_sources(list(records or ()))
+    represented_names = _represented_plugin_names(list(records or ())) | {p.name.casefold() for p in represented}
+    records = []
+    try:
+        paths = sorted((p for p in folder.iterdir() if p.is_file() and p.suffix.casefold() == ".esp"),
+                       key=lambda p: p.name.casefold())
+    except OSError:
+        return []
+    for path in paths:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            resolved = path
+        if resolved in represented or path.name.casefold() in represented_names:
+            continue
+        if not _is_grass_plugin(path):
+            continue
+        masters = _plugin_masters(path)
+        targets = masters - BASE_GAME_MASTERS
+        records.append({"key": "grass-plugin:" + path.name.casefold(),
+                        "group_key": "grass", "group_label": "Grass (MGE XE groundcover)",
+                        "selection_type": "SelectAny", "path": path, "number": 950,
+                        "label": path.name, "required": False, "always_optional": True,
+                        "recommended": False, "targets": sorted(targets),
+                        "compatible": sorted(targets & installed),
+                        "missing_masters": sorted(targets - installed),
+                        "docs": "", "fomod_description": "",
+                        "payload_files": {path.name: path}, "plugin_choice": True,
+                        "mod_dir": mod_dir})
+        represented.add(resolved)
+        represented_names.add(path.name.casefold())
+    return records
+
+
 def _numbered_folders(root: Path, record: dict, mod_dir: Path) -> list[dict]:
     """A freshly extracted companion's top-level numbered folders ("010 HD Worldspace", "012 Remiros'
     Groundcover for TOTSP"): one option each; "0" folders are its core and always go in."""
@@ -2908,6 +2979,9 @@ def _companion_options(root: Path, record: dict, mod_dir: Path, output_dir, inst
     """A companion with options of its own (a FOMOD, or numbered folders): its own options window. Returns what
     to install (its 00 folders always, plus what was chosen), or None when it has no options."""
     records = _discover_fomod(root, installed) if _has_fomod(root) else _numbered_folders(root, record, mod_dir)
+    records.extend(_discover_grass_plugins(root, records, installed))
+    if root.resolve() != Path(mod_dir).resolve():
+        records.extend(_discover_grass_plugins(mod_dir, records, installed))
     if not any(not r.get("required") for r in records):
         return None
     _mark_grass_options(records, mod_dir)
@@ -3418,6 +3492,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
         records.extend(_discover_plugin_choices(mod_dir, installed, _represented_option_sources(records)))
         records.extend(_companion_records(mod_dir))
         records = _drop_superseded_choices(mod_dir, records, installed)
+        records.extend(_discover_grass_plugins(mod_dir, records, installed))
         _mark_grass_options(records, mod_dir, data_files)    # always shown; ticked only for a known groundcover
         _mark_maintainer_needs(records, installed)        # a note's needed mod waits like a master
         _attach_requires(records, mod_dir, output_dir.parent)   # "Requires: <plugin>, Nexus <id>"
@@ -3492,6 +3567,7 @@ def process_staging(staging: str | os.PathLike, data_files: str | os.PathLike,
             records[0]["required"] = True
         records.extend(_companion_records(mod_dir))
         records = _drop_superseded_choices(mod_dir, records, installed)
+        records.extend(_discover_grass_plugins(mod_dir, records, installed))
         _mark_grass_options(records, mod_dir, data_files)    # always shown; ticked only for a known groundcover
         _mark_maintainer_needs(records, installed)        # a note's needed mod waits like a master
         _attach_requires(records, mod_dir, output_dir.parent)   # "Requires: <plugin>, Nexus <id>"

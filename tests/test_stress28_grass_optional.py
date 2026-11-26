@@ -145,5 +145,85 @@ class OptionalGrassDescription(unittest.TestCase):
             self.assertEqual(mock_fomod._option_description(grass, package), docs.strip())
 
 
+
+class GrassStillOptionalAfterTidy(unittest.TestCase):
+    def setUp(self):
+        tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+
+    def _records(self, package, installed=None):
+        """The same discovery order the installer uses after tidy has already run."""
+        installed = installed or set()
+        records = mock_fomod._discover(package, installed)
+        records.extend(mock_fomod._discover_plugin_choices(
+            package, installed, mock_fomod._represented_option_sources(records)))
+        records.extend(mock_fomod._discover_grass_plugins(package, records, installed))
+        mock_fomod._mark_grass_options(records, package)
+        return records
+
+    def test_a_grass_plugin_already_in_grass_is_still_an_optional_choice(self):
+        """After tidy moves Rem-TOTSP.esp into the package Grass\\ folder, the mock FOMOD still
+        lists it as an optional plugin. Rem-TOTSP.esp has no TES3 description and no
+        ModuleConfig.xml; fomod_description is left empty so a description can be hardcoded later.
+        Left unchecked: the prerequisite (Remiros' Groundcover) is not staged, and the filename
+        is not enough for the existing 'for <mod>' tick rule."""
+        package = self.root / "TOTSP"
+        plugin = package / "Grass" / "Rem-TOTSP.esp"
+        grass_plugin(plugin)
+        (package / "TOTSP.esm").write_bytes(b"TES3")     # the package master, not an option
+        records = self._records(package)
+        grass = [r for r in records if r.get("payload_files") and "Rem-TOTSP.esp" in {
+            Path(name).name for name in r["payload_files"]}]
+        self.assertEqual(len(grass), 1)
+        record = grass[0]
+        self.assertFalse(record["required"])
+        self.assertTrue(record.get("always_optional") or not record.get("recommended"))
+        self.assertFalse(record.get("recommended"))
+        self.assertEqual(record["group_label"], "Grass (MGE XE groundcover)")
+        self.assertEqual(record["selection_type"], "SelectAny")
+        self.assertEqual(record["label"], "Rem-TOTSP.esp")
+        self.assertEqual(record.get("fomod_description") or "", "")
+        self.assertEqual(mock_fomod._plugin_description(plugin), "")
+        # the generic MGE XE note is not a plugin description Dej would hardcode
+        self.assertFalse(mock_fomod._option_description(record, package).startswith("Remiros"))
+
+    def test_a_non_grass_plugin_in_the_grass_folder_is_not_listed(self):
+        package = self.root / "TOTSP"
+        package.mkdir()
+        # a TES3 header and a door, not grass statics: not an MGE XE groundcover plugin
+        import struct
+
+        def sub(tag, data):
+            return tag + struct.pack("<I", len(data)) + data
+
+        def record(tag, body):
+            return tag + struct.pack("<III", len(body), 0, 0) + body
+
+        hedr = sub(b"HEDR", struct.pack("<fI", 1.3, 0) + b"\0" * 288 + struct.pack("<I", 1))
+        door = sub(b"NAME", b"somedoor\0") + sub(b"MODL", b"d\\door.nif\0")
+        path = package / "Grass" / "SomeDoor.esp"
+        path.parent.mkdir(parents=True)
+        path.write_bytes(record(b"TES3", hedr) + record(b"DOOR", door))
+        self.assertFalse(mock_fomod._is_grass_plugin(path))
+        self.assertEqual(self._records(package), [])
+
+    def test_a_numbered_folder_option_is_not_listed_again_from_grass(self):
+        """If the optional folder is still present (tidy has not run), discovery keeps that
+        entry and does not add a second Rem-TOTSP.esp row from Grass\\."""
+        package = self.root / "SGR"
+        option = package / "012 Remiros' Groundcover for TOTSP"
+        grass_plugin(option / "Rem-TOTSP.esp")
+        # a leftover or pre-move copy in Grass\\ should not produce a duplicate
+        grass_plugin(package / "Grass" / "Rem-TOTSP.esp")
+        records = mock_fomod._numbered_folders(package, {"label": "SGR"}, package)
+        records.extend(mock_fomod._discover_grass_plugins(package, records))
+        mock_fomod._mark_grass_options(records, package)
+        totsp = [r for r in records if "TOTSP" in r["label"] or r["label"] == "Rem-TOTSP.esp"]
+        self.assertEqual(len(totsp), 1)
+        self.assertEqual(totsp[0]["label"], "Remiros' Groundcover for TOTSP")
+        self.assertEqual(totsp[0].get("fomod_description") or "", "")
+
+
 if __name__ == "__main__":
     unittest.main()
