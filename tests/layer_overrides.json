@@ -42,6 +42,7 @@
   "rules_sources",
   "run_full",
   "run_remove_generated",
+  "run_update_rules",
   "save_pending_cell_conflicts",
   "write_bug_reports",
   "write_collide_data",

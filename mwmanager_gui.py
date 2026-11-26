@@ -1393,6 +1393,7 @@ class ManagerGUI(tk.Tk):
         tools_menu = tk.Menu(menu, tearoff=False)
         tools_menu.add_command(label="Recovery center…", command=self.show_recovery_center)
         tools_menu.add_separator()
+        tools_menu.add_command(label="Update rules…", command=self.update_rules)
         tools_menu.add_command(label="Integrity report…", command=self.show_integrity_report)
         tools_menu.add_command(label="Capture integrity snapshot…", command=self.capture_integrity_snapshot)
         tools_menu.add_command(label="Compare integrity snapshot…", command=self.compare_integrity_snapshot)
@@ -1427,7 +1428,33 @@ class ManagerGUI(tk.Tk):
         scroll.pack(side="right", fill="y")
         ttk.Button(frame, text="Close", command=dialog.destroy).pack(side="bottom", anchor="e", pady=(10, 0))
 
+    def update_rules(self):
+        """Tools > Update rules: same path as --update-rules."""
+        import mwmanager_mlox as mlox
+        if not self._setup_done("preflight_complete") and self.settings.get("first_run", 0) == 1:
+            messagebox.showinfo("Update rules",
+                                "Update rules is available after first-run preflight finishes.",
+                                parent=self)
+            return
+        game_dir = self.settings.get("game_dir")
+        if not game_dir:
+            messagebox.showinfo("Update rules", "Choose a game folder in Options first.", parent=self)
+            return
+
+        def worker(progress):
+            return mlox.update_rules(progress, APP_DIR, game_dir=game_dir)
+
+        def completed(result, error):
+            if error:
+                messagebox.showerror("Update rules", "The mlox rules could not be updated.", parent=self)
+                self.status.set("Update rules stopped with an error.")
+                return
+            self.status.set("mlox rules update finished.")
+
+        self._run_progress_job("Update rules", "Checking for newer mlox rules…", worker, completed)
+
     def show_integrity_report(self):
+
         import mwmanager_integrity
         try:
             report = mwmanager_integrity.inspect(
@@ -5159,6 +5186,7 @@ class ManagerGUI(tk.Tk):
             description = "MWManager is inspecting archive contents to identify plugins, MWSE files, FOMOD options, asset counts, and download dates."
         else:
             description = {
+                "Update rules": "Check for newer mlox community rules, download them only if they have changed, then write pruned copies for the sorter. Your mlox_my_rules.txt is not overwritten.",
                 "First-run preflight": "Check the game and prerequisites. Only setup and configuration choices need your input.",
                 "Initial setup": "Sort and tidy the shipped files. Safe fixes apply automatically; output is shown below.",
                 "Catalog": "Build the plugin and archive catalog. Completed setup checkpoints will be kept.",

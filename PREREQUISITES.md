@@ -70,6 +70,12 @@ changes anything. The prompt has four buttons:
 MWManager does not bypass Nexus or GitHub download controls. It opens the official page, lets the user complete
 the download, retains the selected file under `pre-reqs`, and then processes it locally.
 
+**mlox rules.** After the prerequisite checks pass, first-run preflight asks whether to **Download the latest
+mlox rules (from the mlox project on GitHub)** or **Keep using my own mlox rules**. The download fetches
+`mlox_base.txt` and `mlox_user.txt` from the [mlox-rules](https://github.com/DanaePlays/mlox-rules) project
+(the source official mlox uses) into MWManager's `mlox` folder. Existing files are backed up first. A failed
+or offline download leaves what you already have and does not stop preflight. Later deploy preflights keep using the rules already in MWManager and do not ask again; `--init`/`--sort` still offer to download them if they are missing.
+
 After preflight passes, the first run offers to record a snapshot of the install as it is (a fresh install
 or an existing playthrough with mods) in `journal\baseline`. Rollback returns the game folder to that
 snapshot. From the command line: `mwmanager.py "<game>\Data Files" --capture-baseline`, `--verify`,
@@ -85,6 +91,9 @@ Morrowind.ini archive registrations, generated/repaired ESPs, generated assets, 
 pre-`--full` MWSE Lua suite. Originals are copied into the journal's content-addressed `originals` folder before
 they are changed. The component-specific deployment manifests remain for uninstall/redeploy, but are not used as
 a substitute for the install rollback ledger.
+
+
+**Update rules.** After first-run preflight, Tools > Update rules (and `--update-rules`) check the mlox-rules project and download `mlox_base.txt` and `mlox_user.txt` only when they are newer, then prune conflicting downstream rules against those new files, then save pruned effective copies plus a small metadata file in MWManager's `mlox` folder. Personal rules go in `mlox_my_rules.txt` (highest mlox priority; never overwritten by a download). The cleanup omits user or personal rules that duplicate or conflict with `mlox_base.txt`, and rules that only mention uninstalled plugins. Originals stay in place; `--sort` reads the effective copies.
 
 ## Tools
 
@@ -102,8 +111,8 @@ On the command line (`--init`, `--full`), MWManager also checks MWSE and skips t
 
 The GUI runs the same preflight (above) before plugins or major masters are deployed. Its overrides (a
 modified core file, MGE XE not confirmed as G7, MWSE update declined or unknown) are recorded in
-`outputs/mwmanager_preinstall_audit.json`. Preflight no longer scans for plugins, MWSE.log, mlox rules,
-write access or drive letters; staging-drive and path-length checks happen in the deploy steps themselves.
+`outputs/mwmanager_preinstall_audit.json`. Preflight no longer scans for plugins, MWSE.log, write access or
+drive letters; staging-drive and path-length checks happen in the deploy steps themselves.
 
 ## Interactive Nexus browser
 
