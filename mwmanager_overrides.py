@@ -292,7 +292,7 @@ def repair_sound_missing_message():
 
 def rules_sources(args, game_dir):
     """Highest priority first: MWManager's rules file, then personal mlox_my_rules.txt,
-    community mlox_user.txt and mlox_base.txt (effective copies when present)."""
+    community mlox_user.txt and mlox_base.txt."""
     import mwmanager_mlox as mlox
     sources = [manager_file(RULES_FILE)]
     if not getattr(args, "no_mlox_rules", False):
@@ -310,8 +310,8 @@ def rules_sources(args, game_dir):
 
 
 def run_update_rules(args):
-    """--update-rules: fetch newer community mlox rules if any, then write pruned
-    effective copies for --sort. Same path as Tools > Update rules."""
+    """--update-rules: fetch newer community mlox rules if any, then comment out
+    conflicting rules in the live files. Same path as Tools > Update rules."""
     import mwmanager_mlox as mlox
     game_dir = os.path.dirname(os.path.abspath(args.data_dir))
     def progress(message):
@@ -1206,10 +1206,11 @@ def _main(argv=None):
     lo.add_argument("--no-mlox-rules", action="store_true",
                     help=f"with --init/--sort: don't import or use community mlox rules; use only {RULES_FILE}")
     lo.add_argument("--update-rules", action="store_true",
-                    help="download newer mlox community rules if the mlox-rules project has them, then write "
-                         "pruned effective copies for --sort (duplicates of, or conflicts with, mlox_base, "
-                         "and rules that only mention uninstalled plugins). Originals are left in place; "
-                         "mlox_my_rules.txt is never overwritten. Same path as Tools > Update rules")
+                    help="download newer mlox community rules if the mlox-rules project has them, then "
+                         "comment out conflicting rules in the live mlox files (duplicates of, or conflicts with, mlox_base, "
+                         "and rules that only mention uninstalled plugins). Community files are not backed up; "
+                         "mlox_my_rules.txt is never overwritten by a download and keeps at most one rolling backup. "
+                         "Same path as Tools > Update rules")
     lo.add_argument("--bug-reports", action="store_true",
                     help="write <plugin>.bugreport.txt for plugins with problems of their own (also done by "
                          "--fix and --asset-check)")

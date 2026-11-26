@@ -14,20 +14,21 @@ Downstream pruning
 Local rule files sit downstream of the published mlox-rules base (mlox_base.txt).
 Tools > Update rules and --update-rules first check upstream and fetch only if
 the community files are newer, then run this cleanup against those new files
-(or the current files, if nothing was fetched), then save the pruned effective
-copies and the download metadata. --sort reads the effective copies and leaves
-the originals in place. A rule in mlox_user.txt or
-mlox_my_rules.txt is omitted from the effective copy when:
+(or the current files, if nothing was fetched), then save the download
+metadata. --sort reads the live mlox_base.txt, mlox_user.txt and
+mlox_my_rules.txt in the managed folder. A conflicting rule is commented out
+in place, with one MWManager comment line just above it, when:
 
   * it duplicates an [Order] pair, or an identical rule, already in mlox_base.txt
   * it reverses an [Order] pair, or would form a cycle with, [Order] rules in
     mlox_base.txt
   * every plugin it names is not installed, so the rule cannot apply
 
-mlox_base.txt itself is only trimmed of rules that name no installed plugin,
-and of identical duplicate blocks. MWManager's own rules file is not rewritten.
-mlox_my_rules.txt is never edited in place; the effective copy is what --sort
-reads. Each dropped rule is logged with its source file and the reason.
+mlox_base.txt itself is only commented for rules that name no installed plugin,
+and for identical duplicate blocks. MWManager's own rules file is not rewritten.
+Community files are not backed up (the published copies stay on GitHub).
+mlox_my_rules.txt gets at most one rolling backup, overwritten when the file
+actually changes. Each dropped rule is logged with its source file and the reason.
 """
 from __future__ import annotations
 
@@ -40,7 +41,7 @@ import urllib.request
 from email.utils import format_datetime
 from datetime import datetime, timezone
 
-from mwdialog_loadorder import name_matcher, parse_rules
+from mwdialog_loadorder import name_matcher, parse_rules, rule_entry_lines
 
 MLOX_RULE_URLS = {
     "mlox_base.txt": "https://raw.githubusercontent.com/DanaePlays/mlox-rules/main/mlox_base.txt",
@@ -66,7 +67,9 @@ CHOICE_MESSAGE = (
     "using your own mlox rules if you already have them.\n\n"
     "The download fetches mlox_base.txt and mlox_user.txt from the mlox-rules "
     "project on GitHub (DanaePlays/mlox-rules), the source official mlox uses. "
-    "Existing community rule files are backed up before they are replaced. "
+    "Community rule files are replaced when a newer copy is downloaded; the "
+    "published originals stay on GitHub, so MWManager does not keep a backup "
+    "of them. "
     "Your personal file mlox_my_rules.txt is not downloaded or overwritten; "
     "put your own rules there. They take priority over the community files.\n\n"
     "The mlox tool is MIT-licensed. If you have edited mlox_user.txt yourself, "
@@ -78,15 +81,6 @@ CHOICE_MESSAGE = (
 def mlox_rules_folder(manager_dir):
     """Where MWManager keeps mlox rule files, relative to the configured manager directory."""
     return os.path.join(manager_dir, "mlox")
-
-
-def mlox_rules_backup_dir(manager_dir):
-    return os.path.join(manager_dir, "backups", "rules")
-
-
-def effective_rule_name(name):
-    root, ext = os.path.splitext(name)
-    return root + ".effective" + ext
 
 
 def present_mlox_rules(folder, names=None):
@@ -114,36 +108,40 @@ def installed_plugins(game_dir):
 def mlox_sort_paths(manager_dir):
     """Managed mlox files --sort reads, highest mlox priority first (personal, user, base).
 
-    An effective copy is preferred when present, so pruning can drop conflicts
-    without rewriting the user's originals.
+    Live files only: mlox_base.txt, mlox_user.txt and mlox_my_rules.txt. Stale
+    *.effective.txt copies from earlier MWManager versions are ignored.
     """
     folder = mlox_rules_folder(manager_dir)
-    paths = []
+    return [os.path.join(folder, name)
+            for name in MLOX_SOURCE_NAMES
+            if os.path.isfile(os.path.join(folder, name))]
+
+
+def personal_rules_backup_path(folder):
+    """Single rolling backup of the user's mlox_my_rules.txt, beside the live file."""
+    return os.path.join(folder, MLOX_MY_RULES + ".bak")
+
+
+def stale_effective_path(folder, name):
+    root, ext = os.path.splitext(name)
+    return os.path.join(folder, root + ".effective" + ext)
+
+
+def remove_stale_effective_rules(folder):
+    """Delete leftover *.effective.txt copies for the known mlox rule files."""
+    removed = []
     for name in MLOX_SOURCE_NAMES:
-        effective = os.path.join(folder, effective_rule_name(name))
-        original = os.path.join(folder, name)
-        if os.path.isfile(effective):
-            paths.append(effective)
-        elif os.path.isfile(original):
-            paths.append(original)
-    return paths
+        path = stale_effective_path(folder, name)
+        if os.path.isfile(path):
+            try:
+                os.remove(path)
+            except OSError:
+                continue
+            removed.append(path)
+    return removed
 
 
-def backup_rule_file(source, backup_dir, suffix="pre-download"):
-    """Copy an existing rules file aside before it is overwritten. Never reuses a backup name."""
-    os.makedirs(backup_dir, exist_ok=True)
-    name = os.path.basename(source)
-    dest = os.path.join(backup_dir, f"{name}.{suffix}")
-    if os.path.exists(dest):
-        n = 2
-        while os.path.exists(os.path.join(backup_dir, f"{name}.{suffix}-{n}")):
-            n += 1
-        dest = os.path.join(backup_dir, f"{name}.{suffix}-{n}")
-    shutil.copy2(source, dest)
-    return dest
-
-
-def copy_game_mlox_rules(game_dir, folder, *, backup_dir=None, only_missing=True, names=None):
+def copy_game_mlox_rules(game_dir, folder, *, only_missing=True, names=None):
     """Copy rule files from <game>/mlox into the managed folder. Returns the names copied.
 
     mlox_my_rules.txt is only copied when the managed copy is missing: it is the
@@ -163,8 +161,6 @@ def copy_game_mlox_rules(game_dir, folder, *, backup_dir=None, only_missing=True
         if (only_missing or personal) and os.path.isfile(target):
             continue
         os.makedirs(folder, exist_ok=True)
-        if os.path.isfile(target) and backup_dir and not personal:
-            backup_rule_file(target, backup_dir, suffix="pre-game-import")
         shutil.copy2(source, target)
         copied.append(name)
     return copied
@@ -270,23 +266,23 @@ def _classify_fetch_error(exc):
     return "error"
 
 
-def download_mlox_rules(folder, *, names=None, overwrite=True, opener=None, backup_dir=None, timeout=20,
+def download_mlox_rules(folder, *, names=None, overwrite=True, opener=None, timeout=20,
                         conditional=False, dry_run=False, save_meta=True):
     """Fetch community rule files into folder.
 
-    All requested files are downloaded and checked first. Existing files are
-    backed up, then replaced only if every requested file arrived intact. A
-    failed or offline download leaves existing files in place. Personal
-    mlox_my_rules.txt is never fetched or overwritten.
+    All requested files are downloaded and checked first, then replaced only
+    if every requested file arrived intact. Community files are not backed up
+    (the published copies stay on GitHub). A failed or offline download leaves
+    existing files in place. Personal mlox_my_rules.txt is never fetched or
+    overwritten.
 
     When conditional is True, If-None-Match / If-Modified-Since is sent from
     the managed metadata file (and a 304 is treated as already up to date).
 
-    Returns a dict with ok, written, backed_up, unchanged, errors, status.
-    backed_up maps a rule name to the backup path (for tests and the detail log).
+    Returns a dict with ok, written, unchanged, errors, status.
     """
     wanted = [name for name in (names if names is not None else MLOX_RULE_NAMES) if name != MLOX_MY_RULES]
-    result = {"ok": True, "written": [], "backed_up": {}, "unchanged": [], "errors": [],
+    result = {"ok": True, "written": [], "unchanged": [], "errors": [],
               "status": "ok", "meta": None}
     if not overwrite:
         wanted = [name for name in wanted if not os.path.isfile(os.path.join(folder, name))]
@@ -294,8 +290,6 @@ def download_mlox_rules(folder, *, names=None, overwrite=True, opener=None, back
         result["status"] = "unchanged"
         return result
     opener = opener or urllib.request.urlopen
-    if backup_dir is None:
-        backup_dir = os.path.join(os.path.dirname(folder), "backups", "rules")
     meta = _load_meta(folder)
     result["meta"] = meta
     fetched = {}
@@ -350,8 +344,6 @@ def download_mlox_rules(folder, *, names=None, overwrite=True, opener=None, back
                 stream.write(content)
             temps.append((name, target, temp, content))
         for name, target, temp, content in temps:
-            if os.path.isfile(target):
-                result["backed_up"][name] = backup_rule_file(target, backup_dir)
             os.replace(temp, target)
             result["written"].append(name)
             _store_file_meta(meta, name, header_map.get(name), content)
@@ -414,7 +406,6 @@ def offer_mlox_rules(progress, game_dir, manager_dir, *, first_run=False, opener
     to the detail log. Returns True so a failed download does not stop preflight.
     """
     folder = mlox_rules_folder(manager_dir)
-    backup_dir = mlox_rules_backup_dir(manager_dir)
     present = present_mlox_rules(folder)
     import_personal_rules(game_dir, folder)
 
@@ -425,7 +416,7 @@ def offer_mlox_rules(progress, game_dir, manager_dir, *, first_run=False, opener
 
     choice = _ask_mlox_choice(progress)
     if choice != CHOICE_DOWNLOAD:
-        copied = copy_game_mlox_rules(game_dir, folder, backup_dir=backup_dir, only_missing=True)
+        copied = copy_game_mlox_rules(game_dir, folder, only_missing=True)
         if present or copied or os.path.isfile(os.path.join(folder, MLOX_MY_RULES)):
             _status(progress, "Preflight: keeping your existing mlox rules.")
         else:
@@ -433,7 +424,7 @@ def offer_mlox_rules(progress, game_dir, manager_dir, *, first_run=False, opener
         return True
 
     _status(progress, "Preflight: downloading the latest mlox rules...")
-    result = download_mlox_rules(folder, overwrite=True, opener=opener, backup_dir=backup_dir)
+    result = download_mlox_rules(folder, overwrite=True, opener=opener)
     if result["ok"]:
         _status(progress, "Preflight: downloaded the latest mlox rules.")
         return True
@@ -446,7 +437,12 @@ def offer_mlox_rules(progress, game_dir, manager_dir, *, first_run=False, opener
     return True
 
 
-# ---- pruning (effective copies for --sort) ---------------------------------
+# ---- pruning (in-place comments on the live files) ---------------------------
+
+# mlox treats a semicolon as the start of a comment (parse_rules splits on ";").
+# Official rule files use ";;" for whole-line comments. MWManager does the same.
+DISABLE_MARKER = ";; MWManager: disabled"
+
 
 def _installed_map(plugins):
     return {name.casefold(): name for name in (plugins or [])}
@@ -509,38 +505,122 @@ def _prune_reason(kind, entries, src, base_rules, base_pairs, reaches, installed
     if kind == "order":
         pairs = _order_pairs(entries)
         if pairs and all(pair in base_pairs for pair in pairs):
-            return "duplicates [Order] pairs already in mlox_base.txt"
+            return "duplicates [Order] in mlox_base.txt"
         for a, b in pairs:
             if a == b:
                 continue
+            if (b, a) in base_pairs:
+                return "reverses [Order] in mlox_base.txt"
             if reaches(b, a):
-                return f"conflicts with mlox_base.txt ([Order] {a} before {b} is reversed or would cycle)"
+                return "would cycle with [Order] in mlox_base.txt"
     return None
 
 
-def _write_effective(path, source_name, kept):
-    lines = [
-        "; Effective mlox rules written by MWManager. Do not edit this file.",
-        f"; Source: {source_name}",
-        "",
-    ]
-    for kind, entries, _src in kept:
-        tag = {"order": "Order", "nearstart": "NearStart", "nearend": "NearEnd", "exact": "Exact"}.get(kind, kind)
-        lines.append(f"[{tag}]")
-        lines.extend(entries)
-        lines.append("")
-    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    with open(path, "w", encoding="utf-8", newline="\n") as stream:
-        stream.write("\n".join(lines).rstrip() + "\n")
+def _is_comment_line(line):
+    return line.lstrip(" 	").startswith(";")
 
 
-def prune_mlox_rules(folder, plugins=None, *, progress=None, dry_run=False):
-    """Write effective copies of the managed mlox files. Originals are not rewritten.
+def _is_disable_comment(line):
+    return line.lstrip(" 	").lstrip(";").lstrip().startswith("MWManager: disabled")
 
-    Returns a list of (source, reason) for each dropped rule. dry_run computes
-    the same list without writing the effective copies.
+
+def _comment_out_line(line):
+    """Prefix an active rule line with ';; '. Leave existing comments untouched."""
+    if _is_comment_line(line):
+        return line
+    stripped = line.lstrip(" 	")
+    leading = line[:len(line) - len(stripped)]
+    return f"{leading};; {stripped}"
+
+
+def _disable_comment(reason, when):
+    return f"{DISABLE_MARKER} - {reason} ({when.isoformat()})"
+
+
+def _source_line(src):
+    name, sep, num = src.rpartition(":")
+    if not sep:
+        return src, None
+    try:
+        return name, int(num)
+    except ValueError:
+        return src, None
+
+
+def _read_rule_file(path):
+    with open(path, "rb") as stream:
+        data = stream.read()
+    newline = "\r\n" if b"\r\n" in data.splitlines(keepends=True)[:1] or b"\r\n" in data else "\n"
+    if b"\r\n" in data:
+        newline = "\r\n"
+    elif b"\n" in data:
+        newline = "\n"
+    else:
+        newline = "\n"
+    text = data.decode("cp1252", errors="replace")
+    ended = text.endswith(("\n", "\r"))
+    return text.splitlines(), newline, ended, data
+
+
+def _disable_rule_in_lines(lines, tag_line, reason, when):
+    """Comment out one rule block in a list of lines. tag_line is 1-based.
+
+    Idempotent: no second MWManager comment if one is already immediately
+    above the tag, and lines that are already comments are left as they are.
     """
+    tag_idx = tag_line - 1
+    if tag_idx < 0 or tag_idx >= len(lines):
+        return False
+    changed = False
+    if tag_idx == 0 or not _is_disable_comment(lines[tag_idx - 1]):
+        lines.insert(tag_idx, _disable_comment(reason, when))
+        tag_idx += 1
+        changed = True
+    commented = _comment_out_line(lines[tag_idx])
+    if commented != lines[tag_idx]:
+        lines[tag_idx] = commented
+        changed = True
+    for index in rule_entry_lines(lines, tag_idx + 1):
+        commented = _comment_out_line(lines[index])
+        if commented != lines[index]:
+            lines[index] = commented
+            changed = True
+    return changed
+
+
+def _write_rule_file(path, lines, newline, ended, original, *, backup=False):
+    text = newline.join(lines)
+    if ended or lines:
+        if not text.endswith(("\r\n", "\n")):
+            text += newline
+    new = text.encode("cp1252", errors="replace")
+    if new == original:
+        return False
+    if backup and original:
+        bak = personal_rules_backup_path(os.path.dirname(path))
+        with open(bak, "wb") as stream:
+            stream.write(original)
+    temp = path + ".tmp"
+    with open(temp, "wb") as stream:
+        stream.write(new)
+    os.replace(temp, path)
+    return True
+
+
+def prune_mlox_rules(folder, plugins=None, *, progress=None, dry_run=False, when=None):
+    """Comment out conflicting rules in the live managed mlox files.
+
+    Returns a list of (source, reason) for each newly disabled rule. dry_run
+    computes the same list without writing. Running it again is idempotent:
+    already-disabled rules are ignored by parse_rules, existing MWManager
+    comments are not repeated, and already-commented lines are not re-prefixed.
+    """
+    from datetime import date as date_type
+
     installed_low = _installed_map(plugins) if plugins is not None else None
+    when = when or datetime.now().date()
+    if not isinstance(when, date_type) and hasattr(when, "date"):
+        when = when.date()
     dropped = []
     base_path = os.path.join(folder, "mlox_base.txt")
     base_rules, _ignored = parse_rules(base_path) if os.path.isfile(base_path) else ([], None)
@@ -553,36 +633,55 @@ def prune_mlox_rules(folder, plugins=None, *, progress=None, dry_run=False):
     plans = []
     # Base is pruned only for missing plugins and identical duplicate blocks.
     if os.path.isfile(base_path):
-        kept, seen = [], set()
+        disable, seen = [], set()
         for kind, entries, src in base_rules:
             key = (kind, tuple(e.casefold() for e in entries))
             if key in seen:
-                dropped.append((src, "duplicate of an earlier rule in mlox_base.txt"))
+                reason = "duplicate of an earlier rule in mlox_base.txt"
+                disable.append((src, reason))
+                dropped.append((src, reason))
                 continue
             if installed_low is not None and not _rule_has_installed_plugins(kind, entries, installed_low):
-                dropped.append((src, "mentions only plugins that are not installed"))
+                reason = "mentions only plugins that are not installed"
+                disable.append((src, reason))
+                dropped.append((src, reason))
                 continue
             seen.add(key)
-            kept.append((kind, entries, src))
-        plans.append(("mlox_base.txt", kept))
+        plans.append(("mlox_base.txt", disable))
 
     for name in ("mlox_user.txt", MLOX_MY_RULES):
         path = os.path.join(folder, name)
         if not os.path.isfile(path):
             continue
         rules, _ignored = parse_rules(path)
-        kept = []
+        disable = []
         for kind, entries, src in rules:
             reason = _prune_reason(kind, entries, src, base_rules, base_pairs, reaches, installed_low)
             if reason:
+                disable.append((src, reason))
                 dropped.append((src, reason))
-            else:
-                kept.append((kind, entries, src))
-        plans.append((name, kept))
+        plans.append((name, disable))
 
     if not dry_run:
-        for name, kept in plans:
-            _write_effective(os.path.join(folder, effective_rule_name(name)), name, kept)
+        remove_stale_effective_rules(folder)
+        for name, disable in plans:
+            if not disable:
+                continue
+            path = os.path.join(folder, name)
+            if not os.path.isfile(path):
+                continue
+            lines, newline, ended, original = _read_rule_file(path)
+            # Apply from the bottom so earlier line numbers stay valid.
+            items = []
+            for src, reason in disable:
+                _name, tag_line = _source_line(src)
+                if tag_line:
+                    items.append((tag_line, reason))
+            items.sort(reverse=True)
+            for tag_line, reason in items:
+                _disable_rule_in_lines(lines, tag_line, reason, when)
+            _write_rule_file(path, lines, newline, ended, original,
+                             backup=(name == MLOX_MY_RULES))
 
     if progress is not None:
         for src, reason in dropped:
@@ -595,12 +694,12 @@ def update_rules(progress, manager_dir, *, plugins=None, game_dir=None, opener=N
 
     Runs in this order:
       1. Check upstream and fetch community files only if they are newer.
-      2. Run conflicting-rule cleanup against those NEW files (or the current
-         files, if nothing new came down).
-      3. Save the pruned effective copies and the download metadata.
+      2. Run conflicting-rule cleanup in place against those NEW files (or the
+         current files, if nothing new came down).
+      3. Save the download metadata (the live files were already written by
+         prune, including any single rolling backup of mlox_my_rules.txt).
     """
     folder = mlox_rules_folder(manager_dir)
-    backup_dir = mlox_rules_backup_dir(manager_dir)
     os.makedirs(folder, exist_ok=True)
     import_personal_rules(game_dir, folder)
     if plugins is None and game_dir:
@@ -608,8 +707,8 @@ def update_rules(progress, manager_dir, *, plugins=None, game_dir=None, opener=N
 
     _status(progress, "Checking for newer mlox rules...")
     # 1. Check and fetch. Community files are replaced now so step 2 reads them.
-    #    Metadata is not written yet.
-    result = download_mlox_rules(folder, overwrite=True, opener=opener, backup_dir=backup_dir,
+    #    Metadata is not written yet. Community files are not backed up.
+    result = download_mlox_rules(folder, overwrite=True, opener=opener,
                                  conditional=True, dry_run=dry_run, save_meta=False)
     if not result["ok"]:
         if result["status"] == "offline":
@@ -631,7 +730,7 @@ def update_rules(progress, manager_dir, *, plugins=None, game_dir=None, opener=N
     if dropped:
         _status(progress, f"Skipped {len(dropped)} mlox rules that conflict with newer rules or mention mods you don't have.")
 
-    # 3. Save metadata last, with the effective copies already written by prune.
+    # 3. Save metadata last, after prune has updated the live files.
     if not dry_run and result.get("meta") is not None:
         _save_meta(folder, result["meta"])
     return result["ok"] or os.path.isfile(os.path.join(folder, "mlox_base.txt"))
