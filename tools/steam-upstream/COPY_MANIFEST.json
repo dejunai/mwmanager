@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-25T17:14:41",
+  "SyncedAt": "2026-11-25T18:03:53",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -1070,9 +1070,9 @@
     {
       "RelativePath": "tests\\test_guards_default_off.py",
       "Source": "<Steam Morrowind>\\tests\\test_guards_default_off.py",
-      "Bytes": 1948,
-      "SHA256": "23fafe4a37bcaee12e8e129b488cf31af79e5b492058b1979ca039c1318aa0dd",
-      "SourceModified": "2026-11-24T00:40:17"
+      "Bytes": 1952,
+      "SHA256": "dac44d9f839794e4ef1e64b46ee4f48ccb9e28c4cef92e74615e282a3717985d",
+      "SourceModified": "2026-11-25T17:28:07"
     },
     {
       "RelativePath": "tests\\test_doubled_deleted.py",
