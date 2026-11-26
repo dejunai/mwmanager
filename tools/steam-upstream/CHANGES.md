@@ -1,3 +1,57 @@
+# One Off layout for every tool: Off\<plugin>\<reason>\<path>, tidy migrates the older ones, MAX_PATH files are listed, never moved (2026-11-26)
+
+- Decided by dej (dejunai): everything the tools set aside in a staged mod goes to `Off\<plugin>\<reason>\<path relative to the
+  mod>`. `docs/OFF-LAYOUT.md` is the spec: `<plugin>` (the mod's first plugin, else its first `.omwscripts` stem as omw2mwse
+  names it, else the mod's name; sanitised the converter's way), the fixed list of reasons with a one-line meaning each,
+  no nested reasons, collisions (" (2)", folders merge), journal and undo. New shared module `mwdialog_offlayout.py`.
+- Reasons renamed to say what they hold: `names` -> `ascii`, `longpaths` -> `shortened paths`, `sound` -> `converted sounds`,
+  `textures` -> `converted textures`, `text keys` -> `fixed text keys`, `texture paths` -> `fixed texture paths`,
+  `added masters` -> `plugin repairs`, `unused` -> `unused assets`, `orphaned` -> `orphaned animations`,
+  `converted` -> `repaired originals`, `Damaged assets` -> `broken`... The migration maps every older spelling (MWManager's too).
+- `mwdialog_generated.off_dest`, `backup_asset_original`, the asset check, the sound/text-key/long-path/plugin repairs and tidy
+  (broken dummies, normal maps, the hybrid OpenMW move, whole-package moves) all write the new layout; what finds an
+  original, a broken file or an unused-assets record also finds the older layouts.
+- vortex_tidy plans (one plan, one journal, `--undo` reverses it byte for byte) the migration of loose files in `Off\`,
+  `Off\<reason>\<plugin>\`, `Off\OpenMW\<mod>\`, `Off\<path>` and `Off\<name>\...`. Idempotent. Never touches what an
+  omw2mwse manifest lists, never touches a folder already in the layout, leaves the unrecognised alone with one NOTE.
+- MAX_PATH: a file whose path is over 259 characters, or would be after the move, is never moved (moving it would make it
+  worse). `Off\<plugin>\max_path_too_long.txt` lists them, one path per line relative to the mod's folder, deduped,
+  refreshed, removed when empty; journaled (`write` ops), `--undo` restores the previous text or removes the file.
+- Merging an `Off\OpenMW\<mod>\` package into an existing one merges folders instead of numbering them.
+- The OpenMW converter needs Python 3.11+ (omw2mwse 0.2.3 imports `tomllib` in sidecar.py and build.py; no pyproject, no
+  machine-readable minimum yet), these tools stay 3.9+: `setup_converter` probes the interpreter that would run it
+  (`interpreter_version`: this Python, or a python executable asked for its version; an .exe/.cmd launcher is not judged)
+  against `CONVERTER_MIN_PYTHON = (3, 11)`; older = the converter is treated as missing, one WARNING (`needs Python 3.11+,
+  but it would run on Python 3.x`), the mod's whole package goes to `Off\\<plugin>\\OpenMW\\`. A `requires-python` in the
+  converter's pyproject.toml or a `requiresPython` in its `--json` replaces the constant. Tests: gate, probe, declared minimum,
+  JSON field, one warning for several mods, apply + undo.
+- Tests: `tests/test_off_layout.py` (reasons, owner rule, every legacy layout, idempotence, undo, collisions, manifest
+  protection, the MAX_PATH list, Python 3.9 syntax); expected paths in six older tests updated.
+
+# vortex_tidy: a mod its author excluded from conversion is set aside with a plain WARNING; the tracked blacklist file is removed (2026-11-26)
+
+- A mod whose original author asked to be excluded from mwsuite's conversion utility (omw2mwse 8367f55: it writes
+  nothing, not even a manifest, answers verdict `blocked` and exits 0) is treated like any blocked mod: its whole package
+  goes to `Off\<plugin name>\OpenMW\` untouched. The one WARNING says, with the mod name, that the original mod author
+  has asked that the mod be excluded from mwsuite's conversion utility and to contact them for details. Tidy never shows
+  or logs the converter's code, file, line or message for it (not in the plan, the output or the journal).
+- Fixed: a `blocked` verdict with nothing written was skipped at `--apply` (it counted as converted and stayed put). Any
+  `blocked` entry now moves its package, with or without output to undo. A `reason` of any shape (a dict with missing or
+  odd keys, a string, a list, null) and alerts that aren't dicts no longer stop tidy; a missing manifest is fine.
+- The tracked `mwdialog_check.conflict.blacklist.txt` at the repo root (Dej's old hand-made list; no tool read it) is
+  removed. Nobody gets another person's always-loses picks; the list is the generated one in `generated\`.
+
+# mwdialog_check: no plugin is built into the always-loses list; its header names the file it is in (2026-11-26)
+
+- `OAAB_Saplings.esm` is no longer built in (`CONFLICT_BLACKLIST_BUILTIN` is removed). Nothing is pre-decided for
+  anyone: with no `mwdialog_check.conflict.blacklist.txt`, or an empty one, no plugin always loses, and the first
+  `[7]` / `[8]` pick writes only the header and that pick. A list you already have is read as it is, `OAAB_Saplings.esm`
+  included if it is one of your entries.
+- The generated header names the file it is actually written to (`conflict_blacklist_header(path)`), not always
+  `mwdialog_check.conflict.blacklist.txt`: MWManager keeps the list in `mwmanager_conflict_blacklist.txt`, and a hand-written
+  list converted under any file name gets that name in its header. `CONFLICT_BLACKLIST_HEADER` is gone (use the function).
+- Tests: no built-in entry; the header follows the file name (default, MWManager's name, an absolute path).
+
 # docs: README and MORE_INFO cover the last day of work (2026-11-26)
 
 - vortex_tidy: the OpenMW converter (omw2mwse) is described: when it runs (OpenMW-only mods, `hardcode` by default,
@@ -9,7 +63,7 @@
   (https://github.com/dejunai/openmw-mwse) as experimental, in early development and private for now, and keep it
   apart from tidy's own `.omwaddon` / `Off\OpenMW\` handling.
 - `--cell-conflicts`: the `[7]` / `[8]` "<plugin> always loses" choices, the tool-managed
-  `mwdialog_check.conflict.blacklist.txt` (made by the first pick, with `OAAB_Saplings.esm` built in; reading never
+  `mwdialog_check.conflict.blacklist.txt` (made by the first pick; reading never
   makes it; remove a plugin by hand), and `mwdialog_incompatible_losers.txt` (holds
   while the winner is active, lapses when it is gone).
 - `--play`: the lua tools deploy is described by SHA-256 lineage (`generated\mwdialog_lua_manifest.json`, up to 16

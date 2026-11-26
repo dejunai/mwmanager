@@ -439,9 +439,9 @@
     {
       "Path": "mods/mwsoundfix/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwsoundfix\\main.lua",
-      "SHA256": "26e5e381244f09425a116b5296b5d49cc0f64c91d2edfc017a1e420c99271f4d",
-      "Length": 8714,
-      "SourceModified": "2026-11-25T21:07:49"
+      "SHA256": "99d70eebd41c9205b3414db58b0eb23ea1f980e63655d1e7c39566ff63e79c4c",
+      "Length": 12144,
+      "SourceModified": "2026-11-26T01:48:38"
     },
     {
       "Path": "mods/mwconsole/api.lua",
