@@ -125,7 +125,7 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         for name in ("Siege at Firemoth.esp", "Morrowind.esm", "Tribunal.bsa"):
             path = self.m.plugin_off_backup_path(str(self.data), name, "plugin-repair", plugin=name)
             self.assertTrue(os.path.normcase(path).startswith(
-                os.path.normcase(str(self.data / "Off" / "Found at Setup" / "plugin-repair")) + os.sep))
+                os.path.normcase(str(self.data / "Off" / "Found at Setup" / "plugin repairs")) + os.sep))
         esp = self.data / "Siege at Firemoth.esp"
         esp.write_bytes(b"TES3")
         bak = self.m.backup_path(str(esp))
@@ -154,7 +154,7 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         path = self.m.plugin_off_backup_path(str(self.data), os.path.join("textures", "dr", "magewall.dds"),
                                              "Unused assets")
         self.assertEqual(os.path.normcase(path), os.path.normcase(
-            str(package / "Off" / "Dr_Data" / "Unused assets" / "textures" / "dr" / "magewall.dds")))
+            str(package / "Off" / "Dr_Data" / "unused assets" / "textures" / "dr" / "magewall.dds")))
 
     def test_an_unused_deployed_asset_leaves_staging_and_restore_puts_it_back(self):
         import mwdialog_assets

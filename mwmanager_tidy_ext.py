@@ -25,6 +25,7 @@ from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 
+import mwdialog_offlayout as OL
 import mwdialog_check as _scanner
 
 OUTPUT_DIR = _scanner.OUTPUT_DIR
@@ -541,8 +542,9 @@ def plan_mod(mod_dir):
                                    if part.casefold() == "mwse"), None)
                 if mwse_index is not None:
                     relative = relative[mwse_index:]
-                move(source, os.path.join(mod_dir, "Off", off_owner, "LuaRepairs", *relative),
-                     "migrate Lua repair original under Off/<plugin name>/LuaRepairs")
+                move(source, OL.off_path(mod_dir, "lua repairs", os.path.join(*relative) if relative else "",
+                                         hint=off_owner),
+                     "migrate Lua repair original under Off/<plugin>/lua repairs")
         moves.append((legacy_lua_backup, None, "remove the emptied legacy LuaRepair folder"))
 
     # Programs, libraries and scripts anywhere the package deploys from (Docs too) -> Off\<package>\Executables.
@@ -1044,7 +1046,8 @@ def _tidy_backup_original(path, staging, original_bytes):
     parts = Path(relative).parts
     package = os.path.join(staging, parts[0]) if len(parts) > 1 else staging
     plugin_name = staging_package_name(package)
-    backup = os.path.join(package, "Off", plugin_name, "Reprocessed plugin headers", os.path.relpath(path, package))
+    rel = os.path.relpath(path, package)
+    backup = OL.find_original(package, rel) or OL.off_path(package, "plugin repairs", rel, hint=plugin_name)
     os.makedirs(os.path.dirname(backup), exist_ok=True)
     if not os.path.exists(backup):
         with open(backup, "wb") as backup_file:
@@ -1424,7 +1427,7 @@ def lua_apply(args, lres):
         owner = staging_package_name(package)
         count, rejected = lf.apply_report(
             report, journal=JOURNAL,
-            backup_root=os.path.join(package, "Off", owner, "LuaRepairs"),
+            backup_root=OL.off_path(package, "lua repairs", hint=owner),
             backup_relative_to=package,
             head_extra=dict({"staging": args.staging, "plugin": package_name_raw, "lua": True},
                             **getattr(args, "_journal_extra", {})), done=lres["done"])

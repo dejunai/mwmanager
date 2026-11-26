@@ -324,15 +324,39 @@ def write_load_order(game_dir, order, note=""):
     return os.path.basename(bak)
 
 
+def _off_reason(feature):
+    """The canonical Off reason for `feature`, or the name itself when it is not in the layout list."""
+    try:
+        return OL.reason_for(feature)
+    except ValueError:
+        return feature
+
+
+# Data Files\\Off uses these fixed owner names; never let owner_name scan Data Files for a plugin.
+DATA_FILES_OFF_OWNERS = frozenset({
+    "found at setup", "original install", "official add-ons", "disabled plugins",
+})
+
+
+def _looks_like_data_files(path):
+    """True for a Data Files folder (or the manager's Data Files backup root): Off there is not a staged mod's."""
+    if not path:
+        return False
+    base = os.path.basename(str(path).rstrip("\\/")).casefold()
+    return base == "data files" or os.path.isfile(os.path.join(path, "Morrowind.esm"))
+
+
 def off_dest(mod, feature, plugin, rel):
-    """Return Off/<plugin>/<feature>/<original path> for a staged mod or deployed asset owner."""
-    if plugin:
-        owner = os.path.splitext(os.path.basename(plugin))[0]
-    else:
-        own = sorted(e for e in os.listdir(mod) if e.lower().endswith((".esp", ".esm"))) if os.path.isdir(mod) else []
-        owner = os.path.splitext(own[0])[0] if own else \
-            re.split(r"-\d+-|\s+\d{4,}\s", os.path.basename(mod.rstrip("\\/")))[0].strip()
-    return os.path.join(mod, "Off", owner, feature, rel)
+    """Return Off/<plugin>/<reason>/<original path> for a staged mod or a Data Files Off owner."""
+    reason = _off_reason(feature)
+    hint = os.path.splitext(os.path.basename(plugin))[0] if plugin else None
+    if hint and hint.casefold() in DATA_FILES_OFF_OWNERS:
+        return os.path.join(mod, "Off", hint, reason, rel) if rel else os.path.join(mod, "Off", hint, reason)
+    if _looks_like_data_files(mod):
+        owner = hint or "Found at Setup"
+        return os.path.join(mod, "Off", owner, reason, rel) if rel else os.path.join(mod, "Off", owner, reason)
+    fallback = re.split(r"-\d+-|\s+\d{4,}\s", os.path.basename(str(mod).rstrip("\\/")))[0].strip()
+    return OL.off_path(mod, reason, rel or "", hint=plugin, fallback=fallback)
 
 
 # the Off\\ folder name for a file no plugin owns: shipped assets, or whatever was in Data Files when the user
@@ -341,8 +365,8 @@ ORIGINAL_INSTALL = "Found at Setup"
 LEGACY_ORIGINAL_INSTALL = "Original Install"     # its earlier name; files kept there are still found
 
 
-def backup_asset_original(data_dir, rel, plugin=None, feature="repair"):
-    """Keep one pre-repair original under Off/<plugin>/<feature>/<original relative path>."""
+def backup_asset_original(data_dir, rel, plugin=None, feature="repaired originals"):
+    """Keep one pre-repair original under Off/<plugin>/<reason>/<original relative path>."""
     # the owner first: a file a staged mod deployed (a hard link) is that mod's, whatever folder it is in
     mod, owner_plugin = asset_owner_folder(data_dir, rel)
     shipped = shipped_game_file(data_dir, rel, mod)
@@ -353,10 +377,11 @@ def backup_asset_original(data_dir, rel, plugin=None, feature="repair"):
     off = os.path.join(root, "Off")
     current = os.path.join(data_dir, rel)
     # An original retained by an earlier feature/pass stays the first; an updated file is kept beside it.
-    kept = _kept_original(off, owner, rel)
+    kept = (OL.find_original(root, rel) if mod and not _looks_like_data_files(root)
+            else _kept_original(off, owner, rel))
     if kept:
         return keep_new_original(kept, current)
-    dest = off_dest(root, feature, owner, rel)
+    dest = off_dest(root, _off_reason(feature), owner, rel)
     if not os.path.exists(dest):
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copy2(current, dest)
@@ -443,7 +468,7 @@ def plugin_off_backup_path(data_dir, rel, feature, plugin=None, unique=True):
     if owner.lower().endswith((".esp", ".esm", ".omwaddon")):
         owner = os.path.splitext(owner)[0]
     root = backup_root_for(mod, data_dir, rel)
-    path = os.path.join(root, "Off", owner, str(feature), rel)
+    path = off_dest(root, feature, owner, rel)
     if unique and os.path.exists(path):
         stem, ext = os.path.splitext(path)
         n = 2
@@ -666,13 +691,13 @@ def write_generated(data_dir, game_dir, items, log):
 
 
 def backup_path(path):
-    """Choose <mod>/Off/<plugin>/plugin-repair/<original path>.bak for a rewritten plugin."""
+    """Choose <mod>/Off/<plugin>/plugin repairs/<original path>.bak for a rewritten plugin."""
     parent = os.path.dirname(os.path.abspath(path))
     name = os.path.basename(path)
     if shipped_game_file(parent, name):
         base = backup_file("plugins", "Official Add-Ons", name + ".bak")
     else:
-        base = plugin_off_backup_path(parent, name, "plugin-repair", plugin=name, unique=False) + ".bak"
+        base = plugin_off_backup_path(parent, name, "plugin repairs", plugin=name, unique=False) + ".bak"
     os.makedirs(os.path.dirname(base), exist_ok=True)
     cand, n = base, 2
     while os.path.exists(cand):
@@ -699,8 +724,8 @@ def backup_candidates(path):
     parent = os.path.dirname(os.path.abspath(path))
     owner_root, _owner = asset_owner_folder(parent, name)
     off = []
-    # backup_path() writes Off/<plugin>/plugin-repair/...; older runs used Off/plugin-repair/... and the game's
-    # Data Files\Off (shipped files' backups, and older runs' others) or MWManager\backups\Data Files
+    # backup_path() writes Off/<plugin>/plugin repairs/...; older runs used plugin-repair, Off/plugin-repair/,
+    # and the game's Data Files\Off (shipped files' backups, and older runs' others) or MWManager\backups\Data Files
     roots = [backup_root_for(owner_root, parent, name), owner_root or parent]
     if not owner_root:
         roots.append(os.path.join(BACKUP_DIR, "Data Files"))

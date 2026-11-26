@@ -18,6 +18,8 @@ import tempfile
 import time
 from pathlib import Path, PureWindowsPath
 
+import mwdialog_offlayout as OL
+
 RECURRING = re.compile(r"\b(?:simulate|enterFrame|preUpdate|update|cameraControl)\b", re.I)
 EVENT_REGISTER = re.compile(r"event\.register\s*\(", re.I)
 PRIORITY = re.compile(r"(\bpriority\s*=\s*)([-+]?\d+)", re.I)
@@ -276,10 +278,11 @@ def process(staging: Path, *, apply: bool, report_path: Path, only: list[str] | 
         except (ImportError, AttributeError, OSError):
             owner = package.name
         owner = re.sub(r'[<>:"/\\|?*]', "_", owner).rstrip(" .") or package.name
-        prior_backups = [package / "Off" / "LuaRepair" / package_relative,
-                         package / "Off" / owner / "LuaRepairs" / package_relative,
-                         package / "Off" / plugin_owner / "LuaRepairs" / package_relative,
-                         package / "Off" / package.name / "LuaRepairs" / package_relative]
+        owner = OL.owner_name(str(package), hint=owner, fallback=plugin_owner or package.name)
+        prior_backups = [package / "Off" / "LuaRepair" / package_relative]
+        for folder in dict.fromkeys((owner, plugin_owner, package.name)):
+            for reason in ("lua repairs", "LuaRepairs", "LuaRepair"):
+                prior_backups.append(package / "Off" / folder / reason / package_relative)
         if backup_root is not None:   # an original kept by an earlier run in this or an older central location
             prior_backups.insert(0, backup_root / path.relative_to(backup_relative_to or staging))
         older_backups = [root / path.relative_to(staging) for root in (prior_backup_roots or [])]
@@ -339,7 +342,7 @@ def process(staging: Path, *, apply: bool, report_path: Path, only: list[str] | 
                     relative = path.relative_to(package)
                 except ValueError:
                     relative = path.relative_to(staging)
-                backup_path = package / "Off" / owner / "LuaRepairs" / relative
+                backup_path = Path(OL.off_path(str(package), "lua repairs", str(relative), hint=owner))
             try:
                 backup_path.parent.mkdir(parents=True, exist_ok=True)
                 if not backup_path.exists():         # keep the first original; never overwrite it
@@ -428,7 +431,7 @@ def main() -> int:
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--only", nargs="+", help="restrict to these staged package folders (wildcards allowed)")
     ap.add_argument("--bugreport", help="write a plain-text report suitable for review and sharing")
-    ap.add_argument("--backup-root", help="store originals under this directory instead of each package's Off/<plugin>/LuaRepairs")
+    ap.add_argument("--backup-root", help="store originals under this directory instead of each package's Off/<plugin>/lua repairs")
     ap.add_argument("--backup-relative-to", help="with --backup-root: mirror each file's path relative to this folder "
                                                  "(default: --staging)")
     ap.add_argument("--prior-backup-root", action="append", default=[],

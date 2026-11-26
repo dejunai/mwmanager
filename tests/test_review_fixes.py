@@ -183,7 +183,7 @@ class PluginPathSafetyTests(unittest.TestCase):
 
             self.assertFalse((destination / "Tools/converter.exe").exists())
             self.assertEqual(
-                (destination / "Off" / "Mod" / "Executables" / "Tools" / "converter.exe").read_bytes(),
+                (destination / "Off" / "Mod" / "executables" / "Tools" / "converter.exe").read_bytes(),
                 b"utility",
             )
 

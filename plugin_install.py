@@ -15,6 +15,8 @@ import uuid
 import zipfile
 from datetime import datetime
 
+import mwdialog_offlayout as OL
+
 from core_addons import (ARCHIVE_EXTENSIONS, _members, _member_preflight,
                          _archive_rank, _archive_esm_masters, _seven_zip_listing,
                          LARGE_ARCHIVE_BYTES,
@@ -824,8 +826,9 @@ def apply_plugin_compatibility(package: Path) -> list[str]:
         if pos != header_end or not header:
             continue
         if rewrites:
-            # Off is a package-level non-deploy tree, matching Tidy's backup convention.
-            backup = package / "Off" / path.stem / "Original plugin headers" / path.name
+            # Off is a package-level non-deploy tree; the reason is "plugin repairs".
+            backup = Path(OL.find_original(str(package), path.name) or
+                          OL.off_path(str(package), "plugin repairs", path.name, hint=path.stem))
             backup.parent.mkdir(parents=True, exist_ok=True)
             if not backup.exists():
                 shutil.copy2(path, backup)
@@ -911,7 +914,7 @@ def extract_archive(item: dict, destination: Path, manager: Path) -> Path:
                     (Path(name).stem for name in item.get("plugins", []) if name),
                     destination.name,
                 )
-                quarantine = temporary / "Off" / owner / "Executables"
+                quarantine = Path(OL.off_path(str(temporary), "executables", hint=owner))
                 for payload in sorted(approved, key=str.casefold):
                     normalized = Path(payload.replace("\\", "/").lstrip("/"))
                     source = _safe_child(temporary, normalized, label="Approved payload")
@@ -939,7 +942,7 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
     check_deploy_path_lengths(package, data_dir, plugin_label)
     linked = skipped = 0
     operations = []
-    off_root = package / "Off" / _safe_name(Path(plugin_label).stem) / "replaced"
+    off_root = Path(OL.off_path(str(package), "replaced files", hint=_safe_name(Path(plugin_label).stem)))
     texture_paths = set()
     meshes_present = False
     for base, dirs, files in os.walk(package):
@@ -996,7 +999,8 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
             rel_key = str(rel).replace("\\", "/").casefold()
             is_texture = source.suffix.casefold() in {".dds", ".tga", ".bmp", ".png", ".jpg", ".jpeg"}
             if is_texture and target.exists() and rel_key in protected and not protect_this_package:
-                retained = package / "Off" / _safe_name(Path(plugin_label).stem) / "protected textures" / rel
+                retained = Path(OL.off_path(str(package), "protected textures", str(rel),
+                                            hint=_safe_name(Path(plugin_label).stem)))
                 retained.parent.mkdir(parents=True, exist_ok=True)
                 if transaction:
                     transaction.move(source, retained)
@@ -1061,7 +1065,7 @@ def check_deploy_path_lengths(package: Path, data_dir: Path, plugin_label: str) 
     """Fail before changing Data Files if deploy or staged cleanup would exceed classic MAX_PATH."""
     package = package.resolve()
     data_dir = data_dir.resolve()
-    off_root = package / "Off" / _safe_name(Path(plugin_label).stem) / "replaced"
+    off_root = Path(OL.off_path(str(package), "replaced files", hint=_safe_name(Path(plugin_label).stem)))
     too_long = []
     seen = set()
 
@@ -1184,7 +1188,7 @@ def remove_superseded_plugins(package: Path, item: dict) -> list[str]:
                 continue
             source = Path(base) / filename
             rel = source.relative_to(package)
-            root = package / "Off" / _safe_name(Path(filename).stem) / "superseded plugins"
+            root = Path(OL.off_path(str(package), "superseded plugins", hint=_safe_name(Path(filename).stem)))
             target = root / rel
             target.parent.mkdir(parents=True, exist_ok=True)
             if target.exists():

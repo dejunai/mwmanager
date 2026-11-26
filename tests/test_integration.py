@@ -720,7 +720,7 @@ class TidySteps(unittest.TestCase):
         with mock.patch.dict(os.environ, {"MWMANAGER_PLUGIN_NAME": "ModA"}):
             self.t.lua_apply(args, lres)
         self.assertEqual(Path(lua.apply_report.call_args.kwargs["backup_root"]),
-                         root / "Off" / "ModA" / "LuaRepairs")
+                         root / "Off" / "ModA" / "lua repairs")
         self.assertEqual(Path(lua.apply_report.call_args.kwargs["backup_relative_to"]), root)
         bugreport = root / "bugreports" / "ModA.mwse.bugreport.txt"
         self.assertTrue(bugreport.is_file())
@@ -758,7 +758,7 @@ class TidySteps(unittest.TestCase):
         self.assertNotIn("backup_relative_to", core_kwargs)
         self.assertNotIn("backup_root", core_kwargs)
         pkg_kwargs = lua.apply_report.call_args_list[1].kwargs
-        self.assertEqual(Path(pkg_kwargs["backup_root"]), later / "Off" / "ModA" / "LuaRepairs")
+        self.assertEqual(Path(pkg_kwargs["backup_root"]), later / "Off" / "ModA" / "lua repairs")
         self.assertTrue((later / "bugreports" / "ModA.mwse.bugreport.txt").is_file())
 
     def test_asset_and_lua_reports_share_plugin_name_and_nexus_id(self):

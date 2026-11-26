@@ -281,5 +281,146 @@ class BsaPackedFilesLayout(unittest.TestCase):
         self.assertEqual([p.name for p in (mod / "Off" / "Pack").iterdir() if p.is_file()], [])
 
 
+class StateOffHelpers(unittest.TestCase):
+    """mwmanager_state: staged-mod writers use OL; Data Files\\Off keeps its fixed owners; readers find old names."""
+    def setUp(self):
+        import mwmanager as m
+        self.m = m
+        mwmanager_upstream.compose()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(tmp.name)
+        self.manager = self.base / "MWManager"
+        self.manager.mkdir()
+        self.data = self.base / "Game" / "Data Files"
+        self.data.mkdir(parents=True)
+        state = mwmanager_upstream.use_manager_dir(self.manager)
+        state.__enter__()
+        self.addCleanup(state.__exit__, None, None, None)
+
+    def test_off_dest_and_backup_path_use_plugin_repairs(self):
+        mod = self.base / "staging" / "Some Mod 1234"
+        tes3(mod / "Plugin.esp")
+        dest = Path(self.m.off_dest(str(mod), "plugin-repair", "Plugin.esp", "Plugin.esp"))
+        self.assertEqual(dest, mod / "Off" / "Plugin" / "plugin repairs" / "Plugin.esp")
+        plugin = tes3(self.data / "Plugin.esp")
+        with mock.patch.object(self.m, "asset_owner_folder", return_value=(str(mod), "Plugin.esp")):
+            bak = Path(self.m.backup_path(str(plugin)))
+            self.assertEqual(bak.parent, mod / "Off" / "Plugin" / "plugin repairs")
+            self.assertTrue(bak.name.startswith("Plugin.esp.bak"))
+            put(bak, b"v1")
+            bak2 = Path(self.m.backup_path(str(plugin)))
+            self.assertNotEqual(bak, bak2)
+            self.assertEqual(bak2.parent, bak.parent)
+            found = {os.path.normcase(p) for p in self.m.backup_candidates(str(plugin))}
+        self.assertIn(os.path.normcase(str(bak)), found)
+        old = put(mod / "Off" / "Plugin" / "plugin-repair" / "Plugin.esp.bak", b"legacy")
+        with mock.patch.object(self.m, "asset_owner_folder", return_value=(str(mod), "Plugin.esp")):
+            found = {os.path.normcase(p) for p in self.m.backup_candidates(str(plugin))}
+        self.assertIn(os.path.normcase(str(old)), found)
+
+    def test_backup_asset_original_defaults_to_repaired_originals_and_reuses_repair(self):
+        mod = self.base / "staging" / "Mod"
+        tes3(mod / "Mod.esp")
+        rel = os.path.join("textures", "a.dds")
+        put(self.data / rel, b"orig")
+        put(mod / rel, b"orig")
+        with mock.patch.object(self.m, "asset_owner_folder", return_value=(str(mod), "Mod.esp")):
+            kept = Path(self.m.backup_asset_original(str(self.data), rel, plugin="Mod.esp"))
+        self.assertEqual(kept, mod / "Off" / "Mod" / "repaired originals" / rel)
+        self.assertEqual(kept.read_bytes(), b"orig")
+        # an original already kept under the older "repair" folder is reused, not copied again
+        shutil.rmtree(mod / "Off")
+        legacy = put(mod / "Off" / "Mod" / "repair" / rel, b"first")
+        put(self.data / rel, b"update")
+        with mock.patch.object(self.m, "asset_owner_folder", return_value=(str(mod), "Mod.esp")):
+            again = Path(self.m.backup_asset_original(str(self.data), rel, plugin="Mod.esp", feature="repair"))
+        self.assertEqual(legacy.read_bytes(), b"first")
+        self.assertEqual(again.read_bytes(), b"update")          # the update is kept beside it
+        self.assertFalse((mod / "Off" / "Mod" / "repaired originals" / rel).exists())
+
+    def test_shipped_files_stay_under_found_at_setup_with_the_canonical_reason(self):
+        put(self.data / "textures" / "a.dds", b"orig")
+        with mock.patch.object(self.m, "asset_owner_folder", return_value=(None, None)):
+            kept = Path(self.m.backup_asset_original(str(self.data), os.path.join("textures", "a.dds")))
+            path = Path(self.m.plugin_off_backup_path(str(self.data), "Siege at Firemoth.esp",
+                                                      "plugin-repair", plugin="Siege at Firemoth.esp"))
+        self.assertEqual(kept, self.data / "Off" / "Found at Setup" / "repaired originals" / "textures" / "a.dds")
+        self.assertTrue(os.path.normcase(str(path)).startswith(
+            os.path.normcase(str(self.data / "Off" / "Found at Setup" / "plugin repairs")) + os.sep))
+
+
+class TidyAndInstallWriters(unittest.TestCase):
+    def test_tidy_header_backup_uses_plugin_repairs_and_reuses_the_older_folder(self):
+        mwmanager_upstream.compose_tidy()
+        import vortex_tidy as tidy
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+        package = staging / "Some Mod"
+        tes3(package / "Plugin.esp")
+        original = (package / "Plugin.esp").read_bytes()
+        # older spelling already there: the first original is reused
+        legacy = put(package / "Off" / "Plugin" / "Reprocessed plugin headers" / "Plugin.esp", original)
+        backup = tidy._tidy_backup_original(str(package / "Plugin.esp"), str(staging), original)
+        self.assertEqual(Path(backup), legacy)
+        shutil.rmtree(package / "Off")
+        backup = tidy._tidy_backup_original(str(package / "Plugin.esp"), str(staging), original + b"x")
+        dest = Path(backup)
+        self.assertEqual(dest, package / "Off" / "Plugin" / "plugin repairs" / "Plugin.esp")
+        self.assertEqual(dest.read_bytes(), original + b"x")
+
+    def test_plugin_install_uses_the_canonical_reason_folders(self):
+        import plugin_install
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        package = Path(tmp.name) / "Pack"
+        # a header that names TR_Data.esm is rewritten to Tamriel_Data.esm
+        hedr = struct.pack("<fI", 1.3, 0) + b"\0" * 288 + struct.pack("<I", 0)
+        mast = b"TR_Data.esm\0"
+        sub = b"HEDR" + struct.pack("<I", len(hedr)) + hedr + b"MAST" + struct.pack("<I", len(mast)) + mast
+        tes3 = b"TES3" + struct.pack("<III", len(sub), 0, 0) + sub
+        plugin = put(package / "Patch.esp", tes3)
+        changed = plugin_install.apply_plugin_compatibility(package)
+        self.assertTrue(changed)
+        kept = package / "Off" / "Patch" / "plugin repairs" / "Patch.esp"
+        self.assertEqual(kept.read_bytes(), tes3)
+        self.assertNotEqual(plugin.read_bytes(), tes3)
+        # superseded plugins and replaced files / executables / protected textures
+        put(package / "Old.esp", b"TES3old")
+        moved = plugin_install.remove_superseded_plugins(package, {"superseded_plugins": ["Old.esp"]})
+        self.assertTrue(moved)
+        # the package already has an Off owner (Patch); every reason folder goes under that one plugin name
+        self.assertTrue((package / "Off" / "Patch" / "superseded plugins" / "Old.esp").is_file())
+        self.assertEqual(Path(OL.off_path(str(package), "replaced files", hint="Patch")),
+                         package / "Off" / "Patch" / "replaced files")
+        self.assertEqual(Path(OL.off_path(str(package), "executables", hint="Patch")),
+                         package / "Off" / "Patch" / "executables")
+        self.assertEqual(Path(OL.off_path(str(package), "protected textures", hint="Patch")),
+                         package / "Off" / "Patch" / "protected textures")
+        for reason in ("plugin repairs", "superseded plugins", "replaced files",
+                       "executables", "protected textures", "lua repairs"):
+            self.assertTrue(OL.is_canonical(reason), reason)
+
+    def test_mwse_lint_writes_lua_repairs_and_still_reads_luarepairs(self):
+        import mwse_lint
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        staging = Path(tmp.name)
+        package = staging / "Mod"
+        tes3(package / "Mod.esp")
+        lua = put(package / "MWSE" / "mods" / "x" / "main.lua", b"local x = nil\n")
+        # an older original is found under LuaRepairs
+        old = put(package / "Off" / "Mod" / "LuaRepairs" / "MWSE" / "mods" / "x" / "main.lua",
+                  b"local x = nil\n")
+        # the reader list includes that folder
+        src = io.open(mwse_lint.__file__, encoding="utf-8").read()
+        self.assertIn('"LuaRepairs"', src)
+        self.assertIn('"lua repairs"', src)
+        dest = Path(OL.off_path(str(package), "lua repairs", str(lua.relative_to(package)), hint="Mod.esp"))
+        self.assertEqual(dest, package / "Off" / "Mod" / "lua repairs" / "MWSE" / "mods" / "x" / "main.lua")
+        self.assertTrue(old.is_file())
+
+
 if __name__ == "__main__":
     unittest.main()
