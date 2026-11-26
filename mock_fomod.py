@@ -21,6 +21,7 @@ import urllib.parse
 import webbrowser
 import threading
 import hashlib
+from tk_lifetime import after_while_open, run_in_background
 import subprocess
 import tempfile
 from html.parser import HTMLParser
@@ -2089,31 +2090,27 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         if not retrying:
             open_web_search()
 
-        def fetch():
-            found = _nexus_page_text(mod_dir, refresh=True)
+        def fetch():                 # plain values only: this runs off the Tk thread
+            return _nexus_page_text(mod_dir, refresh=True)
 
-            def finish():
-                nonlocal page_text
-                page_text = found
-                search_button.configure(state="normal")
-                if found:
-                    info_state["status"][key] = "Page text retrieved. Review the result below."
-                    search_button.configure(text="Search for more info")
-                else:
-                    cache_key = str(mod_dir.resolve()).casefold()
-                    info_state["status"][key] = _NEXUS_FETCH_ERRORS.get(
-                        cache_key,
-                        "Nexus returned no readable page text. The web search is open so you can check for alternate information."
-                    )
-                    search_button.configure(text="Retry from browser")
-                show(item)
+        def finish(found, error):       # back on the Tk thread
+            nonlocal page_text
+            found = found or ""
+            page_text = found
+            search_button.configure(state="normal")
+            if found:
+                info_state["status"][key] = "Page text retrieved. Review the result below."
+                search_button.configure(text="Search for more info")
+            else:
+                cache_key = str(mod_dir.resolve()).casefold()
+                info_state["status"][key] = _NEXUS_FETCH_ERRORS.get(
+                    cache_key,
+                    "Nexus returned no readable page text. The web search is open so you can check for alternate information."
+                )
+                search_button.configure(text="Retry from browser")
+            show(item)
 
-            try:
-                root.after(0, finish)
-            except tk.TclError:
-                pass
-
-        threading.Thread(target=fetch, daemon=True).start()
+        run_in_background(root, fetch, finish, name="MWManager Nexus page search")
 
     def read_nexus_browser_page(trigger_button=None):
         item = info_state["item"]
@@ -2150,37 +2147,37 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
             except Exception as exc:
                 found = ""
                 error = str(exc)
+            return found, error
 
-            def finish():
-                nonlocal page_text
-                read_browser_button.configure(state="normal")
-                if trigger_button:
-                    trigger_button.configure(
-                        state="normal", text="Search for more info" if found else "Retry from browser"
-                    )
-                if found:
-                    page_text = found
-                    cache_key = str(mod_dir.resolve()).casefold()
-                    _NEXUS_TEXT_CACHE[cache_key] = found
-                    _NEXUS_FETCH_ERRORS.pop(cache_key, None)
-                    search_button.configure(text="Search for more info")
-                    info_state["status"][key] = "Page read from the MWManager browser and cached for future lookups."
-                else:
-                    info_state["status"][key] = (
-                        f"Browser page was not captured: {error} Open the Nexus page, finish any "
-                        "verification, then click Read page from browser."
-                    )
-                show(item)
+        def apply_result(found, error):
+            nonlocal page_text
+            read_browser_button.configure(state="normal")
+            if trigger_button:
+                trigger_button.configure(
+                    state="normal", text="Search for more info" if found else "Retry from browser"
+                )
+            if found:
+                page_text = found
+                cache_key = str(mod_dir.resolve()).casefold()
+                _NEXUS_TEXT_CACHE[cache_key] = found
+                _NEXUS_FETCH_ERRORS.pop(cache_key, None)
+                search_button.configure(text="Search for more info")
+                info_state["status"][key] = "Page read from the MWManager browser and cached for future lookups."
+            else:
+                info_state["status"][key] = (
+                    f"Browser page was not captured: {error} Open the Nexus page, finish any "
+                    "verification, then click Read page from browser."
+                )
+            show(item)
 
-            try:
-                # Keep the busy state visible even when the local DevTools check
-                # fails immediately, so a click never appears to do nothing.
-                delay_ms = max(0, 650 - int((time.monotonic() - capture_started) * 1000))
-                root.after(delay_ms, finish)
-            except tk.TclError:
-                pass
+        def finish(result, failure):       # back on the Tk thread
+            found, error = result if failure is None else ("", str(failure))
+            # Keep the busy state visible even when the local DevTools check
+            # fails immediately, so a click never appears to do nothing.
+            delay_ms = max(0, 650 - int((time.monotonic() - capture_started) * 1000))
+            after_while_open(root, delay_ms, lambda: apply_result(found, error))
 
-        threading.Thread(target=capture, daemon=True).start()
+        run_in_background(root, capture, finish, name="MWManager Nexus browser read")
 
     search_button = ttk.Button(search_bar, text="Search for more info", command=search_for_info)
     read_browser_button = ttk.Button(search_bar, text="Read page from browser",

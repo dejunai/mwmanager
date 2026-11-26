@@ -3,16 +3,20 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import re
 import shutil
 import struct
 import subprocess
+import threading
 import time
 import urllib.request
 import zipfile
 import hashlib
 import unicodedata
 from pathlib import Path
+
+from tk_lifetime import PollLoop, after_while_open, tk_window, watch_destroy
 
 # Extend through mwmanager_core_addons.json as more community masters are identified.
 BUILTIN_MASTERS = {
@@ -837,6 +841,32 @@ def prepare_core_master_review(manager_dir: str | Path, game_dir: str | Path,
             "select_dependencies": select_dependencies, "required_by_selection": required_by_selection}
 
 
+def start_download_worker(events, mod_id, file_id, downloads_dir):
+    """Run one Nexus download on a background thread; return the thread.
+
+    Deliberately a module-level function with only plain arguments: it cannot capture a Tk widget, variable or image,
+    and it reports through `events` (a queue.Queue of (kind, text): "message", "file" or "error") instead of calling
+    Tk. Whoever owns the window drains the queue on its own thread. If the window is gone by the time the worker
+    finishes, the events are simply never read."""
+    import mwnexus_browser
+
+    def work():
+        try:
+            fid = file_id or nexus_main_file(mod_id)["fileId"]
+            path = mwnexus_browser.download_file(
+                nexus_file_page(mod_id, fid), downloads_dir, lambda message: events.put(("message", message)))
+            events.put(("file", str(path)))
+        except Exception as exc:  # network, Nexus API, browser: all reported the same way
+            events.put(("error", str(exc)))
+        finally:
+            mwnexus_browser.close_browser()
+
+    thread = threading.Thread(target=work, name="MWManager master download", daemon=True)
+    thread.start()
+    return thread
+
+
+@tk_window
 def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                                plan: dict, parent=None, *, prepared=None) -> list[str] | str | None:
     """Present already-inspected masters. Standalone callers may prepare inline."""
@@ -852,6 +882,7 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         import mwmanager_dialogs as messagebox
         from mwmanager_theme import COLORS, FONTS, apply_theme, center, master_status_legend, master_status_tags
         root = tk.Toplevel(parent) if parent is not None else tk.Tk()
+        watch_destroy(root)
         if parent is None:
             apply_theme(root)                       # run on its own: no main window has themed it
         root.title("Review major masters")
@@ -1000,21 +1031,13 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         download_status = ttk.Label(buttons, text="", wraplength=420)
 
         def run_download(name, mod_id, file_id=None, on_done=None):
-            """Download in the hidden MWManager browser; it only appears for a Nexus check or sign-in."""
-            import threading
-            import mwnexus_browser
-            box = {"message": f"Starting the download of {name}…"}
+            """Download in the hidden MWManager browser; it only appears for a Nexus check or sign-in.
 
-            def work():
-                try:
-                    fid = file_id or nexus_main_file(mod_id)["fileId"]
-                    box["file"] = mwnexus_browser.download_file(
-                        nexus_file_page(mod_id, fid), plan.get("downloads_dir"),
-                        lambda message: box.__setitem__("message", message))
-                except Exception as exc:  # network, Nexus API, browser: all reported the same way
-                    box["error"] = str(exc)
-                finally:
-                    mwnexus_browser.close_browser()
+            The worker thread never touches Tk: it puts plain (kind, text) tuples on a queue and this window's own
+            thread drains them every 300 ms. The poll loop stops by itself when the window is destroyed."""
+            import mwnexus_browser
+            events = queue.Queue()
+            events.put(("message", f"Starting the download of {name}…"))
 
             def cancel():
                 mwnexus_browser.close_browser_in_background()   # closing the browser cancels the download
@@ -1024,28 +1047,36 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
                 if isinstance(child, ttk.Button):
                     child.state(["disabled"])
             root.protocol("WM_DELETE_WINDOW", cancel)
-            threading.Thread(target=work, daemon=True).start()
+            start_download_worker(events, mod_id, file_id, plan.get("downloads_dir"))
 
-            def poll():
-                if not root.winfo_exists():
-                    return
-                download_status.configure(text=box["message"])
-                if "file" in box:
-                    if on_done:
-                        on_done()
-                    result["selected"] = "rescan"
-                    root.destroy()
-                elif "error" in box:
-                    download_status.configure(text="")
-                    root.protocol("WM_DELETE_WINDOW", root.destroy)
-                    for child in buttons.winfo_children():
-                        if isinstance(child, ttk.Button):
-                            child.state(["!disabled"])
-                    update_action()
-                    messagebox.showerror("Download failed", f"{name}: {box['error']}", parent=root)
-                else:
-                    root.after(300, poll)
-            poll()
+            def tick():
+                finished = False
+                while True:
+                    try:
+                        kind, text = events.get_nowait()
+                    except queue.Empty:
+                        break
+                    if kind == "message":
+                        download_status.configure(text=text)
+                    elif kind == "file":
+                        if on_done:
+                            on_done()
+                        result["selected"] = "rescan"
+                        root.destroy()
+                        return False
+                    elif kind == "error":
+                        download_status.configure(text="")
+                        root.protocol("WM_DELETE_WINDOW", root.destroy)
+                        for child in buttons.winfo_children():
+                            if isinstance(child, ttk.Button):
+                                child.state(["!disabled"])
+                        update_action()
+                        messagebox.showerror("Download failed", f"{name}: {text}", parent=root)
+                        finished = True
+                        break
+                return not finished
+
+            PollLoop(root, 300, tick).start()
 
         def nexus_action():
             item_id = tree.focus()
@@ -1180,9 +1211,9 @@ def review_core_master_install(manager_dir: str | Path, game_dir: str | Path,
         # Reapply after mapping: Windows can reset an owned Toplevel's position
         # when it becomes visible or changes topmost state.
         root.geometry(f"{width}x{height}+{x}+{y}")
-        root.after(300, lambda: root.attributes("-topmost", False))
+        after_while_open(root, 300, lambda: root.attributes("-topmost", False))
         root.focus_force()
-        root.after(400, offer_other_variant)
+        after_while_open(root, 400, offer_other_variant)
         if parent is not None:
             root.grab_set()
         if parent is not None:

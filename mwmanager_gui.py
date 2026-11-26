@@ -19,6 +19,7 @@ from tkinter import filedialog, ttk
 
 import mwmanager_dialogs as messagebox  # themed prompts
 import mwmanager_setup_state as setup_state
+from tk_lifetime import run_in_background
 from mwmanager_workflow import JobCancelled, JobControl, JobView, checkpoint, preflight_signature
 
 from mwmanager_theme import COLORS, FONTS, SPACE, apply_theme, center, master_status_legend, master_status_tags, tree_tags
@@ -1286,27 +1287,27 @@ class ManagerGUI(tk.Tk):
             return
         self._integrity_running = True
 
-        def work():
+        app_dir = APP_DIR
+        data_dir = Path(self.settings["game_dir"]) / "Data Files"
+
+        def work():                      # plain values only: this runs off the Tk thread
             import mwmanager_integrity
-            try:
-                result = mwmanager_integrity.inspect(
-                    APP_DIR, Path(self.settings["game_dir"]) / "Data Files")
-            except (OSError, ValueError):
-                self.after(0, lambda: setattr(self, "_integrity_running", False))
-                return
+            return mwmanager_integrity.inspect(app_dir, data_dir)
 
-            def finish():
-                self._integrity_running = False
-                counts = result.get("counts") or {}
-                drift = sum(count for status, count in counts.items() if status != "ok")
-                if drift:
-                    self.status.set(
-                        f"Integrity warning: {drift} tracked deployment file(s) are missing, "
-                        "modified, unreadable, or unverifiable. Open Tools > Integrity report.")
+        def finish(result, error):       # back on the Tk thread
+            self._integrity_running = False
+            if error is not None:
+                if isinstance(error, (OSError, ValueError)):
+                    return
+                raise error
+            counts = result.get("counts") or {}
+            drift = sum(count for status, count in counts.items() if status != "ok")
+            if drift:
+                self.status.set(
+                    f"Integrity warning: {drift} tracked deployment file(s) are missing, "
+                    "modified, unreadable, or unverifiable. Open Tools > Integrity report.")
 
-            self.after(0, finish)
-
-        threading.Thread(target=work, name="MWManager integrity check", daemon=True).start()
+        run_in_background(self, work, finish, name="MWManager integrity check")
 
     def _resume_waiting_options_after_startup(self):
         if getattr(self, "_active_job", None):
@@ -1529,30 +1530,29 @@ class ManagerGUI(tk.Tk):
         names = read_order() or read_game_ini_order(game_dir)
         self.status.set("Working out merge recommendations…")
 
-        def work():
+        app_outputs = APP_DIR / "outputs"
+
+        def work():                      # plain values only: this runs off the Tk thread
             import mwdialog_mergeplan
-            try:
-                order = [(n, str(data_dir / n)) for n in names if (data_dir / n).is_file()]
-                (APP_DIR / "outputs").mkdir(parents=True, exist_ok=True)
-                plan = mwdialog_mergeplan.recommend(order, str(data_dir), str(game_dir))
-                path = Path(mwdialog_mergeplan.write_plan(plan, str(APP_DIR / "outputs"), len(order)))
-                lines = path.read_text(encoding="utf-8").splitlines()
-                error = None
-            except (OSError, ValueError) as exc:
-                lines, error = [], exc
+            order = [(n, str(data_dir / n)) for n in names if (data_dir / n).is_file()]
+            app_outputs.mkdir(parents=True, exist_ok=True)
+            plan = mwdialog_mergeplan.recommend(order, str(data_dir), str(game_dir))
+            path = Path(mwdialog_mergeplan.write_plan(plan, str(app_outputs), len(order)))
+            return path, path.read_text(encoding="utf-8").splitlines()
 
-            def finish():
-                self._merge_plan_running = False
-                if error:
-                    self.status.set("Merge recommendations failed.")
-                    messagebox.showerror("Merge recommendations failed", str(error), parent=self)
-                    return
-                self.status.set(f"Merge recommendations saved to {path}")
-                self._show_tool_report("Merge recommendations", lines)
+        def finish(result, error):       # back on the Tk thread
+            self._merge_plan_running = False
+            if error is not None:
+                if not isinstance(error, (OSError, ValueError)):
+                    raise error
+                self.status.set("Merge recommendations failed.")
+                messagebox.showerror("Merge recommendations failed", str(error), parent=self)
+                return
+            path, lines = result
+            self.status.set(f"Merge recommendations saved to {path}")
+            self._show_tool_report("Merge recommendations", lines)
 
-            self.after(0, finish)
-
-        threading.Thread(target=work, name="MWManager merge plan", daemon=True).start()
+        run_in_background(self, work, finish, name="MWManager merge plan")
 
     def run_auto_merge(self):
         """--auto-merge on its own (normally part of --full); its follow-up --fix --multipatch rebuilds the patches."""
@@ -5317,19 +5317,21 @@ class ManagerGUI(tk.Tk):
         report.run_program_with_reference = run_program_with_reference
         report.check_cancelled = control.check
 
+        job_game_dir = self.settings["game_dir"]     # read here: the worker thread must not hold the Tk window
+
         def run():
             try:
                 control.check()
                 from workflow_safety import mutation_lock
-                with mutation_lock(APP_DIR, self.settings["game_dir"]):
+                with mutation_lock(APP_DIR, job_game_dir):
                     from workflow_safety import DurableTransaction
                     DurableTransaction.recover(
                         APP_DIR / "transactions" / "plugin-deploy",
-                        [APP_DIR, Path(self.settings["game_dir"]), APP_DIR / "staging" / "plugins"])
+                        [APP_DIR, Path(job_game_dir), APP_DIR / "staging" / "plugins"])
                     from major_master_deploy import recovery_pending, recover_deployment
                     if recovery_pending(APP_DIR):
                         report("Recovering interrupted deployment changes before starting this job.")
-                        recover_deployment(APP_DIR, self.settings["game_dir"])
+                        recover_deployment(APP_DIR, job_game_dir)
                     result = worker(report)
                 events.put(("done", result, None))
             except Exception as exc:
