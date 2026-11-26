@@ -26,6 +26,21 @@ def digest(path):
     return h.hexdigest()
 
 
+def _replace(temporary, path, attempts=40, delay=0.05):
+    """os.replace, retried briefly on Windows while another reader holds `path` open without delete sharing
+    (WinError 5/32: a thread reading the batch manifest made the 3.9 suite fail
+    test_blocked_rescan_does_not_stop_the_tidy_of_other_packages now and then). Gives up after ~2 s."""
+    import time
+    for attempt in range(attempts):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            if os.name != "nt" or attempt == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
 def atomic_bytes(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -35,7 +50,7 @@ def atomic_bytes(path, data):
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        _replace(temporary, path)
         if os.name != "nt":
             fd = os.open(path.parent, os.O_RDONLY)
             try:

@@ -318,6 +318,8 @@ class Companions(unittest.TestCase):
                 mock_fomod._show_selector("X", records, set(), set())
             except tk.TclError as exc:
                 self.skipTest(f"Tk unavailable: {exc}")
+        if not found:                                         # Tk failed to start: the selector said so and left
+            self.skipTest("Tk unavailable: the option window never opened")   # the selection unchanged
         self.assertEqual(found["radios"], 8)                  # both one-choice groups rendered as radios
         self.assertEqual(found["boxes"], [])
 
