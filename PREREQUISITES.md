@@ -1,6 +1,6 @@
 # MWManager prerequisites
 
-MWManager targets the original Windows Morrowind engine and its `Data Files` directory. OpenMW installations are not supported.
+MWManager targets the original Windows Morrowind engine and its `Data Files` directory. OpenMW installations are not supported. Recent features (Update MWSE, the Play-time core-file check, Tamriel_Data HD/SD swap, and others) are described in [`MORE_INFO.md`](MORE_INFO.md). A separate OpenMW Converter project is experimental and in early development; see [its own README](https://github.com/dejunai/openmw-mwse) (the repository is private for now).
 
 ## First window and preflight
 
@@ -9,7 +9,7 @@ every Steam library), Epic and other uninstall entries for Morrowind, and Vortex
 or the `nxm://` handler). Mod Organizer 2 is recognised but not supported yet. The first window lists every
 Morrowind install it found, so someone with both a Steam and a GOG copy picks the one to manage (or browses
 to another). Below that is **Archive Downloads**, the folder MWManager reads mod archives from. It is
-manager-agnostic: pick a detected manager (Vortex now, read from Vortex's own settings; Mod Organizer 2 is
+manager-agnostic: pick a detected manager (Vortex now, including download and install paths from its `state.v2` LevelDB; Mod Organizer 2 is
 shown but not supported yet; more managers plug into `MOD_MANAGER_DETECTORS`) or "None / unmanaged" and
 browse to any folder you keep archives in. `mwmanager.ini` stores it as `archive_downloads_dir` (an older
 `downloads_dir` is still read) and the settings JSON stores the source as `archive_source`
@@ -123,7 +123,7 @@ The FOMOD option helper uses a visible, persistent Microsoft Edge WebView2 windo
 
 MWManager keeps reports, caches, and journals in its `outputs` folder, and keeps plugin, INI, and asset backups in `backups`. Required game content remains in Morrowind's `Data Files` folder. Keep the `tools` folder beside the manager for utilities such as `texconv.exe`.
 
-MWManager records SHA-256 fingerprints for `Morrowind.esm`, `Tribunal.esm`, `Bloodmoon.esm`, `Morrowind.bsa`, `Tribunal.bsa`, and `Bloodmoon.bsa` during initialization, using existing catalog hashes as the initial reference when available. The two DLC BSA hashes without catalog references are captured from the installed game on the first successful initialization. Later `--init` and `--full` runs warn if one differs and recommend verifying/restoring the game files through GOG Galaxy. The warning does not block use. The MCP-patched executable is excluded because MCP intentionally alters it. On a first setup without prior catalog hashes, verify the game installation before initialization: a first-use fingerprint detects later changes but cannot establish that a file was already clean.
+MWManager records SHA-256 fingerprints for `Morrowind.esm`, `Tribunal.esm`, `Bloodmoon.esm`, `Morrowind.bsa`, `Tribunal.bsa`, and `Bloodmoon.bsa` during initialization, using existing catalog hashes as the initial reference when available. The two DLC BSA hashes without catalog references are captured from the installed game on the first successful initialization. Later `--init` and `--full` runs warn if one differs and recommend verifying/restoring the game files through GOG Galaxy. The warning does not block use. The MCP-patched executable is excluded because MCP intentionally alters it. On a first setup without prior catalog hashes, verify the game installation before initialization: a first-use fingerprint detects later changes but cannot establish that a file was already clean. Separately, `--play` hashes those same six shipped files against known-good values and can warn if they have changed (see [`MORE_INFO.md`](MORE_INFO.md#core-game-files-on-play)); that Play-time check is controlled by `[Integrity] check_core_game_files` and does not block Play.
 
 FFmpeg's upstream project uses LGPL by default, while enabling optional GPL or nonfree components changes redistribution requirements. Our eventual bundled build must be built without GPL/nonfree components, include matching source and build instructions, and account for LAME and every other linked library. Until those checks are complete, the downloader stays user-directed. See [FFmpeg's licensing guidance](https://ffmpeg.org/legal.html) and [LAME's license information](https://lame.sourceforge.io/about.php).
 
@@ -156,6 +156,8 @@ The compatibility journal is `outputs/mwmanager_compatibility_journal.json`. Whe
 ## OpenMW content in vanilla staging
 
 `vortex_tidy.py` converts compatible `.omwaddon` plugins to `.esp` and rewrites matching `MAST` names in staged plugin headers. It also raises an older staged plugin HEDR version to the highest available version among its masters. These are header-only changes; record-level incompatibilities are left for MWManager's main plugin repair pass. A shared cache in `outputs/mwmanager_tidy_backup_cache.json` records one original header backup per staged plugin file, reused across later tidy passes and restored by `--undo`. OpenMW scripts and resources (`.omwscripts`, `scripts`, `l10n`, `animations`, and `playlists`) are moved under `Off/OpenMW/<plugin name>/`, outside the vanilla game payload. Normal maps are moved under `Off/normal maps/<plugin name>/`. A legacy root-level `OpenMW/` folder from an earlier tidy run is migrated into the same plugin-owned Off tree. When a package has OpenMW scripts but no `.esp` or `.esm`, tidy alerts the user and retains its `.omwaddon` and scripts under `Off/OpenMW-only/<plugin name>/` for possible future MWSE conversion. Remove the mod through Vortex if you choose to uninstall it.
+
+This tidy pass is not the same as the separate OpenMW Converter project ([dejunai/openmw-mwse](https://github.com/dejunai/openmw-mwse)), which is experimental and in early development. See [that project's own README](https://github.com/dejunai/openmw-mwse) (the repository is private for now).
 
 ## Asset filename pass
 
