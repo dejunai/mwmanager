@@ -55,7 +55,10 @@ class CloseBrowser(unittest.TestCase):
 
     def test_github_is_approved_and_component_download_folder_is_sent(self):
         target = Path(self.tmp.name) / "pre-reqs" / "mge_xe"
-        with mock.patch.object(B, "_tracked_browser_pid", return_value=123):
+        # open_page checks find_spec("webview") before writing the command; this test is
+        # about the approved URL and download_dir, not whether pywebview is installed.
+        with mock.patch.object(B, "_tracked_browser_pid", return_value=123), \
+                mock.patch.object(B.importlib.util, "find_spec", return_value=object()):
             B.open_page("https://github.com/Greatness7/MGE-XE/releases", download_dir=target)
         command = B._read_json(self.root / "command.json")
         self.assertEqual(command["url"], "https://github.com/Greatness7/MGE-XE/releases")
