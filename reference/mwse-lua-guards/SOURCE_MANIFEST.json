@@ -292,9 +292,9 @@
     {
       "Path": "mods/mwsaveguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwsaveguard\\main.lua",
-      "SHA256": "8c2a3d8ab7d998a8dc91a85c9bead39e9d6f301d268e77ddd74fad5f15243517",
-      "Length": 22203,
-      "SourceModified": "2026-11-25T16:40:06"
+      "SHA256": "67c8cd3c3530d006ba89236031196310649e9553d1e29ea3671db923f51f7260",
+      "Length": 22279,
+      "SourceModified": "2026-11-25T21:09:04"
     },
     {
       "Path": "mods/mwsaveguard/validator.lua",
@@ -306,9 +306,9 @@
     {
       "Path": "mods/mwsaveguard/wbsr_bard.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwsaveguard\\wbsr_bard.lua",
-      "SHA256": "905fb89aa5f343b6de100efbbc904a0768dc2a8cf67855518fb27724a494d816",
-      "Length": 8493,
-      "SourceModified": "2026-11-24T19:18:18"
+      "SHA256": "119d8502db559b726c772e1d17631928c3f22fcd6f55e38e5872a50bde56de51",
+      "Length": 9165,
+      "SourceModified": "2026-11-25T21:07:55"
     },
     {
       "Path": "mods/mwsoundguard/main.lua",
@@ -390,9 +390,9 @@
     {
       "Path": "mods/mwcriminal/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcriminal\\mcm.lua",
-      "SHA256": "6a2fa598cc03eaf7766486a3151bb6772755aad503a9f7869f7bdc60d5125205",
-      "Length": 7795,
-      "SourceModified": "2026-11-25T16:12:42"
+      "SHA256": "20e9b58bb85cbeb0d9b51a226b3fabd9ec77f423f0c0fd7547efed99e2d8b9ff",
+      "Length": 7892,
+      "SourceModified": "2026-11-25T21:12:40"
     },
     {
       "Path": "mods/mwcriminal/interop.lua",
@@ -439,9 +439,9 @@
     {
       "Path": "mods/mwsoundfix/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwsoundfix\\main.lua",
-      "SHA256": "aef1ad8b7bf534701a77555d69423aa7272be32b2651dd22004f3d050ade11f9",
-      "Length": 5104,
-      "SourceModified": "2026-11-24T03:03:22"
+      "SHA256": "26e5e381244f09425a116b5296b5d49cc0f64c91d2edfc017a1e420c99271f4d",
+      "Length": 8714,
+      "SourceModified": "2026-11-25T21:07:49"
     },
     {
       "Path": "mods/mwconsole/api.lua",
