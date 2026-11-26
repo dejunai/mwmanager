@@ -4,6 +4,8 @@ Only reads: table (.ldb/.sst) and log files are opened for reading, nothing is l
 LevelDB and Snappy reader lives here so no native module is needed. Keys are Vortex's "###"-joined state paths
 ("persistent###downloads###files###<id>###localPath") with JSON values; the newest sequence number of a key wins
 and a deletion hides it."""
+
+from __future__ import annotations
 import json
 import os
 import struct

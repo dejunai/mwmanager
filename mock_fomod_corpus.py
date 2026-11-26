@@ -6,6 +6,8 @@
 The corpus goes to outputs/mock_fomod_corpus (git-ignored): the docs are third-party text and are never committed.
 tests/mock_fomod_golden.json holds hand-checked expectations; see MOCK_FOMOD_REGEX.MD.
 """
+
+from __future__ import annotations
 import argparse
 import hashlib
 import json

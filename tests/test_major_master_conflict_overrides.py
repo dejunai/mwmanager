@@ -15,6 +15,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 import mwmanager_upstream  # noqa: E402
+import py_compat  # noqa: E402
 
 
 def sub(tag, data):
@@ -49,7 +50,7 @@ def plugin(path, *records):
 class ConflictOverrides(unittest.TestCase):
     def setUp(self):
         self.m = mwmanager_upstream.compose()
-        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
         self.root = Path(tmp.name)
         self.master = self.root / "Morrowind.esm"

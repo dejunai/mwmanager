@@ -13,6 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import option_plugins as op  # noqa: E402
+import py_compat  # noqa: E402
 
 GRASS = ROOT / "tests" / "fixtures" / "grass_rem_style.esp"
 HEADER = struct.pack("<4sIII", b"TES3", 0, 0, 0)
@@ -20,7 +21,7 @@ HEADER = struct.pack("<4sIII", b"TES3", 0, 0, 0)
 
 class OptionPluginsEnabled(unittest.TestCase):
     def setUp(self):
-        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
         base = Path(tmp.name)
         self.manager, self.game = base / "MWManager", base / "Game"

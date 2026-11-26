@@ -16,6 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 import mwmanager_mwse_core as core  # noqa: E402
 import mwdialog_luafix as luafix  # noqa: E402
+import py_compat  # noqa: E402
 
 
 LATEST = "1dce8de6b87c7b216c6809fbc261a176157764ce"
@@ -27,7 +28,7 @@ def write(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(data, str):
-        path.write_text(data, encoding="latin-1", newline="\n")
+        py_compat.write_text(path, data, encoding="latin-1", newline="\n")
     else:
         path.write_bytes(data)
     return path

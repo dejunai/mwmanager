@@ -1,6 +1,8 @@
 """nexus_ids: an archive with no Nexus id in its name or .meta file is looked up in Vortex's records (read-only),
 then by a Nexus search (a fake here, from tests/fixtures/nexus_graphql_search.json; no network), else marked as not
 a Nexus mod, remembered, and changeable by hand. Also the small read-only LevelDB/Snappy reader for Vortex's state."""
+
+from __future__ import annotations
 import hashlib
 import json
 import sys

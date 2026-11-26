@@ -44,6 +44,7 @@ from pathlib import Path
 import mwmanager_prereqs
 from core_addons import _quiet_subprocess_options, _seven_zip
 from mwmanager_mlox import offer_mlox_rules
+import py_compat  # noqa: E402
 
 CORE_FILES = ("Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm",
               "Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa")
@@ -603,20 +604,19 @@ def _set_values(path: Path, values: dict, sep: str, encoding: str) -> list[str]:
         changed.extend(f"{name}.{k}" for k in keys)
     if changed:
         temporary = path.with_name(path.name + ".tmp")
-        temporary.write_text("".join(out), encoding=encoding, errors="surrogateescape", newline="")
+        py_compat.write_text(temporary, "".join(out), encoding=encoding, errors="surrogateescape", newline="")
         os.replace(temporary, path)
     return changed
 
 
 def apply_recommended_mge_settings(game_dir: Path) -> list[str]:
     """Write MWManager's recommended MGE XE starting settings; returns the keys that changed."""
-    import tomllib
     toml_path, ini = Path(game_dir) / "mgeXE.toml", {s: dict(kv) for s, kv in MGE_RECOMMENDED_INI.items()}
     changed = _set_values(toml_path, MGE_RECOMMENDED_TOML, " = ", "utf-8")
     try:
-        if tomllib.loads(toml_path.read_text(encoding="utf-8")).get("distant_land", {}).get("per_pixel_lighting"):
+        if py_compat.toml_loads(toml_path.read_text(encoding="utf-8")).get("distant_land", {}).get("per_pixel_lighting"):
             ini["LightAttenuation"]["LinearValue"] = "0.000"
-    except (OSError, tomllib.TOMLDecodeError):
+    except (OSError, py_compat.TOMLDecodeError):
         pass
     return changed + _set_values(Path(game_dir) / "Morrowind.ini", ini, "=", "cp1252")
 

@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import mwmanager_install as ext  # noqa: E402
 import mwmanager_upstream  # noqa: E402
+import py_compat  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -22,7 +23,7 @@ def _build(mod, files):
 
 class StagingRound2(unittest.TestCase):
     def _tidy(self, files, name):
-        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
         staging = Path(tmp.name) / "staging"
         mod = staging / name

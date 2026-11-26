@@ -18,6 +18,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 import mwnexus_parse as P  # noqa: E402
+import py_compat  # noqa: E402
 
 FIX = HERE / "fixtures"
 try:
@@ -42,7 +43,7 @@ def run_capture_js(markup: str) -> dict:
     import urllib.request
 
     import websocket  # websocket-client
-    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+    with py_compat.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
         page = Path(tmp) / "page.html"
         page.write_text(markup, encoding="utf-8")
         with socket.socket() as sock:

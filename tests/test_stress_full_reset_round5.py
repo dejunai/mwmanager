@@ -16,6 +16,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import mwmanager_upstream  # noqa: E402
+import py_compat  # noqa: E402
 
 
 class FullResetJournal(unittest.TestCase):
@@ -23,7 +24,7 @@ class FullResetJournal(unittest.TestCase):
         import mwmanager as m
         import mwmanager_journal
         self.m, self.mj = m, mwmanager_journal
-        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
         base = Path(tmp.name).resolve()
         self.manager, self.game = base / "MWManager", base / "Game"

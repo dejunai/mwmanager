@@ -17,6 +17,7 @@ import mock_fomod
 import mwmanager_install as ext
 import mwmanager_upstream
 import major_master_deploy as deploy
+import py_compat  # noqa: E402
 
 README = ('Optional Modules:\n\nAn optional module can be found in "01 Faction Integration".\n\n'
           '- 01: TR_Factions.esp: adds Telvanni Hortator quests to the mainland\n')
@@ -24,7 +25,7 @@ README = ('Optional Modules:\n\nAn optional module can be found in "01 Faction I
 
 class PreOptionTidyTests(unittest.TestCase):
     def setUp(self):
-        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)   # deploy leaves sqlite handles to the GC
+        tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)   # deploy leaves sqlite handles to the GC
         self.addCleanup(tmp.cleanup)
         self.staging = Path(tmp.name) / "staging"
         self.mod = self.staging / "Tamriel Rebuilt 42145"
@@ -458,7 +459,7 @@ class OptionFileSpeedTests(unittest.TestCase):
 
 class ExecutablesTests(unittest.TestCase):
     def test_tidy_moves_programs_and_scripts_to_off_executables(self):
-        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
         mod = Path(tmp.name).resolve() / "staging" / "Tamriel Data"
         for rel in ("Tamriel_Data.esm", "Docs/tamriel_data/MWLathe.exe", "Docs/tamriel_data/readme.txt",
@@ -477,7 +478,7 @@ class ExecutablesTests(unittest.TestCase):
 
 class SoundsFolderTests(unittest.TestCase):
     def test_a_misnamed_sounds_folder_is_renamed_and_reported(self):
-        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
         staging = Path(tmp.name).resolve() / "staging"
         mod = staging / "Dr_Data-51776"
@@ -499,7 +500,7 @@ class SoundsFolderTests(unittest.TestCase):
 
 class ApplyAfterFolderMove(unittest.TestCase):
     def test_a_file_planned_inside_a_folder_moved_earlier_still_moves(self):
-        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
         staging = Path(tmp.name).resolve() / "staging"
         mod = staging / "AATL Data"
@@ -520,11 +521,13 @@ class Heartbeat(unittest.TestCase):
         import time
         out = io.StringIO()
         with contextlib.redirect_stdout(out):
-            with ext._long_phase_heartbeat("Scanning", interval=2):
-                for _ in range(3):              # output every second: never silent long enough
+            with ext._long_phase_heartbeat("Scanning", interval=1.0, poll=0.1):
+                for _ in range(3):              # output more often than the interval: never silent long enough
                     print("progress")
-                    time.sleep(1)
-                time.sleep(3)                   # silent: one heartbeat
+                    time.sleep(0.4)
+                # Silent for 1.7 s after the last line: one heartbeat at about 1.0 s, and the next would be due at
+                # about 2.0 s, so 0.3 s of margin each way instead of landing on a polling boundary.
+                time.sleep(1.3)
         text = out.getvalue()
         self.assertEqual(text.count("Working... please be patient"), 1)
         self.assertNotIn("hung", text)

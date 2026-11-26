@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import mwmanager_core_game_files as core  # noqa: E402
+import py_compat  # noqa: E402
 
 ABS_PATH_RE = re.compile(r'(?i)\b[A-Z]:\\')
 
@@ -21,7 +22,7 @@ def write(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     if isinstance(data, str):
-        path.write_text(data, encoding="utf-8", newline="\n")
+        py_compat.write_text(path, data, encoding="utf-8", newline="\n")
     else:
         path.write_bytes(data)
     return path

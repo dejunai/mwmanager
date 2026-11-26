@@ -19,6 +19,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
 
 import mwnexus_browser as B  # noqa: E402
+import py_compat  # noqa: E402
 
 FAKE = textwrap.dedent(r'''
     import json, os, sys, time
@@ -61,7 +62,7 @@ class CloseBrowser(unittest.TestCase):
         self.assertEqual(command["download_dir"], str(target.resolve()))
 
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)
         self.old_lad = os.environ.get("LOCALAPPDATA")
         os.environ["LOCALAPPDATA"] = self.tmp.name
         self.root = B._root()

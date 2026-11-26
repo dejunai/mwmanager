@@ -49,7 +49,7 @@ def _bound_in(node) -> set[str]:
             names.add(child.name)
         elif isinstance(child, (ast.Global, ast.Nonlocal)):
             names |= set(child.names)
-        elif isinstance(child, ast.MatchAs) and child.name:
+        elif isinstance(child, getattr(ast, "MatchAs", ())) and child.name:      # match is 3.10+
             names.add(child.name)
         stack.extend(ast.iter_child_nodes(child))
     return names
@@ -681,7 +681,8 @@ class GuiSmokeTests(unittest.TestCase):
         with mock.patch.object(mwmanager_detect, "detect_all", return_value=found), \
                 mock.patch.object(self.g, "offer_elevation"), \
                 mock.patch.object(self.app, "open_options", side_effect=lambda **kwargs: opened.append(kwargs)), \
-                mock.patch.object(self.app, "_begin_first_run", side_effect=lambda: began.append(True)):
+                mock.patch.object(self.app, "_begin_first_run",
+                                  new=lambda: began.append(True)):   # Tk 3.9's after() reads func.__name__
             dialog = self.app._open_detected_paths(first_run=True)
             self.pump(0.2)
             buttons, labels = [], []

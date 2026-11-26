@@ -11,11 +11,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import major_master_deploy as mmd  # noqa: E402
+import py_compat  # noqa: E402
 
 
 class RemovalBlockers(unittest.TestCase):
     def setUp(self):
-        tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)
         self.addCleanup(tmp.cleanup)
         base = Path(tmp.name)
         self.manager, self.staging, self.data = base / "mgr", base / "staging", base / "game" / "Data Files"

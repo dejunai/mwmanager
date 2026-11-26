@@ -1176,9 +1176,9 @@ def drop_covered_moves(res):
 
 
 @contextmanager
-def _long_phase_heartbeat(message, interval=30):
+def _long_phase_heartbeat(message, interval=30, poll=1):
     """A long scan that prints nothing for `interval` seconds says it is working; any other output resets the wait,
-    so the line only appears when the window would otherwise be silent."""
+    so the line only appears when the window would otherwise be silent. `poll` is how often silence is checked."""
     stop = threading.Event()
     real = sys.stdout
     last = [time.monotonic()]
@@ -1192,7 +1192,7 @@ def _long_phase_heartbeat(message, interval=30):
             return getattr(real, name)
 
     def pulse():
-        while not stop.wait(1):
+        while not stop.wait(poll):
             if time.monotonic() - last[0] >= interval:
                 real.write(f"MWMANAGER-PROGRESS: {message}: Working... please be patient\n")
                 real.flush()

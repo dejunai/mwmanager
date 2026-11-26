@@ -26,6 +26,8 @@ name, a staged mod folder or an MWSE mod name; it matches with or without the ar
 
 Manual answers live in the user's own nexus_id_overrides.json (%LOCALAPPDATA%\\MWManager, so they outlast a reset or
 rollback of the MWManager folder); one in the MWManager folder (--manager) wins over it."""
+
+from __future__ import annotations
 import argparse
 import difflib
 import hashlib

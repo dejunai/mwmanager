@@ -24,6 +24,7 @@ from mwmanager_workflow import JobCancelled, JobControl, JobView, checkpoint, pr
 
 from mwmanager_theme import COLORS, FONTS, SPACE, apply_theme, center, master_status_legend, master_status_tags, tree_tags
 from bsa_pack import BSA_OFFER_SETTING, DEFAULT_THRESHOLD as DEFAULT_BSA_OFFER, MIN_THRESHOLD as MIN_BSA_OFFER
+import py_compat  # noqa: E402
 ALWAYS_BSA_SETTING = "always_build_bsa"      # mwmanager.ini [Staging]; default off: ask per package
 # mwmanager.ini [Staging], default on: Tidy/--asset-check reduce textures / splash screens wider than 2048
 ASSET_LIMIT_SETTINGS = {"reduce_textures_2048": "Reduce textures larger than 2048 to 2048",
@@ -4085,7 +4086,7 @@ class ManagerGUI(tk.Tk):
         rules_path = APP_DIR / "mwmanager_rules.txt"
         if not rules_path.exists():
             try:
-                rules_path.write_text(USER_RULES_TEMPLATE, encoding="cp1252", newline="\r\n")
+                py_compat.write_text(rules_path, USER_RULES_TEMPLATE, encoding="cp1252", newline="\r\n")
             except OSError as exc:
                 messagebox.showerror("Could not create sort rules", str(exc), parent=self)
                 return

@@ -8,7 +8,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest]           # MWManager is a Windows tool: its paths, hardlinks and case rules are Windows ones
-        python: ["3.12", "3.14"]
+        python: ["3.9", "3.12", "3.14"]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:

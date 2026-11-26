@@ -20,6 +20,8 @@ not change and reports what was added or changed. Pages older than --refresh-day
 
 An archive whose name has no Nexus id is looked up with nexus_ids (Vortex's records for the file in --archives,
 default Vortex's downloads folder; with browser/http also a Nexus search). One that is not a Nexus mod gets no page."""
+
+from __future__ import annotations
 import argparse
 import hashlib
 import json
