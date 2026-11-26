@@ -138,11 +138,11 @@ class OptionalGrassDescription(unittest.TestCase):
             grass = next(r for r in records if "Groundcover" in r["label"])
             self.assertEqual(grass["label"], "Remiros' Groundcover for TOTSP")
             self.assertEqual(grass["group_label"], "Grass (MGE XE groundcover)")
-            self.assertFalse(grass.get("fomod_description"))
+            self.assertEqual(grass.get("fomod_description"), mock_fomod.KNOWN_GRASS_OPTIONS["rem-totsp.esp"]["description"])
             docs = grass.get("docs") or ""
             self.assertIn("MGE XE grass plugin", docs)
             self.assertIn("Remiros' Groundcover", docs)
-            self.assertEqual(mock_fomod._option_description(grass, package), docs.strip())
+            self.assertEqual(grass.get("grass_section_note"), mock_fomod.GRASS_SECTION_NOTE)
 
 
 
@@ -165,9 +165,8 @@ class GrassStillOptionalAfterTidy(unittest.TestCase):
     def test_a_grass_plugin_already_in_grass_is_still_an_optional_choice(self):
         """After tidy moves Rem-TOTSP.esp into the package Grass\\ folder, the mock FOMOD still
         lists it as an optional plugin. Rem-TOTSP.esp has no TES3 description and no
-        ModuleConfig.xml; fomod_description is left empty so a description can be hardcoded later.
-        Left unchecked: the prerequisite (Remiros' Groundcover) is not staged, and the filename
-        is not enough for the existing 'for <mod>' tick rule."""
+        ModuleConfig.xml. The hardcoded Rem-TOTSP.esp description is applied; the box stays
+        unchecked because Remiros' Groundcover is not staged."""
         package = self.root / "TOTSP"
         plugin = package / "Grass" / "Rem-TOTSP.esp"
         grass_plugin(plugin)
@@ -183,10 +182,10 @@ class GrassStillOptionalAfterTidy(unittest.TestCase):
         self.assertEqual(record["group_label"], "Grass (MGE XE groundcover)")
         self.assertEqual(record["selection_type"], "SelectAny")
         self.assertEqual(record["label"], "Rem-TOTSP.esp")
-        self.assertEqual(record.get("fomod_description") or "", "")
+        self.assertEqual(record.get("fomod_description"),
+                         mock_fomod.KNOWN_GRASS_OPTIONS["rem-totsp.esp"]["description"])
         self.assertEqual(mock_fomod._plugin_description(plugin), "")
-        # the generic MGE XE note is not a plugin description Dej would hardcode
-        self.assertFalse(mock_fomod._option_description(record, package).startswith("Remiros"))
+        self.assertEqual(record.get("grass_section_note"), mock_fomod.GRASS_SECTION_NOTE)
 
     def test_a_non_grass_plugin_in_the_grass_folder_is_not_listed(self):
         package = self.root / "TOTSP"
@@ -222,7 +221,84 @@ class GrassStillOptionalAfterTidy(unittest.TestCase):
         totsp = [r for r in records if "TOTSP" in r["label"] or r["label"] == "Rem-TOTSP.esp"]
         self.assertEqual(len(totsp), 1)
         self.assertEqual(totsp[0]["label"], "Remiros' Groundcover for TOTSP")
-        self.assertEqual(totsp[0].get("fomod_description") or "", "")
+        self.assertEqual(totsp[0].get("fomod_description"),
+                         mock_fomod.KNOWN_GRASS_OPTIONS["rem-totsp.esp"]["description"])
+
+
+
+class KnownGrassDescriptionAndTick(unittest.TestCase):
+    def setUp(self):
+        tmp = py_compat.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.package = self.root / "staging" / "plugins" / "TOTSP"
+
+    def _records(self, plugin_name="Rem-TOTSP.esp"):
+        grass_plugin(self.package / "Grass" / plugin_name)
+        records = mock_fomod._discover(self.package, set())
+        records.extend(mock_fomod._discover_plugin_choices(
+            self.package, set(), mock_fomod._represented_option_sources(records)))
+        records.extend(mock_fomod._discover_grass_plugins(self.package, records, set()))
+        mock_fomod._mark_grass_options(records, self.package)
+        return [r for r in records if r.get("payload_files") and plugin_name.casefold() in {
+            Path(name).name.casefold() for name in r["payload_files"]}]
+
+    def test_rem_totsp_gets_the_hardcoded_description_for_any_letter_case(self):
+        want = mock_fomod.KNOWN_GRASS_OPTIONS["rem-totsp.esp"]["description"]
+        self.assertIn("Remiros' Groundcover", want)
+        self.assertIn("Remiros' Grass", want)
+        for name in ("Rem-TOTSP.esp", "rem-totsp.esp", "REM-TOTSP.ESP"):
+            with self.subTest(name=name):
+                records = self._records(name)
+                self.assertEqual(len(records), 1)
+                self.assertEqual(records[0]["fomod_description"], want)
+
+    def test_the_box_is_ticked_when_remiros_groundcover_is_staged(self):
+        (self.root / "staging" / "plugins" / "Remiros' Groundcover-46766").mkdir(parents=True)
+        record = self._records()[0]
+        self.assertTrue(record["recommended"])
+        self.assertFalse(record["always_optional"])
+
+    def test_the_box_is_ticked_when_the_folder_uses_the_grass_alias(self):
+        (self.root / "staging" / "plugins" / "Remiros' Grass").mkdir(parents=True)
+        record = self._records()[0]
+        self.assertTrue(record["recommended"])
+        self.assertFalse(record["always_optional"])
+
+    def test_the_box_is_ticked_when_only_a_remiros_groundcover_plugin_is_present(self):
+        sibling = self.root / "staging" / "plugins" / "downloaded-111"
+        (sibling / "Grass").mkdir(parents=True)
+        (sibling / "Grass" / "Remiros' Groundcover - Ascadian Isles.esp").write_bytes(b"TES3")
+        record = self._records()[0]
+        self.assertTrue(record["recommended"])
+
+    def test_the_box_stays_unticked_when_the_required_mod_is_not_staged(self):
+        (self.root / "staging" / "plugins" / "Remiros' Uniques-49674").mkdir(parents=True)
+        record = self._records()[0]
+        self.assertFalse(record["recommended"])
+        self.assertTrue(record["always_optional"])
+
+    def test_after_tidy_the_filename_alone_still_describes_and_can_auto_tick(self):
+        """Only Grass\\Rem-TOTSP.esp remains, as after tidy; staging Remiros' Groundcover ticks it."""
+        records = self._records()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0]["label"], "Rem-TOTSP.esp")
+        self.assertFalse(records[0]["recommended"])
+        (self.root / "staging" / "plugins" / "Remiros' Groundcover-46766").mkdir(parents=True)
+        records = self._records()
+        self.assertTrue(records[0]["recommended"])
+        self.assertEqual(records[0]["fomod_description"],
+                         mock_fomod.KNOWN_GRASS_OPTIONS["rem-totsp.esp"]["description"])
+
+    def test_the_grass_section_note_is_on_every_grass_option_and_in_the_window(self):
+        record = self._records()[0]
+        self.assertEqual(record["grass_section_note"], mock_fomod.GRASS_SECTION_NOTE)
+        self.assertIn("only deploys it", mock_fomod.GRASS_SECTION_NOTE)
+        self.assertIn("Grass tab", mock_fomod.GRASS_SECTION_NOTE)
+        self.assertIn("Distant Land", mock_fomod.GRASS_SECTION_NOTE)
+        src = Path(mock_fomod.__file__).read_text(encoding="utf-8")
+        body = src[src.index("for group_key, items in grouped"):]
+        self.assertIn("ttk.Label(box, text=GRASS_SECTION_NOTE)", body)
 
 
 if __name__ == "__main__":

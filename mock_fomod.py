@@ -2559,6 +2559,8 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
         box = ttk.LabelFrame(left, text=label + (" — choose one" if exclusive else
                                " — required" if select_all or any(i["required"] for i in items) else " — optional"))
         box.pack(fill="x", pady=4)
+        if first.get("group_key") == "grass":
+            ttk.Label(box, text=GRASS_SECTION_NOTE).pack(anchor="w", padx=6, pady=(2, 4))
         required = [i for i, item in enumerate(items) if item["required"] and not item.get("informational_utility")]
         if required:
             defaults = required
@@ -2575,9 +2577,11 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
                 defaults = [i for i, item in enumerate(items) if item["compatible"]
                             and not item.get("informational_utility") and not item.get("always_optional")]
             if not defaults and first.get("plugin_choice") and not exclusive:
-                defaults = [i for i, item in enumerate(items) if not item.get("informational_utility")]
+                defaults = [i for i, item in enumerate(items)
+                            if not item.get("informational_utility") and not item.get("always_optional")]
             if not defaults and first.get("plugin_choice") and exclusive:
-                defaults = [i for i, item in enumerate(items) if not item.get("informational_utility")][:1]
+                defaults = [i for i, item in enumerate(items)
+                            if not item.get("informational_utility") and not item.get("always_optional")][:1]
             if not defaults and group_key in stale_groups and selection_type.casefold() == "selectexactlyone":
                 # its saved choice no longer matches any option: the first one, so saved answers still apply
                 defaults = [i for i, item in enumerate(items) if not item.get("informational_utility")][:1]
@@ -2841,6 +2845,26 @@ def _data_root(folder: Path) -> Path:
         folder = children[0]
 
 
+
+# Known grass plugins: a hardcoded description and the groundcover mod they require.
+# Rem-TOTSP.esp is an approved exception to the no-ID-lists rule (Dej, 2026-11-26): after
+# tidy only the filename remains, and the required install is Remiros' Groundcover
+# (also called Remiros' Grass). Keep further known grass descriptions in this table.
+KNOWN_GRASS_OPTIONS = {
+    "rem-totsp.esp": {
+        "description": ("A grass plugin for Solstheim Tomb of the Snow Prince. Requires "
+                        "Remiros' Groundcover (also called Remiros' Grass)."),
+        "requires": "Remiros' Groundcover",
+        "also_called": ("Remiros' Grass",),
+        "nexus_id": "46766",
+    },
+}
+
+# One line for the Grass group in the options window, covering every grass file.
+GRASS_SECTION_NOTE = ("Selecting a grass file only deploys it; it still has to be enabled in "
+                      "MGE XE's Distant Land generator, on the Grass tab, when you rebuild distant land.")
+
+
 def _is_grass_plugin(path: Path) -> bool:
     """An MGE XE groundcover plugin (vortex_tidy's test: only grass statics placed in cells)."""
     if Path(path).suffix.casefold() != ".esp":
@@ -2869,17 +2893,116 @@ def _option_plugins(record: dict) -> list[Path]:
     return [Path(src) for src in (payload or {}).values() if Path(src).suffix.casefold() in PLUGIN_EXTS]
 
 
+def _known_grass_option(record: dict) -> dict | None:
+    """The KNOWN_GRASS_OPTIONS entry for this record, matched by plugin filename (any letter case)."""
+    names = [Path(src).name.casefold() for src in
+             list((record.get("payload_files") or {}).keys())
+             + list((record.get("all_payload_files") or {}).keys())]
+    names.extend(p.name.casefold() for p in _option_plugins(record))
+    label = str(record.get("label") or "")
+    names.append(label.casefold())
+    names.append(Path(label).name.casefold())
+    for name in names:
+        info = KNOWN_GRASS_OPTIONS.get(name)
+        if info:
+            return info
+    return None
+
+
+def _required_mod_names(info: dict) -> tuple[str, ...]:
+    return (info["requires"],) + tuple(info.get("also_called") or ())
+
+
+def _nexus_id_is_staged(nexus_id: str, mod_dir: Path) -> bool:
+    """A sibling staging folder whose name carries this Nexus id (the same pattern needed_mods uses)."""
+    if not nexus_id:
+        return False
+    token = re.compile(rf"(?:^|[-_ ]){re.escape(str(nexus_id))}(?:[-_ .]|$)")
+    staging = mod_dir.parent.parent
+    roots = {mod_dir.parent, staging, staging / "plugins", staging / "major_masters"}
+    try:
+        return any(token.search(p.name) for root in roots if root.is_dir() for p in root.iterdir()
+                   if p.is_dir() and p != mod_dir)
+    except OSError:
+        return False
+
+
+def _name_matches_required(needed: str, text: str) -> bool:
+    from needed_mods import names_mod
+    return bool(text) and names_mod(f"{needed} (mod)", text)
+
+
+def _required_grass_content_present(names: tuple[str, ...], mod_dir: Path,
+                                    data_files: Path | None = None) -> bool:
+    """True when a sibling package or Data Files\\Grass holds a plugin or display name for that groundcover."""
+    from needed_mods import names_mod
+    from major_master_deploy import ASSET_FOLDERS
+
+    def mentions(text: str) -> bool:
+        return any(_name_matches_required(n, text) for n in names)
+
+    def walk_plugins(root: Path):
+        skip = {"off", "extras", "docs", "screenshots", "openmw", "bugreports"} | set(ASSET_FOLDERS)
+        try:
+            for base, dirs, files in os.walk(root):
+                dirs[:] = [d for d in dirs if d.casefold() not in skip]
+                for name in files:
+                    if Path(name).suffix.casefold() in PLUGIN_EXTS and mentions(Path(name).stem):
+                        return True
+        except OSError:
+            return False
+        return False
+
+    staging = mod_dir.parent.parent
+    roots = [mod_dir.parent, staging, staging / "plugins", staging / "major_masters"]
+    try:
+        for root in roots:
+            if not root.is_dir():
+                continue
+            for pkg in root.iterdir():
+                if not pkg.is_dir() or pkg == mod_dir:
+                    continue
+                if mentions(pkg.name) or mentions(_search_mod_title(pkg, pkg.name)):
+                    return True
+                if walk_plugins(pkg):
+                    return True
+    except OSError:
+        pass
+    grass = Path(data_files) / "Grass" if data_files else None
+    if grass and grass.is_dir() and walk_plugins(grass):
+        return True
+    return False
+
+
+def _required_grass_mod_is_present(info: dict, mod_dir: Path, data_files: Path | None = None) -> bool:
+    """The required groundcover is staged (folder or Vortex/mod name), or its plugins are present."""
+    names = _required_mod_names(info)
+    if any(_mod_is_staged(f"{n} (mod)", mod_dir) or _grass_installed(n, data_files) for n in names):
+        return True
+    if _nexus_id_is_staged(str(info.get("nexus_id") or ""), mod_dir):
+        return True
+    return _required_grass_content_present(names, mod_dir, data_files)
+
+
 def _mark_grass_options(records: list[dict], mod_dir: Path, data_files: Path | None = None) -> None:
     """An option whose plugins are all MGE XE grass plugins goes under its own heading, ticked only when the
-    groundcover it is made for is staged ("Remiros' Groundcover for TOTSP" needs Remiros' Groundcover)."""
+    groundcover it is made for is staged. Rem-TOTSP.esp (and other KNOWN_GRASS_OPTIONS entries) use the
+    required mod in that table, so they still tick after tidy when only the filename is left."""
     for record in records:
         plugins = _option_plugins(record)
         if not plugins or not all(_is_grass_plugin(p) for p in plugins):
             continue
-        name = re.split(r"\s+for\s+", str(record.get("label") or ""), maxsplit=1, flags=re.I)[0].strip()
-        present = bool(name) and (_mod_is_staged(f"{name} (mod)", mod_dir) or _grass_installed(name, data_files))
+        known = _known_grass_option(record)
+        if known:
+            record["fomod_description"] = known["description"]
+            name = known["requires"]
+            present = _required_grass_mod_is_present(known, mod_dir, data_files)
+        else:
+            name = re.split(r"\s+for\s+", str(record.get("label") or ""), maxsplit=1, flags=re.I)[0].strip()
+            present = bool(name) and (_mod_is_staged(f"{name} (mod)", mod_dir) or _grass_installed(name, data_files))
         record.update(group_key="grass", group_label="Grass (MGE XE groundcover)", selection_type="SelectAny",
-                      recommended=present, required=False, compatible=[], always_optional=not present)
+                      recommended=present, required=False, compatible=[], always_optional=not present,
+                      grass_section_note=GRASS_SECTION_NOTE)
         note = (f"MGE XE grass plugin: read by MGE XE's distant land generator from Data Files\\Grass, never "
                 f"loaded by the game. For {name}, which is "
                 + ("staged, so it is chosen." if present else "not staged: choose it only if you will install it. "
