@@ -547,15 +547,16 @@ def plan_mod(mod_dir):
                      "migrate Lua repair original under Off/<plugin>/lua repairs")
         moves.append((legacy_lua_backup, None, "remove the emptied legacy LuaRepair folder"))
 
-    # Programs, libraries and scripts anywhere the package deploys from (Docs too) -> Off\<package>\Executables.
+    # Programs, libraries and scripts anywhere the package deploys from (Docs too) -> Off\<package>\executables.
     # A package with one at its root installs into the game folder and was left alone above.
+    # Older Off\<plugin>\Executables\ trees are still read (the folder is already under Off, so tidy leaves it).
     for base, dirs, files in os.walk(mod_dir):
         dirs[:] = [d for d in dirs if d.casefold() not in {"off", "extras", "fomod"}]
         for filename in sorted(files, key=str.casefold):
             if os.path.splitext(filename)[1].casefold() in EXECUTABLE_EXTS:
                 source = os.path.join(base, filename)
-                move(source, os.path.join(mod_dir, "Off", off_owner, "Executables", os.path.relpath(source, mod_dir)),
-                     "program, library or script -> Off\\<package>\\Executables (never deployed into Data Files)")
+                move(source, os.path.join(mod_dir, "Off", off_owner, "executables", os.path.relpath(source, mod_dir)),
+                     "program, library or script -> Off\\<package>\\executables (never deployed into Data Files)")
 
     # Search nested BAIN/FOMOD and Data Files layouts too. Groundcover ESPs belong
     # in this mod's Grass folder so MGE XE can find them; they are not game plugins.
@@ -577,7 +578,7 @@ def plan_mod(mod_dir):
                     splash_index = next(i for i, part in enumerate(relative_parts[:-1])
                                         if part.casefold() == "splash")
                     splash_relative = os.path.join(*relative_parts[splash_index + 1:])
-                    move(source, os.path.join(mod_dir, "Off", off_owner, "Splash", splash_relative),
+                    move(source, os.path.join(mod_dir, "Off", off_owner, "redundant splash sources", splash_relative),
                          "redundant TGA splash source retained under Off; matching JPEG is deployed")
                     continue
             openmw_path = ext == ".omwscripts" or any(part.casefold() in OPENMW_DIRS for part in relative_parts)
@@ -650,7 +651,7 @@ def plan_mod(mod_dir):
             move(src, os.path.join(mod_dir, "Off", off_owner, "OpenMW", e),
                  "OpenMW-only plugin retained under Off for possible future conversion")
         elif os.path.exists(os.path.join(mod_dir, dest_name)):
-            move(src, os.path.join(mod_dir, "Off", off_owner, "OpenMW-addon-duplicate", e),
+            move(src, os.path.join(mod_dir, "Off", off_owner, "duplicate omwaddon", e),
                  "duplicate .omwaddon kept Off because its .esp destination already exists")
         else:
             move(src, os.path.join(mod_dir, dest_name),
@@ -926,7 +927,7 @@ def plan_mod(mod_dir):
             for key, is_dir in junk_keys)]
         for source in packaging_junk:
             relative = os.path.relpath(source, mod_dir)
-            destination = free_path(os.path.join(mod_dir, "Off", off_owner, "Packaging Metadata", relative), taken)
+            destination = free_path(os.path.join(mod_dir, "Off", off_owner, "packaging metadata", relative), taken)
             moves.append((source, destination, "remove platform packaging metadata from installable content"))
     return moves
 CONVERTED_ADDONS = {}  # source .omwaddon filename -> destination .esp filename

@@ -798,7 +798,7 @@ class TidySteps(unittest.TestCase):
         rc, out = self.run_tidy("--apply", "--yes")
         self.assertEqual(rc, 0, out)
         self.assertTrue(all(not path.exists() for path in debris))
-        quarantined = list((root / "Off").rglob("Packaging Metadata"))
+        quarantined = list((root / "Off").rglob("packaging metadata"))
         self.assertEqual(len(quarantined), 1)
         self.assertEqual(len([path for path in quarantined[0].rglob("*") if path.is_file()]), len(debris))
         rc, out = self.run_tidy("--undo")

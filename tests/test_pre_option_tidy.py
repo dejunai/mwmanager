@@ -470,9 +470,9 @@ class ExecutablesTests(unittest.TestCase):
         moved = {os.path.relpath(s, mod): os.path.relpath(d, mod) for s, d, _why in plan if d}
         owner = ext.staging_package_name(str(mod))
         self.assertEqual(moved[os.path.join("Docs", "tamriel_data", "MWLathe.exe")],
-                         os.path.join("Off", owner, "Executables", "Docs", "tamriel_data", "MWLathe.exe"))
+                         os.path.join("Off", owner, "executables", "Docs", "tamriel_data", "MWLathe.exe"))
         self.assertEqual(moved[os.path.join("Textures", "tool.bat")],
-                         os.path.join("Off", owner, "Executables", "Textures", "tool.bat"))
+                         os.path.join("Off", owner, "executables", "Textures", "tool.bat"))
         self.assertNotIn(os.path.join("MWSE", "mods", "td", "main.lua"), moved)       # Lua is no program
 
 

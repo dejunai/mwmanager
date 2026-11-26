@@ -329,7 +329,30 @@ def _off_reason(feature):
     try:
         return OL.reason_for(feature)
     except ValueError:
+        # Conflict Tools accepted this name; the next sync adds it to REASONS and LEGACY.
+        if (feature or "").strip().lower() in {"texture-reduction", "reduced textures"}:
+            return "reduced textures"
         return feature
+
+
+# Older reason-folder spellings still read until (and after) they appear in mwdialog_offlayout.LEGACY.
+_LEGACY_REASON_FOLDERS = {
+    "reduced textures": ("texture-reduction",),
+    "executables": ("Executables",),
+    "redundant splash sources": ("Splash",),
+    "duplicate omwaddon": ("OpenMW-addon-duplicate",),
+    "packaging metadata": ("Packaging Metadata",),
+}
+
+
+def _existing_off_copy(root, owner, rel, reason):
+    """An original already kept for `rel` under this reason or an older spelling of it, or None."""
+    reason = _off_reason(reason)
+    for name in (reason,) + _LEGACY_REASON_FOLDERS.get(reason, ()):
+        path = os.path.join(root, "Off", owner, name, rel)
+        if os.path.exists(path):
+            return path
+    return None
 
 
 # Data Files\\Off uses these fixed owner names; never let owner_name scan Data Files for a plugin.
@@ -469,6 +492,10 @@ def plugin_off_backup_path(data_dir, rel, feature, plugin=None, unique=True):
         owner = os.path.splitext(owner)[0]
     root = backup_root_for(mod, data_dir, rel)
     path = off_dest(root, feature, owner, rel)
+    if not os.path.exists(path):
+        kept = _existing_off_copy(root, owner, rel, feature)
+        if kept:
+            path = kept
     if unique and os.path.exists(path):
         stem, ext = os.path.splitext(path)
         n = 2
@@ -497,7 +524,7 @@ def reduce_textures(data_dir, game_dir, items, log):
             if links:
                 kind, keep = "link", links[0]
             else:
-                kind, keep = "backup", asset_backup_file("texture-reduction", rel, data_dir=data_dir)
+                kind, keep = "backup", asset_backup_file("reduced textures", rel, data_dir=data_dir)
                 os.makedirs(os.path.dirname(keep), exist_ok=True)
                 shutil.move(full, keep)
             tmp = full + ".mwdtmp"

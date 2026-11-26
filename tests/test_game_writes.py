@@ -116,10 +116,10 @@ class BackupsStayOutOfTheGame(unittest.TestCase):
         kept = self.m.backup_asset_original(str(self.data), os.path.join("textures", "a.dds"))
         self.assertInGameOff(kept)
         self.assertEqual(Path(kept).read_bytes(), b"orig")
-        official = self.m.asset_backup_file("texture-reduction", os.path.join("textures", "b.dds"),
+        official = self.m.asset_backup_file("reduced textures", os.path.join("textures", "b.dds"),
                                             data_dir=str(self.data))
         self.assertEqual(os.path.normcase(official), os.path.normcase(
-            str(self.data / "Off" / "Found at Setup" / "texture-reduction" / "textures" / "b.dds")))
+            str(self.data / "Off" / "Found at Setup" / "reduced textures" / "textures" / "b.dds")))
 
     def test_shipped_assets_use_original_install_and_patched_esps_use_manager_backups(self):
         for name in ("Siege at Firemoth.esp", "Morrowind.esm", "Tribunal.bsa"):

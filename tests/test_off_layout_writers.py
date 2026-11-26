@@ -421,6 +421,85 @@ class TidyAndInstallWriters(unittest.TestCase):
         self.assertEqual(dest, package / "Off" / "Mod" / "lua repairs" / "MWSE" / "mods" / "x" / "main.lua")
         self.assertTrue(old.is_file())
 
+    def test_tidy_writers_use_canonical_reason_folders_and_leave_old_spellings(self):
+        mwmanager_upstream.compose_tidy()
+        import vortex_tidy as tidy
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        package = Path(tmp.name) / "Pack"
+        tes3(package / "Pack.esp")
+        put(package / "Docs" / "tool.exe", b"exe")
+        put(package / "Splash" / "load.tga", b"tga")
+        put(package / "Splash" / "load.jpg", b"jpg")
+        put(package / "Pack.omwaddon", b"omw")
+        put(package / "desktop.ini", b"ini")
+        # older spellings already under Off stay put: tidy does not walk Off
+        old_exe = put(package / "Off" / "Pack" / "Executables" / "old.exe", b"old")
+        old_splash = put(package / "Off" / "Pack" / "Splash" / "old.tga", b"tga")
+        old_omw = put(package / "Off" / "Pack" / "OpenMW-addon-duplicate" / "Old.omwaddon", b"omw")
+        old_meta = put(package / "Off" / "Pack" / "Packaging Metadata" / "thumbs.db", b"old")
+        plan = tidy.plan_mod(str(package))
+        owner = tidy.staging_package_name(str(package))
+        moved = {os.path.relpath(s, package): os.path.relpath(d, package) for s, d, _why in plan if d}
+        self.assertEqual(moved[os.path.join("Docs", "tool.exe")],
+                         os.path.join("Off", owner, "executables", "Docs", "tool.exe"))
+        self.assertEqual(moved[os.path.join("Splash", "load.tga")],
+                         os.path.join("Off", owner, "redundant splash sources", "load.tga"))
+        self.assertNotIn(os.path.join("Splash", "load.jpg"), moved)
+        self.assertEqual(moved["Pack.omwaddon"],
+                         os.path.join("Off", owner, "duplicate omwaddon", "Pack.omwaddon"))
+        self.assertEqual(moved["desktop.ini"],
+                         os.path.join("Off", owner, "packaging metadata", "desktop.ini"))
+        dests = [os.path.relpath(d, package) for s, d, _why in plan if d]
+        prefix = os.path.join("Off", owner) + os.sep
+        for old_name in ("Executables", "OpenMW-addon-duplicate", "Packaging Metadata"):
+            self.assertFalse(any(p.startswith(prefix + old_name + os.sep) or p == prefix.rstrip(os.sep) + os.sep + old_name
+                                 for p in dests), old_name)
+        # "Splash" as an Off reason is gone; the game Splash/ folder is a source, not a dest
+        self.assertFalse(any(p.startswith(os.path.join("Off", owner, "Splash") + os.sep) for p in dests))
+        self.assertTrue(old_exe.is_file())
+        self.assertTrue(old_splash.is_file())
+        self.assertTrue(old_omw.is_file())
+        self.assertTrue(old_meta.is_file())
+
+
+class ReducedTexturesWriter(unittest.TestCase):
+    """asset_backup_file writes 'reduced textures'; an older texture-reduction folder is still read.
+
+    Do not assert OL.is_canonical('reduced textures') until the next Conflict Tools sync lands.
+    """
+    def setUp(self):
+        import mwmanager as m
+        self.m = m
+        mwmanager_upstream.compose()
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(tmp.name)
+        self.manager = self.base / "MWManager"
+        self.manager.mkdir()
+        self.data = self.base / "Game" / "Data Files"
+        self.data.mkdir(parents=True)
+        state = mwmanager_upstream.use_manager_dir(self.manager)
+        state.__enter__()
+        self.addCleanup(state.__exit__, None, None, None)
+
+    def test_new_writes_use_reduced_textures_and_the_old_folder_is_still_found(self):
+        rel = os.path.join("textures", "b.dds")
+        with mock.patch.object(self.m, "asset_owner_folder", return_value=(None, None)):
+            path = Path(self.m.asset_backup_file("reduced textures", rel, data_dir=str(self.data)))
+            alias = Path(self.m.off_dest(str(self.data), "texture-reduction", "Found at Setup", rel))
+        self.assertEqual(path, self.data / "Off" / "Found at Setup" / "reduced textures" / rel)
+        self.assertEqual(alias, path)
+        # an original already under the older spelling is found; a unique sibling stays in that folder
+        legacy = put(self.data / "Off" / "Found at Setup" / "texture-reduction" / rel, b"first")
+        with mock.patch.object(self.m, "asset_owner_folder", return_value=(None, None)):
+            kept = Path(self.m.plugin_off_backup_path(str(self.data), rel, "reduced textures", unique=False))
+            again = Path(self.m.asset_backup_file("reduced textures", rel, data_dir=str(self.data)))
+        self.assertEqual(kept, legacy)
+        self.assertEqual(again.parent, legacy.parent)
+        self.assertIn("mwmanager", again.name)
+        self.assertFalse((self.data / "Off" / "Found at Setup" / "reduced textures" / rel).exists())
+
 
 if __name__ == "__main__":
     unittest.main()

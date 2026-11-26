@@ -2657,7 +2657,7 @@ class ManagerGUI(tk.Tk):
             text=(f"{len(items)} archive(s) contain executable, library, or script files and are blocked: these "
                   "are never deployed into Data Files. Review the listed files. Approve only archives whose "
                   "utilities you recognize; approved files are extracted directly into Off/<plugin name>/"
-                  "Executables/<original path> for inspection or manual use. The rest stay marked BLOCKED."),
+                  "executables/<original path> for inspection or manual use. The rest stay marked BLOCKED."),
             wraplength=780,
         ).pack(anchor="w", padx=12, pady=(12, 8))
         body = ttk.Frame(dialog)
