@@ -46,7 +46,7 @@ Other modules: `plugin_install.py`, `core_addons.py`, `major_master_deploy.py`, 
 Per-install settings and state (`mwmanager.ini`, GUI settings/state, load order, caches, `outputs/`, `backups/`,
 `staging/`, `disabled_plugins/`) are created on first run and ignored by git. Third-party binaries go in `tools/`
 yourself: LuaJIT in `tools/luajit/` (used by the Lua check), `texconv.exe` (DirectXTex), and the BSA packer.
-`mlox/` rule files can be downloaded during first-run preflight, or by `--init`, from the community mlox-rules project on GitHub. After first run, Tools > Update rules and `--update-rules` fetch only if newer, then comment out conflicting rules in the live files. Put personal rules in `mlox/mlox_my_rules.txt`; that file is never overwritten by a download. Community files are not backed up (the originals stay on GitHub); `mlox_my_rules.txt` keeps at most one rolling backup when MWManager has to change it.
+`mlox/` rule files can be downloaded during first-run preflight, or by `--init`, from the community mlox-rules project on GitHub. After first run, Tools > Update rules and `--update-rules` fetch only if newer, then comment out conflicting rules in the live mlox files and, if it already exists, obsolete rules in `mwmanager_rules.txt`. Put personal rules in `mlox/mlox_my_rules.txt`; that file is never overwritten by a download. Community files are not backed up (the originals stay on GitHub); `mlox_my_rules.txt` keeps at most one rolling backup when MWManager has to change it.
 
 `mwmanager_core_hashes.json` is shipped as immutable verification data; first-run code reads it but never
 regenerates or clears it.

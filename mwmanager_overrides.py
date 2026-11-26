@@ -311,7 +311,8 @@ def rules_sources(args, game_dir):
 
 def run_update_rules(args):
     """--update-rules: fetch newer community mlox rules if any, then comment out
-    conflicting rules in the live files. Same path as Tools > Update rules."""
+    conflicting rules in the live mlox files and, if it already exists,
+    obsolete rules in mwmanager_rules.txt. Same path as Tools > Update rules."""
     import mwmanager_mlox as mlox
     game_dir = os.path.dirname(os.path.abspath(args.data_dir))
     def progress(message):
@@ -1208,9 +1209,11 @@ def _main(argv=None):
     lo.add_argument("--update-rules", action="store_true",
                     help="download newer mlox community rules if the mlox-rules project has them, then "
                          "comment out conflicting rules in the live mlox files (duplicates of, or conflicts with, mlox_base, "
-                         "and rules that only mention uninstalled plugins). Community files are not backed up; "
-                         "mlox_my_rules.txt is never overwritten by a download and keeps at most one rolling backup. "
-                         "Same path as Tools > Update rules")
+                         "and rules that only mention uninstalled plugins). If mwmanager_rules.txt already exists, "
+                         "also comment out rules there that are duplicates or mention only uninstalled plugins "
+                         "(override rules, the [Context] section and the cell-conflicts block are left alone). "
+                         "Community files are not backed up; mlox_my_rules.txt is never overwritten by a download "
+                         "and keeps at most one rolling backup. Same path as Tools > Update rules")
     lo.add_argument("--bug-reports", action="store_true",
                     help="write <plugin>.bugreport.txt for plugins with problems of their own (also done by "
                          "--fix and --asset-check)")

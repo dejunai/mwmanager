@@ -5186,7 +5186,7 @@ class ManagerGUI(tk.Tk):
             description = "MWManager is inspecting archive contents to identify plugins, MWSE files, FOMOD options, asset counts, and download dates."
         else:
             description = {
-                "Update rules": "Check for newer mlox community rules, download them only if they have changed, then comment out conflicting rules in the live files. Your mlox_my_rules.txt is not overwritten by a download.",
+                "Update rules": "Check for newer mlox community rules, download them only if they have changed, then comment out conflicting rules in the live mlox files and, if it already exists, obsolete rules in mwmanager_rules.txt. Your mlox_my_rules.txt is not overwritten by a download.",
                 "First-run preflight": "Check the game and prerequisites. Only setup and configuration choices need your input.",
                 "Initial setup": "Sort and tidy the shipped files. Safe fixes apply automatically; output is shown below.",
                 "Catalog": "Build the plugin and archive catalog. Completed setup checkpoints will be kept.",

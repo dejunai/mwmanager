@@ -42,6 +42,7 @@ from email.utils import format_datetime
 from datetime import datetime, timezone
 
 from mwdialog_loadorder import name_matcher, parse_rules, rule_entry_lines
+from mwdialog_state import CONFLICT_RULE_NOTE, CONFLICT_RULES_HEADER
 
 MLOX_RULE_URLS = {
     "mlox_base.txt": "https://raw.githubusercontent.com/DanaePlays/mlox-rules/main/mlox_base.txt",
@@ -54,6 +55,7 @@ MLOX_RULES_REPO = "https://github.com/DanaePlays/mlox-rules"
 MLOX_USER_AGENT = "MWManager/1.0"
 MLOX_MAX_BYTES = 8 * 1024 * 1024
 MLOX_META_FILE = "mlox_rules_meta.json"
+MANAGER_RULES_FILE = "mwmanager_rules.txt"
 PLUGIN_EXTS = (".esp", ".esm", ".omwaddon")
 
 DOWNLOAD_LABEL = "Download the latest mlox rules (from the mlox project on GitHub)"
@@ -120,6 +122,16 @@ def mlox_sort_paths(manager_dir):
 def personal_rules_backup_path(folder):
     """Single rolling backup of the user's mlox_my_rules.txt, beside the live file."""
     return os.path.join(folder, MLOX_MY_RULES + ".bak")
+
+
+def manager_rules_path(manager_dir):
+    """MWManager's own sort-rules file, in the managed manager directory."""
+    return os.path.join(manager_dir, MANAGER_RULES_FILE)
+
+
+def manager_rules_backup_path(manager_dir):
+    """Single rolling backup of mwmanager_rules.txt, beside the live file."""
+    return os.path.join(manager_dir, MANAGER_RULES_FILE + ".bak")
 
 
 def stale_effective_path(folder, name):
@@ -588,7 +600,7 @@ def _disable_rule_in_lines(lines, tag_line, reason, when):
     return changed
 
 
-def _write_rule_file(path, lines, newline, ended, original, *, backup=False):
+def _write_rule_file(path, lines, newline, ended, original, *, backup=False, backup_path=None):
     text = newline.join(lines)
     if ended or lines:
         if not text.endswith(("\r\n", "\n")):
@@ -597,7 +609,7 @@ def _write_rule_file(path, lines, newline, ended, original, *, backup=False):
     if new == original:
         return False
     if backup and original:
-        bak = personal_rules_backup_path(os.path.dirname(path))
+        bak = backup_path or (path + ".bak")
         with open(bak, "wb") as stream:
             stream.write(original)
     temp = path + ".tmp"
@@ -681,7 +693,106 @@ def prune_mlox_rules(folder, plugins=None, *, progress=None, dry_run=False, when
             for tag_line, reason in items:
                 _disable_rule_in_lines(lines, tag_line, reason, when)
             _write_rule_file(path, lines, newline, ended, original,
-                             backup=(name == MLOX_MY_RULES))
+                             backup=(name == MLOX_MY_RULES),
+                             backup_path=(personal_rules_backup_path(folder)
+                                          if name == MLOX_MY_RULES else None))
+
+    if progress is not None:
+        for src, reason in dropped:
+            _detail(progress, f"skipped {src}: {reason}")
+    return dropped
+
+
+CONTEXT_BEGIN = "[Context]"
+CONTEXT_END = "; ---- end of [Context] ----"
+
+
+def _protected_manager_rule_lines(lines):
+    """1-based line numbers in [Context] and the --cell-conflicts block, which must not be edited."""
+    protected = set()
+    if lines and lines[0].strip().lower() == CONTEXT_BEGIN.lower():
+        end = next((i for i, line in enumerate(lines) if line.strip() == CONTEXT_END), None)
+        if end is not None:
+            protected.update(range(1, end + 2))
+    i = 0
+    while i < len(lines):
+        if lines[i].strip().startswith(CONFLICT_RULES_HEADER):
+            protected.add(i + 1)
+            i += 1
+            continue
+        block = [line.strip() for line in lines[i:i + 4]]
+        if (len(block) == 4 and block[0].lower() == "[order]"
+                and block[1] and block[2]
+                and not block[1].startswith((";", "[")) and not block[2].startswith((";", "["))
+                and CONFLICT_RULE_NOTE.match(block[3])):
+            protected.update(range(i + 1, i + 5))
+            i += 4
+            continue
+        i += 1
+    return protected
+
+
+def _manager_prune_reason(kind, entries, seen, base_rules, installed_low):
+    if not _rule_has_installed_plugins(kind, entries, installed_low):
+        return "mentions only plugins that are not installed"
+    key = (kind, tuple(e.casefold() for e in entries))
+    if key in seen:
+        return f"duplicate of an earlier rule in {MANAGER_RULES_FILE}"
+    if _identical(kind, entries, base_rules):
+        return "duplicates a rule in mlox_base.txt"
+    return None
+
+
+def prune_manager_rules(manager_dir, plugins=None, *, mlox_folder=None, progress=None, dry_run=False, when=None):
+    """Comment out obsolete rules in mwmanager_rules.txt, if that file already exists.
+
+    Never creates the file. Leaves the [Context] section and the --cell-conflicts
+    block untouched. Does not disable rules that reverse or cycle with mlox_base
+    (this file is the override layer). Returns a list of (source, reason).
+    """
+    from datetime import date as date_type
+
+    path = manager_rules_path(manager_dir)
+    if not os.path.isfile(path):
+        return []
+    installed_low = _installed_map(plugins) if plugins is not None else None
+    when = when or datetime.now().date()
+    if not isinstance(when, date_type) and hasattr(when, "date"):
+        when = when.date()
+    folder = mlox_folder or mlox_rules_folder(manager_dir)
+    base_path = os.path.join(folder, "mlox_base.txt")
+    base_rules, _ignored = parse_rules(base_path) if os.path.isfile(base_path) else ([], None)
+
+    lines, newline, ended, original = _read_rule_file(path)
+    protected = _protected_manager_rule_lines(lines)
+    rules, _ignored = parse_rules(path)
+    dropped = []
+    disable = []
+    seen = set()
+    for kind, entries, src in rules:
+        _name, tag_line = _source_line(src)
+        if tag_line and tag_line in protected:
+            key = (kind, tuple(e.casefold() for e in entries))
+            seen.add(key)
+            continue
+        reason = _manager_prune_reason(kind, entries, seen, base_rules, installed_low)
+        key = (kind, tuple(e.casefold() for e in entries))
+        seen.add(key)
+        if reason:
+            disable.append((src, reason))
+            dropped.append((src, reason))
+
+    if not dry_run and disable:
+        items = []
+        for src, reason in disable:
+            _name, tag_line = _source_line(src)
+            if tag_line:
+                items.append((tag_line, reason))
+        items.sort(reverse=True)
+        for tag_line, reason in items:
+            _disable_rule_in_lines(lines, tag_line, reason, when)
+        _write_rule_file(path, lines, newline, ended, original, backup=True,
+                         backup_path=manager_rules_backup_path(manager_dir))
 
     if progress is not None:
         for src, reason in dropped:
@@ -696,8 +807,13 @@ def update_rules(progress, manager_dir, *, plugins=None, game_dir=None, opener=N
       1. Check upstream and fetch community files only if they are newer.
       2. Run conflicting-rule cleanup in place against those NEW files (or the
          current files, if nothing new came down).
-      3. Save the download metadata (the live files were already written by
-         prune, including any single rolling backup of mlox_my_rules.txt).
+      3. If mwmanager_rules.txt already exists, comment out obsolete rules
+         there (uninstalled plugins, duplicates in the file, exact duplicates
+         of mlox_base). Override rules that reverse or cycle with base, the
+         [Context] section, and the --cell-conflicts block are left alone.
+      4. Save the download metadata (the live files were already written by
+         prune, including any single rolling backup of mlox_my_rules.txt or
+         mwmanager_rules.txt).
     """
     folder = mlox_rules_folder(manager_dir)
     os.makedirs(folder, exist_ok=True)
@@ -729,6 +845,12 @@ def update_rules(progress, manager_dir, *, plugins=None, game_dir=None, opener=N
     dropped = prune_mlox_rules(folder, plugins, progress=progress, dry_run=dry_run)
     if dropped:
         _status(progress, f"Skipped {len(dropped)} mlox rules that conflict with newer rules or mention mods you don't have.")
+
+    # 2b. After the mlox prune: clean mwmanager_rules.txt if it already exists.
+    manager_dropped = prune_manager_rules(manager_dir, plugins, mlox_folder=folder,
+                                          progress=progress, dry_run=dry_run)
+    if manager_dropped:
+        _status(progress, f"Skipped {len(manager_dropped)} rules in {MANAGER_RULES_FILE} that were duplicates or mention mods you don't have.")
 
     # 3. Save metadata last, after prune has updated the live files.
     if not dry_run and result.get("meta") is not None:
