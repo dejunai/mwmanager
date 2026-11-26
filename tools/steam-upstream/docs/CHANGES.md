@@ -1,3 +1,47 @@
+# Log shim v7: every redirected log is new in each game session (2026-11-26)
+
+- Cause: Enchantment Animation 2.3.6 (and Graphic Herbalism) write their own log with `io.open(path, "a")`, which
+  luafix's shim (it wraps `print`, `mwse.log` and the mod's `mwse.Logger`) never saw, so `Enchantment Animation.log`
+  only grew (227 KB over many sessions). The shim's own log, `lsmods.enchantment animation.log`, was already
+  rotated each session.
+- `SHIM_V` 7: the shim hands its file a local `io` whose `open` starts a `*.log` under `MWSE\logs\` new on the first
+  append-mode open in a session (old one to `<name>.old.log`, or deleted with `keepOld` 0), unless the file was
+  already written this session; later opens append. The shim's own log is also set aside at `initialized` when it
+  is from an earlier session and nothing wrote it this one. A file that appends to a log now counts as logging, so
+  `--lua-log all` gives it the shim. Third-party code is not edited beyond the shim's header; old shims are
+  upgraded on the next luafix run.
+- Not covered: `Core\Map Update` (mapfix.log; core mods are outside luafix). `LUA-DEBUGGING.md`'s logger example
+  now opens with `"w"`.
+
+# --play hash check: core files and our patches (2026-11-26)
+
+- `mwdialog_hashes.py`: `--play` hashes (SHA-256) Morrowind/Tribunal/Bloodmoon `.esm` and `.bsa` in Data Files
+  (Tribunal and Bloodmoon optional, skipped quietly when missing) and every plugin these tools generate. Core files
+  are recorded the first time `--play` sees them; our patches are recorded by their writers once final
+  (`write_plugin_bytes` hook for plugins written into Data Files whose header author is `mwdialog_check`, or already
+  recorded; the `--merge` and `--auto-merge` outputs directly). Record: `generated\mwdialog_play_hashes.json`. A
+  changed file, a missing required core file, or a recorded patch gone from Data Files while still in the load
+  order: a loud block naming each file, no launch, exit 4. New `--play-force` (starts anyway, same warning) and
+  `--rebaseline-hashes` (accept the current files; `--dry-run` shows the changes). `--full --play` forwards
+  `--play-force`.
+
+# doc_scan clean on the repository; deploy.py's running-game check only for a game install (2026-11-26)
+
+- deploy.py: the running Morrowind/MWManager check applies only when TARGET is, or is inside, a folder holding
+  `Morrowind.exe` or `Data Files`; `main(probe=...)` takes the process probe, so tests never see live processes.
+  README gets a "Developer Tools (repository only)" section documenting deploy.py (with `--backups`) and doc_scan.py.
+- MORE_INFO: the Performers Patch note no longer spells its removed switches as live ones (the names stay here in
+  CHANGES.md); the `--preserve-saves` abbreviation note uses the full name. `doc_scan.py` now exits 0 on the
+  repository, and `tests/test_doc_scan.py` keeps it that way.
+
+# doc_scan.py: verify documented switches still exist in the code (2026-11-26)
+
+- New dev tool `doc_scan.py` (not shipped). It reads README.md and docs/*.md except CHANGES.md and
+  docs/dev/, and checks every documented command-line switch against the flags the CLIs define
+  (ast of argparse, and pattern matching of hand-rolled parsers). It also lists switches the code
+  defines that no doc mentions. Exit 1 if either list is not empty. Retired or dev-only flags are
+  marked in the code with `help=argparse.SUPPRESS`, not in a side list.
+
 # Ship the bundled LuaJIT README with the tools (2026-11-26)
 
 - `tools/luajit/README.md` (the local build note already in the Steam install) is now tracked, so

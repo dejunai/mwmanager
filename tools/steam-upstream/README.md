@@ -34,6 +34,9 @@ The suite is engineered for massive, complex mod lists (hundreds of plugins, ten
 - [OpenMW Converter (experimental)](#openmw-converter-experimental)
 - [Installation & Directory Layout](#installation--directory-layout)
 - [Requirements & Bundled Binaries](#requirements--bundled-binaries)
+- [Developer Tools (repository only)](#developer-tools-repository-only)
+  - [deploy.py](#deploypy)
+  - [doc_scan.py](#doc_scanpy)
 - [License](#license)
 
 ---
@@ -147,8 +150,10 @@ The suite is engineered for massive, complex mod lists (hundreds of plugins, ten
 | `--fix` | *(flag)* | After the report, show a fix plan and apply it after you confirm. `.esp` files are fixed in place (backed up first); masters (`.esm`) through `mwdialog_check - ESM fixes.esp`. Also rebuilds Cell Fixes (`mwdialog_check Cell Fixes.esp`: doubled objects, footing moves, exterior float drops, pathgrids), SoundFix unless `--no-soundfix`, the MWSE suite data, and `MWSE\config\mwsoundguard_data.json`. `.esm` files are never rewritten. |
 | `--dry-run` | *(flag)* | With `--fix` (or other writing steps): show the plan but change nothing. |
 | `--yes` | *(flag)* | With `--fix`: apply without asking. |
-| `--play` | *(flag)* | Start `Morrowind.exe` directly, skipping the Morrowind Launcher (after any other steps given, e.g. `--sort --play`; not after a failed step, and skipped with `--dry-run`). Refuses (exit 3) when a plugin's master is missing, off, or loads after it. Writes `generated\mwdialog_load_order.txt` into `Morrowind.ini`'s `[Game Files]`, brings `Data Files` up to date with `lua tools\` (removing, with a backup, what it deployed earlier for a mod or file `lua tools\` no longer has), and sets `SteamAppId` so Steam doesn't redirect to the Launcher. On its own, just does that and starts the game. |
+| `--play` | *(flag)* | Start `Morrowind.exe` directly, skipping the Morrowind Launcher (after any other steps given, e.g. `--sort --play`; not after a failed step, and skipped with `--dry-run`). Refuses (exit 3) when a plugin's master is missing, off, or loads after it, and (exit 4) when a core file or one of our patches no longer matches its recorded hash (see `--play-force`). Writes `generated\mwdialog_load_order.txt` into `Morrowind.ini`'s `[Game Files]`, brings `Data Files` up to date with `lua tools\` (removing, with a backup, what it deployed earlier for a mod or file `lua tools\` no longer has), and sets `SteamAppId` so Steam doesn't redirect to the Launcher. On its own, just does that and starts the game. |
 | `--play-anyway` | *(flag)* | With `--play`: start even if a plugin's master is missing or loads after it. |
+| `--play-force` | *(flag)* | With `--play`: start even when the hash check fails (a core `.esm`/`.bsa` or one of our patches changed, or a recorded patch is missing). The warning is still printed. |
+| `--rebaseline-hashes` | *(flag)* | Accept the core files and our patches as they are now: record their current hashes as the baseline `--play` checks, then stop (or start the game with `--play`). With `--dry-run`, only show what would change. |
 | `--exe` | `<NAME>` | With `--play`: the game executable (default `Morrowind.exe`). |
 | `--steam-appid` | `<ID>` | With `--play`: Steam app id (default 22320). |
 
@@ -301,6 +306,7 @@ The suite is engineered for massive, complex mod lists (hundreds of plugins, ten
 | `mwdialog_check` | `1` | Done, ERRORs reported (also: another tool or MWManager holds the lock, or a step had nothing to do, e.g. `--reenable` with no match). |
 | `mwdialog_check` | `2` | Failed or refused: Vortex folders not found, a bad entry in your rules file, `--full` stopped, the sound cache not written, and so on. |
 | `mwdialog_check` | `3` | `--play` refused: a plugin's master is missing, off, or loads after it. |
+| `mwdialog_check` | `4` | `--play` refused: the hash check failed (`--play-force` starts anyway; `--rebaseline-hashes` accepts the files). |
 | `vortex_tidy`, `mwdialog_luafix` | `0` / `1` / `2` | Done / lock held, nothing to undo, an `--undo` that refused or left items in the journal, or some actions left unapplied / no plan, plan mismatch, Vortex folder not found, or (luafix) no syntax checker for `--apply`. |
 | `mwdialog_check.bat` | `9009` | Python 3 was not found. |
 
@@ -341,7 +347,7 @@ To guarantee safety and prevent unintended modifications across huge mod install
 - **Automatic repairs before a run**: if `Morrowind.ini`'s list was cut at the 32,767-character section limit (and there is no `mwdialog_load_order.txt` yet), the run does `--add-all-esp --sort --yes` first. If an `[Exact]` group came apart (a plugin in it was saved since the last sort), it does `--sort --yes` first. `--dry-run` only reports these.
 - **Follow-ups**: `--sort` that changed the order, and `--auto-merge`, then run `--fix --multipatch`; `--unmerge` then runs `--add-all-esp --sort`. `--no-follow-up` skips them.
 - **Compatibility guard**: before `--fix`, `--multipatch`, `--auto-merge` or `--merge` write anything, the run checks for plugins that are incompatible with each other (moved land and the like; asked about in a console) and stops if that check fails.
-- **`--play`** (or double-click `Play Morrowind.bat`) checks every active plugin's masters (refusing with exit 3; `--play-anyway` starts regardless), writes the ini, deploys `lua tools\` into `Data Files` (missing files copied, a deployed file replaced, with a backup in `backups\lua deploy\<date>\`, only when it is the older version (an older version is never put over a newer one: one warning names the file; your `MWSE\config\` settings are always left alone); which is older is decided by SHA-256 lineage, not file times: what it deployed is recorded in `generated\mwdialog_lua_manifest.json` with the earlier hashes each file had (up to 16), and file times are used only when a deployed file's content is in no record; and files an earlier `--play` deployed for a mod no longer in `lua tools\`, with its `*-metadata.toml` and `MWSE\config\` settings, are removed, backed up to `backups\lua prune\<date>\` and listed; `python mwdialog_paths.py --undo-lua-prune` puts them back), then starts the game detached with `SteamAppId` set (`--steam-appid`, default 22320). Details: [MORE_INFO.md](docs/MORE_INFO.md#starting-the-game---play).
+- **`--play`** (or double-click `Play Morrowind.bat`) checks every active plugin's masters (refusing with exit 3; `--play-anyway` starts regardless), checks the hashes of the core files and our patches (refusing with exit 4; `--play-force` starts regardless; see [the hash check](docs/MORE_INFO.md#the-hash-check-before-starting)), writes the ini, deploys `lua tools\` into `Data Files` (missing files copied, a deployed file replaced, with a backup in `backups\lua deploy\<date>\`, only when it is the older version (an older version is never put over a newer one: one warning names the file; your `MWSE\config\` settings are always left alone); which is older is decided by SHA-256 lineage, not file times: what it deployed is recorded in `generated\mwdialog_lua_manifest.json` with the earlier hashes each file had (up to 16), and file times are used only when a deployed file's content is in no record; and files an earlier `--play` deployed for a mod no longer in `lua tools\`, with its `*-metadata.toml` and `MWSE\config\` settings, are removed, backed up to `backups\lua prune\<date>\` and listed; `python mwdialog_paths.py --undo-lua-prune` puts them back), then starts the game detached with `SteamAppId` set (`--steam-appid`, default 22320). Details: [MORE_INFO.md](docs/MORE_INFO.md#starting-the-game---play).
 
 ---
 
@@ -374,7 +380,7 @@ A notorious Morrowind engine quirk causes `GetSoundPlaying` to return `0` for ce
 Unlike crude regex-based matchers, `mwdialog_luafix.py` uses a pure-Python lexical scanner and parser (`mwdialog_lua.py`) to build an AST for Lua 5.1/LuaJIT code:
 - **Nil Guards**: Automatically inserts defensive guards before unchecked property accesses (e.g. `e.reference.object`).
 - **Priority Compression**: Event handler priorities whose absolute value is 10,000 or more (`priorityLimit`) are made ordinary, keeping their relative order (`compress_priority`). By default (`priorityMode` `keepOrder`) they go to 9000-9999 (10000 -> 9000, 1e6 -> 9200, `math.huge` -> 9999; negative ones the same, negated), so they still run before every ordinary priority. `priorityMode` `clamp` uses 1000-1999 instead.
-- **Log Shimming** (rule `F1`): for a mod with log-spam signs (logging every frame, in loops, in frequent events, debug flags on), its `print` / `mwse.log` lines past its allowance go to `Data Files\MWSE\logs\<mod>.log` (rotated at 2 MB, at most 25 lines a second); errors and lifecycle lines still reach `MWSE.log`. `--lua-log all` gives every mod that logs the shim, `off` none. The current shim is version 6.
+- **Log Shimming** (rule `F1`): for a mod with log-spam signs (logging every frame, in loops, in frequent events, debug flags on), its `print` / `mwse.log` lines past its allowance go to `Data Files\MWSE\logs\<mod>.log` (rotated at 2 MB, at most 25 lines a second); errors and lifecycle lines still reach `MWSE.log`. `--lua-log all` gives every mod that logs the shim, `off` none. The current shim is version 7. Every log it handles is new in each game session, like `MWSE.log`: the previous session's log is kept as `<mod>.old.log` (replacing the older one), and a log from an earlier session that nothing wrote to is set aside when the game has initialized. A mod that keeps its own log in `Data Files\MWSE\logs\` by opening it in append mode (`io.open(path, "a")`) gets the same treatment: the first such open in a session starts the file new, later opens append.
 - **Targeted KnownBugs (KB1-KB17 and KB19-KB51)**: Hardens high-profile third-party mods against known engine crashes, memory leaks, sound-loop stacking, unbounded UI element growth (such as MWSE Core's `ExclusionsPage` unbounded item pagination), broken asset paths, missing-comma syntax, nil crashes, and handlers that register again on every load. There is no KB18: the WBSR save-block conflict is handled at runtime by `mwsaveguard.wbsr_bard`, not by a luafix patch of WBSR. See [MORE_INFO.md](docs/MORE_INFO.md) for the catalog.
 - **MWSE performance checks (report only)**: `G6` `tes3.getReference` in a frequent handler or a fast repeating timer; `G7` `tes3.rayTest` every frame or in a frequent handler with no `maxDistance`, no `root`, or `accurateSkinned`; `R1` a timer callback that uses a reference from its event with no safe handle or `:isValid()` check; `T1` `timer.start{ callback = "name" }` with no `timer.register("name", ...)` anywhere in the mod; `P1` `ref.data` written on a non-actor reference without `ref.modified = true`. `V1` (number before a vector in `*`, `+`, `-`) now flags only operands with vector evidence (MWSE's documented vector fields and functions, `tes3vector3.new`, a reference's `.position`, or a local set from one); `H2` no longer flags a timer started in `loaded` (MWSE clears every timer just before it); `D1` also flags costly work in an `infoFilter` handler that runs before it checks `e.passes`. `G6` ignores `getReference("player")`; `H2` treats a custom event fired only from `loaded` like `loaded`; `MWSE\backups\` and switched-off folders are skipped; files nothing loads are listed as unreferenced, their report-only findings set aside.
 - **Generic tuning rules**: `G2` (a per-frame handler that only polls state runs every `minInterval`) and `G2S` (the same for a handler `G2` would leave at medium that scans the world every frame, for example with `tes3.rayTest`, `:iterateReferences()` or `tes3.findActorsInProximity`, and shows nothing frame-critical); `G8` (the same literal `tes3.messageBox` in a handler of a per-hit or per-decision combat event is shown at most once per `messageInterval`, 10 s by default); `U1` (a per-frame handler writes the `.text` of a label it made only when the value changed); `M1` (an `enterFrame` handler with no UI work returns in menu mode). `M1` and `G2` both read a handler's leading guards, so they share its first line instead of adding it twice. The config key `skipRules` (generic rule ids such as `"G2S"`, `"G8"`, `"U1"`) reports a rule but never applies it, like `skipKnown` does for Known Bugs. See [MORE_INFO.md](docs/MORE_INFO.md) for the rule table and config keys.
@@ -387,6 +393,7 @@ Unlike crude regex-based matchers, `mwdialog_luafix.py` uses a pure-Python lexic
 The first-party MWSE modules live in `lua tools\MWSE\mods\mwsuite\` (with their `*-metadata.toml` files, `ownmods.json`, and `MWSE\config\mwguard.json`) and are deployed to `Data Files` by `--play` (and by MWManager). luafix reads the first-party list from `Data Files\MWSE\mods\mwsuite\ownmods.json` (schema `{"version": 1, "ownMods": [...]}`) and falls back to a built-in copy, with a warning, if that file is missing from a deployed mwsuite folder. It leaves those mods (and any `exemptMods`) alone unless `--include-own` (then only A1-A5 and F1). See [MORE_INFO.md](docs/MORE_INFO.md#13-mwse-suite-notes-cr-18) for the module list. Recent suite logging and memory-safety work includes:
 
 - **Log shim v6** (`mwdialog_luafix.py`): tighter lifecycle allowlist so lines like "Dialogue started with..." are not treated as init lines and forwarded to MWSE.log. The shim still intercepts `print` and `mwse.log`.
+- **Log shim v7** (`mwdialog_luafix.py`): fresh logs each session (see Log Shimming), including a mod's own append-mode log under `Data Files\MWSE\logs\`.
 - **mwsaveguard**: if a requested save never reaches saveguard because another handler returned false, it logs that the save was swallowed and lists the registered save handlers. `wbsr_bard` (loaded from mwsaveguard) releases only WBSR's save block for bard / performer songs; real dialogue still blocks saving. The toggle is on by default when WBSR is installed and loaded, and off (and registers nothing) when it is not.
 - **mwhangwatch**: has no Mod Config tab of its own. Its settings are on the **Guard & Hang Watch** page that mwguard registers (page *Memory & Hang Log*), and closing that menu saves them to mwhangwatch's own settings file, `mwhangwatch.json`, next to `mwguard.json`. The low-memory warning (address space at `memLimit`, 80% by default, 70-99 in the MCM) is a non-modal toast, and it is opt-in (`memWarn` defaults to false). The hang watch itself (`enabled`) stays off until you turn it on.
 - **mwfloatfix / `mwdialog_check --fix`**: `write_float_data` stamps `mwfloatfix_data.json` with size and an FNV-1a content hash of Cell Fixes, not the plugin's file time (those dates are rewritten for load order). `--fix` also runs an exterior z pass (`find_float_drops`) into Cell Fixes; interiors are still checked in-game.
@@ -459,6 +466,41 @@ When the tools are not installed inside the game folder, their records go straig
   - `tools\7z\7z.exe`: Archive inspection for download master verification (LGPL / unRAR). Optional: `--no-archive-lookup` skips it.
   - `tools\luajit\luajit.exe`: Bytecode syntax verification of patched Lua mods (MIT).
   - `tools\MWRecompile\MWRecompile.exe`: Recompiles rewritten sound scripts for `--soundfix`.
+
+---
+
+## Developer Tools (repository only)
+
+These two scripts are for working on the tools. They are in the repository and are never deployed into an install.
+
+### deploy.py
+
+Copies the runtime files and docs (git-tracked, chosen by `deploy_manifest.txt`) from the repository to an install, usually `<Morrowind>\conflict-tools\`.
+
+```text
+python deploy.py [TARGET] [--backups DIR] [--dry-run]
+python deploy.py -h | --help
+```
+
+| Switch | Argument | Description |
+| :--- | :--- | :--- |
+| `TARGET` | `<PATH>` | The folder to deploy into. Saved in `deploy.ini` beside `deploy.py` (machine-specific, never committed); with no `TARGET` the saved one is used. |
+| `--backups` | `<DIR>` | Where the backup of every file a deploy overwrites goes, also as `--backups=DIR` (saved in `deploy.ini` too). Default: a `_deploy_backups` folder beside the repository. Never inside `TARGET` or inside a game install. Each deploy gets `conflict-tools-deploy-<stamp>\` with `SHA256SUMS.txt`, `NEW_FILES.txt` and a relative `ROLLBACK.ps1`. |
+| `--dry-run` | *(flag)* | Report what a real run would copy, skip and back up, and write nothing (not even `deploy.ini`). |
+| `-h`, `--help` | *(flag)* | Print the full help and exit. |
+
+A real run into a Morrowind install (`TARGET` is, or is inside, a folder holding `Morrowind.exe` or `Data Files`) refuses while Morrowind or MWManager is running; it never stops them. Any other target is not checked for running programs. Exit codes: `0` done, `1` refused or a copy failed its hash check, `2` an unknown switch or no target.
+
+### doc_scan.py
+
+Checks that the docs and the code agree on command-line switches. It never edits anything.
+
+```text
+python doc_scan.py [DIR]
+python doc_scan.py -h | --help
+```
+
+It reads `README.md` and `docs\*.md` (not `docs\CHANGES.md`, which keeps removed names on purpose, and not `docs\dev\`), and the switches the tools define (argparse calls and hand-written parsers). It prints one line per documented switch the code doesn't have (file, line, and the tool it was checked against) and one per switch the code has that no doc mentions, then a summary. A switch hidden with `help=argparse.SUPPRESS` (retired or internal) is not listed as undocumented. Switches of other programs (`omw2mwse`, `luajit`, `git`...) written after that program's name are left out. `DIR` checks another copy of the project. Exit codes: `0` clean, `1` something to fix, `2` an unknown switch.
 
 ---
 
