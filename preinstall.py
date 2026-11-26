@@ -354,26 +354,18 @@ def _choose(progress, title, message, choices, cancel):
     return choices[0][1] if progress.ask_yes_no(title, message) else cancel
 
 
-def run_mwse_updater(game_dir: Path, latest: str | None, progress, runner=subprocess.run) -> bool:
-    """Start MWSE-Update.exe from the game folder (only ever after the user clicked to run it)."""
-    updater = Path(game_dir) / "MWSE-Update.exe"
-    progress(f"Running {updater} (the MWSE updater)…")
-    try:
-        result = runner([str(updater)], cwd=str(game_dir), check=False)
-    except OSError as exc:
-        hint = (" Windows says it needs administrator rights; run MWSE-Update.exe yourself as administrator."
-                if getattr(exc, "winerror", None) == 740 else "")
-        progress(f"Preflight: MWSE-Update.exe could not be started: {exc}.{hint}")
-        return False
-    if result.returncode:
-        progress(f"Preflight: MWSE-Update.exe exited with code {result.returncode}.")
-        return False
-    build = mwmanager_prereqs.detect(game_dir)["mwse"].get("build")
-    if latest and build and latest.startswith(build):
-        progress(f"Preflight: MWSE is now the latest build ({latest[:12]}).")
-        return True
-    progress("Preflight: MWSE-Update.exe finished, but mwse-version.txt does not show the latest build yet.")
-    return False
+def run_mwse_updater(game_dir: Path, latest: str | None, progress, runner=subprocess.run,
+                     manager_dir: Path | None = None) -> bool:
+    """Start MWSE-Update.exe from the game folder (only ever after the user clicked to run it).
+
+    After a successful updater run, re-apply KnownBug core patches. A missing core
+    Lua file is logged but does not fail this preflight step. Pass manager_dir so
+    tests do not write stamps into the live MWManager folder.
+    """
+    import mwmanager_mwse_core as mwse_core
+    return bool(mwse_core.run_updater_then_reapply(
+        game_dir, latest=latest, progress=progress, runner=runner,
+        manager_dir=manager_dir))
 
 
 def launch_morrowind(game_dir: Path) -> str:
@@ -741,7 +733,7 @@ def install_prerequisite_archive(key: str, archive: Path, game_dir: Path, manage
 
 
 def _post_prerequisite(key: str, game_dir: Path, progress, latest: str | None,
-                       runner=subprocess.run, state=None) -> bool:
+                       runner=subprocess.run, state=None, manager_dir: Path | None = None) -> bool:
     state = state if state is not None else {}
     if key == "mwse":
         state["mwse_update_offered"] = True
@@ -750,7 +742,7 @@ def _post_prerequisite(key: str, game_dir: Path, progress, latest: str | None,
                 "Update MWSE now (highly recommended)",
                 "MWSE is installed. Running MWSE-Update.exe now is highly recommended so the first launch uses "
                 "the current MWSE build. Close Morrowind before continuing.\n\nRun the updater now?"):
-            run_mwse_updater(game_dir, latest, progress, runner=runner)
+            run_mwse_updater(game_dir, latest, progress, runner=runner, manager_dir=manager_dir)
         return True
     if key == "mcp_beta":
         patcher = Path(game_dir) / "Morrowind Code Patch.exe"
@@ -826,7 +818,7 @@ def _offer_missing(report: dict, progress, game_dir: Path, manager_dir: Path, ar
         selected = cached[0] if choice == "cache" else archived[0]
         if not install_prerequisite_archive(first, selected, game_dir, manager_dir, progress, runner=runner):
             return False
-        return _post_prerequisite(first, game_dir, progress, latest, runner=runner, state=state)
+        return _post_prerequisite(first, game_dir, progress, latest, runner=runner, state=state, manager_dir=manager_dir)
     download_root = prereq_root / first
     download_root.mkdir(parents=True, exist_ok=True)
     download_dir = Path(tempfile.mkdtemp(prefix="download-", dir=download_root))
@@ -846,14 +838,14 @@ def _offer_missing(report: dict, progress, game_dir: Path, manager_dir: Path, ar
     if not ready:
         return False
     if _prereq_ready(first, game_dir):
-        return _post_prerequisite(first, game_dir, progress, latest, runner=runner, state=state)
+        return _post_prerequisite(first, game_dir, progress, latest, runner=runner, state=state, manager_dir=manager_dir)
     downloaded = mwmanager_prereqs.prerequisite_archives(first, download_dir)
     if not downloaded:
         progress(f"Preflight: no matching {mwmanager_prereqs.PAGES[first]['name']} archive was found in {download_dir}.")
         return False
     if not install_prerequisite_archive(first, downloaded[0], game_dir, manager_dir, progress, runner=runner):
         return False
-    return _post_prerequisite(first, game_dir, progress, latest, runner=runner, state=state)
+    return _post_prerequisite(first, game_dir, progress, latest, runner=runner, state=state, manager_dir=manager_dir)
 
 
 def _prepare_first_run(game_dir: Path, manager_dir: Path, progress, archive_source: str | None) -> bool:
@@ -1020,7 +1012,8 @@ def run_preinstall(game_dir: Path, manager_dir: Path, progress, *,
                 f"MWManager always recommends the latest MWSE.\n\nInstalled build: {have}\n"
                 f"Latest build: {mwse['latest'][:12]}\n\nRun MWSE-Update.exe now? Close Morrowind first. "
                 "Choose No to continue with the installed MWSE."):
-            if not run_mwse_updater(game_dir, mwse["latest"], progress, runner=runner):
+            if not run_mwse_updater(game_dir, mwse["latest"], progress, runner=runner,
+                                    manager_dir=manager_dir):
                 overrides.append("mwse-update-incomplete")
         else:
             overrides.append("mwse-update-declined")

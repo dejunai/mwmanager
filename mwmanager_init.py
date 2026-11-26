@@ -254,98 +254,38 @@ def show_download_interface(items, title="MWManager prerequisites"):
 
 
 def check_mwse_latest_commit(timeout=10):
-    """Return the latest upstream MWSE commit SHA used as a nightly-build freshness proxy."""
-    from urllib.request import Request, urlopen
-    request = Request("https://api.github.com/repos/MWSE/MWSE/commits/master",
-                      headers={"Accept": "application/vnd.github+json", "User-Agent": "MWManager"})
-    with urlopen(request, timeout=timeout) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    sha = payload.get("sha", "") if isinstance(payload, dict) else ""
-    return sha.lower() if re.fullmatch(r"[0-9a-fA-F]{40}", sha) else None
+    """Return the latest MWSE build-automatic release SHA (what MWSE-Update.exe installs)."""
+    import mwmanager_prereqs
+    latest, error = mwmanager_prereqs.latest_mwse_build()
+    if error and not latest:
+        raise RuntimeError(error)
+    return latest
 
 
-def offer_mwse_update(game_dir, *, dry_run=False, yes=False):
-    """Check MWSE freshness ourselves; offer the official updater only when needed or unknown."""
-    updater = os.path.join(game_dir, "MWSE-Update.exe")
-    if not os.path.isfile(updater):
-        print("\nWARNING: MWSE-Update.exe was not found in the Morrowind game folder. "
-              "MWSE may be missing or its updater may need to be restored.")
-        if dry_run:
-            print("--dry-run: would offer the MWSE installation page.")
-        else:
-            show_download_interface([("MWSE and its updater",
-                                      "MGE XE normally includes MWSE-Update.exe. Install/update MWSE, then rerun MWManager.",
-                                      PREREQUISITE_URLS["mwse"])], "MWSE updater missing")
-        return False
-
-    marker = os.path.join(game_dir, "mwse-version.txt")
-    installed = os.path.isfile(marker) and os.path.isfile(os.path.join(game_dir, "MWSE.dll"))
-    installed_sha = None
-    if installed:
-        try:
-            candidate = open(marker, encoding="ascii", errors="ignore").read().strip()
-            installed_sha = candidate.lower() if re.fullmatch(r"[0-9a-fA-F]{40}", candidate) else None
-        except OSError:
-            pass
-    if not installed:
-        print("\nMWSE appears incomplete (version marker or MWSE.dll missing).")
-    else:
-        print(f"\nMWSE installation found; installed build marker: {installed_sha or 'unrecognized'}.")
-
-    latest_sha = None
-    check_error = None
-    try:
-        latest_sha = check_mwse_latest_commit()
-    except Exception as exc:
-        check_error = str(exc)
-    if latest_sha and installed_sha and latest_sha == installed_sha:
-        print("MWSE is current according to the upstream build marker; no update prompt is needed.")
+def _offer_mwse_update_ok(result):
+    """Keep a bool at the init layer: a dict result is always truthy."""
+    if not isinstance(result, dict):
+        return bool(result)
+    if result.get("updated") or result.get("state") in {"current", "updated", "skipped-offer"}:
         return True
-    if latest_sha and installed_sha:
-        print(f"A newer MWSE upstream revision is available ({installed_sha[:12]} -> {latest_sha[:12]}).")
-        reason = "A newer MWSE build is available."
-    elif not installed:
-        reason = "MWSE is missing or incomplete."
-    else:
-        print(f"WARNING: MWSE update status could not be verified ({check_error or 'unrecognized installed build marker'}).",
-              file=sys.stderr)
-        reason = "MWSE update status could not be verified. Run its official updater to check for an update?"
+    if result.get("skipped") or result.get("dry_run"):
+        return result.get("state") != "missing-updater"
+    return False
 
-    if dry_run:
-        print(f"--dry-run: would ask whether to run MWSE-Update.exe. Reason: {reason}")
-        return installed
-    answer = bool(yes)
-    if yes:
-        print("--yes: running the official MWSE updater because the installed build is outdated or could not be verified.")
-    else:
-        try:
-            import tkinter as tk
-            import mwmanager_dialogs as messagebox
-            root = tk.Tk()
-            root.withdraw()
-            answer = messagebox.askyesno(
-                "MWSE update available",
-                reason + "\n\nMWManager will run MWSE-Update.exe and wait for it to finish.",
-                parent=root)
-            root.destroy()
-        except Exception:
-            try:
-                answer = input(reason + " [y/N] ").strip().casefold() in {"y", "yes"}
-            except (EOFError, OSError):
-                answer = False
-    if not answer:
-        print("MWSE update skipped; continuing with the installed build.")
-        return installed
-    try:
-        result = subprocess.run([updater], cwd=game_dir, check=False)
-    except OSError as exc:
-        print(f"WARNING: could not start MWSE-Update.exe: {exc}", file=sys.stderr)
-        return False
-    if result.returncode:
-        print(f"WARNING: MWSE updater exited with code {result.returncode}; continuing.", file=sys.stderr)
-        return False
-    print("MWSE updater finished; initialization will lint the installed core Lua afterward.")
-    return True
+
+def offer_mwse_update(game_dir, *, dry_run=False, yes=False, force=False, progress=None,
+                      ask=None, runner=None, manager_dir=None, checker=None, reapply_after=True):
+    """Shared path with Tools > Update MWSE, preflight, --init and --full.
+
+    Freshness is the build-automatic release. After the official updater runs
+    (and, for Tools, also when the build is already current), KnownBug core
+    patches are re-applied. Returns a bool for existing --init/--full callers.
+    """
+    import mwmanager_mwse_core as mwse_core
+    result = mwse_core.offer_mwse_update(
+        game_dir, dry_run=dry_run, yes=yes, force=force, progress=progress, ask=ask,
+        runner=runner, manager_dir=manager_dir, checker=checker, reapply_after=reapply_after)
+    return _offer_mwse_update_ok(result)
 
 
 def mcp_beta_status(game_dir):

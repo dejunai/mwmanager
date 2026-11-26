@@ -139,6 +139,17 @@ def showwarning(title=None, message=None, **options):
     return _prompt(title, message, "warning", [("OK", "ok")], "ok", "ok", **options)
 
 
+def ask_continue_dont_warn(title=None, message=None, **options):
+    """Non-blocking warning: Continue anyway, or Don't warn again for this exact version.
+
+    Returns 'continue' or 'mute'. Closing the window continues; Play is never blocked.
+    """
+    return _prompt(
+        title, message, "warning",
+        [("Continue anyway", "continue"), ("Don't warn again", "mute")],
+        "continue", "continue", **options)
+
+
 def showerror(title=None, message=None, **options):
     return _prompt(title, message, "error", [("OK", "ok")], "ok", "ok", **options)
 

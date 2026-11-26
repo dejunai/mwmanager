@@ -51,13 +51,13 @@
     },
     {
       "name": "Lua nil-safety fixer",
-      "source": "<Steam Morrowind>\\mwdialog_luafix.py",
+      "source": "<morrowind-conflict-tools>\\mwdialog_luafix.py",
       "snapshot": "tools\\steam-upstream\\mwdialog_luafix.py",
       "working": "mwdialog_luafix.py",
-      "working_copy_action": "upstream verbatim (integration 2026-11-14)",
-      "source_sha256": "2794fedeacc3e590fc4d21fe9f23eef3afa57d630d5a74cba6ed9e44cf011e89",
-      "snapshot_sha256": "2794fedeacc3e590fc4d21fe9f23eef3afa57d630d5a74cba6ed9e44cf011e89",
-      "working_sha256": "2794fedeacc3e590fc4d21fe9f23eef3afa57d630d5a74cba6ed9e44cf011e89",
+      "working_copy_action": "upstream verbatim (conflict-tools bcf8d59)",
+      "source_sha256": "8c044f8f3f285e559d0e88fec3eeb2e8fbbae4c5eacb84d53e9d6ab954f56e17",
+      "snapshot_sha256": "8c044f8f3f285e559d0e88fec3eeb2e8fbbae4c5eacb84d53e9d6ab954f56e17",
+      "working_sha256": "8c044f8f3f285e559d0e88fec3eeb2e8fbbae4c5eacb84d53e9d6ab954f56e17",
       "working_matches_upstream": true
     },
     {
