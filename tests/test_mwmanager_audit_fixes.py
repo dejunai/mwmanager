@@ -63,15 +63,15 @@ class AuditFixes(unittest.TestCase):
 
     def test_tidy_backup_keeps_an_updated_original(self):
         root = self.base / "staging" / "Mod"
-        put(root / "Off" / "Mod" / "repair" / "a.wav", b"first")
+        put(root / "Off" / "Mod" / "converted sounds" / "a.wav", b"first")
         put(root / "a.wav", b"updated")
         bak = self.ah._backup_in_mod(str(root), "a.wav", str(root / "a.wav"), "Mod", self.m)
         self.assertEqual(Path(bak).read_bytes(), b"updated")
-        self.assertEqual((root / "Off" / "Mod" / "repair" / "a.wav").read_bytes(), b"first")
+        self.assertEqual((root / "Off" / "Mod" / "converted sounds" / "a.wav").read_bytes(), b"first")
 
     def test_tidy_backup_that_cannot_be_made_stops_the_repair(self):
         root = self.base / "staging" / "Mod"
-        put(root / "Off" / "Mod" / "repair" / "a.wav", b"first")
+        put(root / "Off" / "Mod" / "converted sounds" / "a.wav", b"first")
         put(root / "a.wav", b"updated")
         with mock.patch("shutil.copy2", side_effect=OSError("no space")), self.assertRaises(OSError):
             self.ah._backup_in_mod(str(root), "a.wav", str(root / "a.wav"), "Mod", self.m)
@@ -105,7 +105,7 @@ class AuditFixes(unittest.TestCase):
         names = [f"café{i}.nif" for i in range(3)]
         for n in names:
             put(root / "Meshes" / n, b"nif")
-        home = root / "Off" / "Mod" / "Reprocessed filenames" / "Mod"
+        home = root / "Off" / "Mod" / "ascii"
         plugin(home / "Mod.esp.bak_ascii", *names)
         update = plugin(root / "Mod.esp", *names, "only_in_update.nif")
         self.rename_all(root, names)

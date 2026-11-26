@@ -405,9 +405,9 @@ def save_pending_cell_conflicts(args, ranked):
 
 def off_label(kind):
     return {
-        "unused": "unused or empty file(s) to move to Off\\<plugin>\\Unused assets\\ (--restore-unused)",
-        "broken": "broken file(s) to keep in Off\\<plugin>\\Damaged assets\\, a stand-in put in their place",
-        "orphan": "orphaned animation(s) to move to Off\\<plugin>\\Unused assets\\",
+        "unused": "unused or empty file(s) to move to Off\\<plugin>\\unused assets\\ (--restore-unused)",
+        "broken": "broken file(s) to keep in Off\\<plugin>\\broken\\, a stand-in put in their place",
+        "orphan": "orphaned animation(s) to move to Off\\<plugin>\\orphaned animations\\",
     }[kind]
 
 
@@ -1195,7 +1195,7 @@ def _main(argv=None):
                     help="put back every file --fix or vortex_tidy moved to a short path (mwdialog_longpaths.json) "
                          "and the paths in plugins and models; the next --fix rebuilds the ESM patch without them")
     tc.add_argument("--restore-unused", action="store_true",
-                    help="put back the unused textures/sounds --asset-check --fix moved to Off\\unused\\")
+                    help="put back the unused textures/sounds --asset-check --fix moved to Off\\<plugin>\\unused assets\\")
     tc.add_argument("--repair-sounds", action="store_true",
                     help="re-save sound files the active plugins play that the game can hang or crash on (24/32-bit "
                          "or odd-codec WAVs, MP3s with damaged or huge tags), same names, no plugin changed; needs "

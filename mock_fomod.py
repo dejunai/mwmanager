@@ -22,6 +22,7 @@ import webbrowser
 import threading
 import hashlib
 from tk_lifetime import after_while_open, run_in_background
+import mwdialog_offlayout as OL
 import subprocess
 import tempfile
 from html.parser import HTMLParser
@@ -68,6 +69,33 @@ def _known_option_masters(mod_dir: Path, label: str) -> set[str]:
     package = re.sub(r"[^a-z0-9]+", " ", mod_dir.name.casefold()).strip()
     option = re.sub(r"[^a-z0-9]+", " ", label.casefold()).strip()
     return {"nod - core.esm"} if package.startswith("wares ultimate ") and option == "nod patch" else set()
+
+
+def _unused_option_roots(mod_dir: Path) -> list[Path]:
+    """Every folder holding this mod's parked, unused FOMOD plugin options: Off\\<plugin>\\unused fomod options\\
+    (the layout), and the older Off\\<name>\\FOMOD option plugin choices\\ and
+    Off\\<name>\\fomod-options\\plugin-choices\\, which stay readable."""
+    off = Path(mod_dir) / "Off"
+    roots: list[Path] = []
+    try:
+        owners = sorted((p for p in off.iterdir() if p.is_dir()), key=lambda p: p.name.casefold())
+    except OSError:
+        return roots
+    for owner in owners:
+        try:
+            children = sorted((p for p in owner.iterdir() if p.is_dir()), key=lambda p: p.name.casefold())
+        except OSError:
+            continue
+        for child in children:
+            try:
+                if OL.reason_for(child.name) == "unused fomod options":
+                    roots.append(child)
+            except ValueError:
+                pass
+        legacy = owner / "fomod-options" / "plugin-choices"
+        if legacy.is_dir():
+            roots.append(legacy)
+    return roots
 
 
 def _package_display_name(mod_dir: Path) -> str:
@@ -1265,10 +1293,13 @@ def _apply_plugin_choices(mod_dir: Path, records: list[dict], chosen: set[str]) 
                 if mod_folder is None:
                     mod_folder = extras / mod_dir.name
                 unused_root = mod_folder / "unused-at-install"
+                parked_roots = [unused_root]
             else:
-                unused_root = mod_dir / "Off" / _package_display_name(mod_dir) / "FOMOD option plugin choices"
+                unused_root = Path(OL.off_path(str(mod_dir), "unused fomod options",
+                                               fallback=_package_display_name(mod_dir)))
+                parked_roots = [unused_root] + _unused_option_roots(mod_dir)   # parked by an older version too
             try:
-                parked = source.resolve().is_relative_to(unused_root.resolve())
+                parked = any(source.resolve().is_relative_to(root.resolve()) for root in parked_roots)
             except (OSError, ValueError, AttributeError):
                 parked = False
             if item["key"] in chosen:
@@ -3572,9 +3603,7 @@ def undo_staging_options(staging: str | os.PathLike, output_dir: str | os.PathLi
             _prune_option_backups(_option_backup_root(Path(output_dir), identity), {"files": {}})
         if activation.get("files"):
             undone += len(activation["files"])
-        off_root = mod_dir / "Off"
-        choice_roots = list(off_root.glob("*/FOMOD option plugin choices"))
-        choice_roots += list(off_root.glob("*/fomod-options/plugin-choices"))  # legacy layout
+        choice_roots = _unused_option_roots(mod_dir)       # the layout's folder and the older two
         extras_root = mod_dir / "Extras"
         if extras_root.is_dir():
             choice_roots.extend(extras_root.glob("*/unused-at-install"))

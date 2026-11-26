@@ -304,7 +304,8 @@ def _pack_assets_locked(package, plugin_name, tool, progress):
             raise RuntimeError("BSAPack output pipe did not close; packing was not published.")
         if reader_errors:
             raise reader_errors[0]
-        log_path = package / "Off" / Path(plugin_name).stem / "bsapack.log"
+        # the only loose file Off\\<plugin>\\ may hold is max_path_too_long.txt: the log goes in a reason folder
+        log_path = package / "Off" / Path(plugin_name).stem / "packed into bsa" / "bsapack.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(temp / "bsapack.log", log_path)
         if returncode:
@@ -312,7 +313,7 @@ def _pack_assets_locked(package, plugin_name, tool, progress):
         outputs = sorted(temp.glob(Path(base_name).stem + "*.bsa"), key=lambda p: p.name.casefold())
         if not outputs:
             raise RuntimeError(f"BSAPack reported success but created no archive for {plugin_name}.")
-        off = package / "Off" / Path(plugin_name).stem / "bsa packed" / uuid.uuid4().hex
+        off = package / "Off" / Path(plugin_name).stem / "packed into bsa" / uuid.uuid4().hex
         tx = DurableTransaction(transaction_root, [package]).begin()
         try:
             record_path = package / ".mwmanager-bsa-state.json"

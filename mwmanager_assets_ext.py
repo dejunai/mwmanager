@@ -2,7 +2,7 @@
 
 Runs inside the upstream mwdialog_assets namespace (see mwmanager_upstream.py); a name set here replaces
 upstream's. What MWManager changes: originals of repaired, broken and unused files go to the owning mod's
-Off\\<plugin>\\<feature>\\ (or MWManager's backups, never the game install), texconv and ffmpeg come from
+Off\\<plugin>\\<reason>\\ (or MWManager's backups, never the game install), texconv and ffmpeg come from
 MWManager\\tools, bug reports carry the mod's Nexus page and go to MWManager\\outputs\\bugreports, a damaged Bink
 video gets the stand-in, and the cache and records live in the MWManager folder. The checks themselves (mipmap
 rules, texture limits, model facts, the SQLite cache) are upstream's.
@@ -16,21 +16,41 @@ import tempfile
 import time
 import hashlib
 
+import mwdialog_offlayout as OL
+
 _scanner = sys.modules["mwdialog_check"]
 MANAGER_DIR = _scanner.MANAGER_DIR
 OUTPUT_DIR = _scanner.OUTPUT_DIR
 TOOLS_DIR = _scanner.TOOLS_DIR
-FEATURE_OF = {"snd": "Reprocessed sounds", "tex": "Reprocessed textures",
-              "keys": "Reprocessed Unix line joins", "abs": "Reprocessed texture paths",
-              "broken": "Damaged assets", "orphan": "Unused assets", "unused": "Unused assets"}
+# the kind of repair -> its reason folder (the fixed list in mwdialog_offlayout.REASONS)
+FEATURE_OF = {"snd": "converted sounds", "tex": "converted textures", "splash": "converted splash screens",
+              "keys": "fixed text keys", "abs": "fixed texture paths", "ascii": "ascii",
+              "broken": "broken", "orphan": "orphaned animations", "unused": "unused assets"}
+DEFAULT_REASON = "repaired originals"
 if not _scanner.asset_limit("reduce_splash_2048"):
     SPLASH_MAX_WIDTH = None             # splashes keep their width; alpha and non-TGA repairs still apply
 
 
 def broken_dest(root_or_mod, rel, sub="broken", plugin="Found at Setup"):
-    """<mod>\\Off\\<plugin>\\<feature>\\<original path>."""
-    owner = os.path.splitext(os.path.basename(plugin))[0]
-    return os.path.join(root_or_mod, "Off", owner, sub, rel)
+    """<mod>\\Off\\<plugin>\\<reason>\\<original path> (the owner is mwdialog_offlayout.owner_name's)."""
+    return OL.off_path(root_or_mod, sub, rel, hint=plugin)
+
+
+def _off_dest(m, data_dir, rel, reason):
+    """Where a file leaves Data Files to: the owning staged mod's Off\\<plugin>\\<reason>\\<rel>, or (a file no
+    staged mod owns) the manager's own backup folder for it."""
+    mod, plugin = m.asset_owner_folder(data_dir, rel)
+    if not mod:
+        return m.plugin_off_backup_path(data_dir, rel, reason, plugin)
+    dest = broken_dest(mod, rel, reason, plugin)
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    if os.path.exists(dest):                       # never over an earlier original of the same path
+        stem, ext = os.path.splitext(dest)
+        number = 1
+        while os.path.exists(f"{stem}.mwmanager-{number}{ext}"):
+            number += 1
+        dest = f"{stem}.mwmanager-{number}{ext}"
+    return dest
 
 
 def apply(fixes, data_dir, game_dir, m, log, dry=False):
@@ -112,8 +132,7 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
                 new = open(out, "rb").read()
                 os.remove(out)
             elif kind == "orphan":                     # out of Data Files, into the mod's Off\...\orphaned\
-                mod, _pl = m.asset_owner_folder(data_dir, rel)
-                dest = m.plugin_off_backup_path(data_dir, rel, FEATURE_OF["orphan"], _pl)
+                dest = _off_dest(m, data_dir, rel, FEATURE_OF["orphan"])
                 if os.path.exists(full):
                     move_out(full, dest, rel)
                 moves.append((rel, dest, job))
@@ -121,8 +140,7 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
                 log.append(("Data Files", f"'{rel}' ({job})", f"moved to {dest}"))
                 continue
             elif kind == "broken":                     # keep the broken file in Off, a stand-in in its place
-                mod, _pl = m.asset_owner_folder(data_dir, rel)
-                dest = m.plugin_off_backup_path(data_dir, rel, FEATURE_OF["broken"], _pl)
+                dest = _off_dest(m, data_dir, rel, FEATURE_OF["broken"])
                 if not os.path.exists(dest):
                     shutil.copy2(full, dest)
                 m.replace_asset_in_place(full, m.stand_in_bytes(rel))
@@ -131,8 +149,7 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
                 log.append(("Data Files", f"'{rel}' ({job})", f"broken file kept in {dest}; stand-in put in its place"))
                 continue
             else:                                      # unused / empty: move out of Data Files
-                mod, _pl = m.asset_owner_folder(data_dir, rel)
-                dest = m.plugin_off_backup_path(data_dir, rel, FEATURE_OF["unused"], _pl)
+                dest = _off_dest(m, data_dir, rel, FEATURE_OF["unused"])
                 if os.path.exists(full):
                     move_out(full, dest, rel)
                 moves.append((rel, dest, job))
@@ -140,8 +157,11 @@ def apply(fixes, data_dir, game_dir, m, log, dry=False):
                 done["unused"] += 1
                 continue
             _mod, owner_plugin = m.asset_owner_folder(data_dir, rel)
-            bak = m.backup_asset_original(data_dir, rel, plugin=owner_plugin,
-                                         feature=FEATURE_OF.get(kind, "repair"))
+            reason = FEATURE_OF.get(kind, DEFAULT_REASON)
+            if _mod:
+                bak = _backup_in_mod(_mod, rel, os.path.join(data_dir, rel), owner_plugin, m, reason)
+            else:
+                bak = m.backup_asset_original(data_dir, rel, plugin=owner_plugin, feature=reason)
             m.replace_asset_in_place(full, new)
             done[kind] += 1
             log.append(("Data Files", f"'{rel}' ({kind})", f"repaired (original: {bak})"))
@@ -221,50 +241,19 @@ def restore_unused(game_dir, data_dir):
     return 0
 
 
-def _backup_owner(plugin_name):
-    owner = os.path.basename(plugin_name)
-    return os.path.splitext(owner)[0] if owner.casefold().endswith((".esp", ".esm", ".omwaddon")) else owner
-
-
-def _backup_in_mod(root, rel, full, plugin_name, m, feature="repair"):
-    """Keep the original at Off/<Vortex mod name>/<feature>/<original relative path>, and an update's beside it."""
-    owner = _backup_owner(plugin_name)
-    off = os.path.join(root, "Off")
-    kept = _kept_in_mod(off, owner, rel)
+def _backup_in_mod(root, rel, full, plugin_name, m, feature=DEFAULT_REASON):
+    """Keep the original at <mod>\\Off\\<plugin>\\<reason>\\<original relative path>, and an update's beside it.
+    An original already kept for this path (any reason or older layout, but not a moved-out file) is reused."""
+    kept = OL.find_original(root, rel)
     if kept:
         return m.keep_new_original(kept, full)
-    dest = os.path.join(off, owner, feature, rel)
+    dest = OL.off_path(root, feature, rel, hint=plugin_name)
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     if not os.path.exists(dest):
         shutil.copy2(full, dest)
         m._ASSET_BACKUP_OF[os.path.normcase(os.path.abspath(full))] = dest
         return dest
     return m.keep_new_original(dest, full)
-
-
-def _kept_in_mod(off, owner, rel):
-    """The first original, in the canonical Off/<plugin>/<feature>/<path> layout or an older one, or None."""
-    try:
-        owner_dir = os.path.join(off, owner)
-        for category in os.listdir(owner_dir):
-            existing = os.path.join(owner_dir, category, rel)
-            if os.path.exists(existing):
-                return existing
-        for category in os.listdir(off):
-            category_dir = os.path.join(off, category)
-            if not os.path.isdir(category_dir):
-                continue
-            for plugin_dir_name in os.listdir(category_dir):
-                if plugin_dir_name.casefold() == owner.casefold():
-                    existing = os.path.join(category_dir, plugin_dir_name, rel)
-                    if os.path.exists(existing):
-                        return existing
-        legacy = os.path.join(off, owner, rel)
-        if os.path.exists(legacy):
-            return legacy
-    except OSError:
-        pass
-    return None
 
 
 def find_ffmpeg():
@@ -283,13 +272,13 @@ def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
         os.replace(full, new_full)
         operations.append({"src": full, "dst": new_full})
     elif os.path.exists(full):
-        # If this path was renamed earlier, keep the old-named source in Off\<plugin>\non-ascii\<old path>.
+        # If this path was renamed earlier, keep the old-named source in Off\<plugin>\ascii\<old path>.
         import mwdialog_check as _manager
-        keep = _manager.off_dest(root, "non-ascii", None, rel)
-        kept_before = _manager.off_dest(root, "names", None, rel)      # where earlier versions kept it
-        if os.path.exists(keep) or os.path.exists(kept_before):
+        keep = OL.off_path(root, "ascii", rel)
+        kept_before = keep if os.path.exists(keep) else OL.find_original(root, rel)   # or an older layout's
+        if kept_before:
             # an update's file is a new original; raises if it can't be kept
-            _manager.keep_new_original(keep if os.path.exists(keep) else kept_before, full)
+            _manager.keep_new_original(kept_before, full)
             os.remove(full)
             operations.append({"duplicate": new_full, "restore": full})
             log(f"{rel}: ASCII replacement {new_rel} already exists and the original is already kept; "
@@ -338,8 +327,7 @@ def rename_ascii(root, full, rel, new_rel, log, backup_callback=None):
                 if backup:
                     operations.append({"restore": pp, "backup": backup})
             else:
-                bak = os.path.join(root, "Off", os.path.splitext(pf)[0], "Reprocessed filenames",
-                                   os.path.splitext(pf)[0], pf + ".bak_ascii")
+                bak = OL.off_path(root, FEATURE_OF["ascii"], pf + ".bak_ascii", hint=pf)
                 os.makedirs(os.path.dirname(bak), exist_ok=True)
                 if not os.path.exists(bak):
                     shutil.copy2(pp, bak)
@@ -371,21 +359,21 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                 def backup_plugin(path, _data):
                     plugin_rel = os.path.relpath(path, root)
                     return _backup_in_mod(root, plugin_rel, path, plugin_name, m,
-                                          FEATURE_OF.get("ascii", "Reprocessed filenames"))
+                                          FEATURE_OF["ascii"])
                 operations = rename_ascii(root, full, rel, job, lambda t: print("  " + t), backup_plugin)
                 if journal_ops is not None:
                     journal_ops.extend(operations)
                 done += 1
                 continue
             if kind == "orphan":
-                dest = os.path.join(root, "Off", _backup_owner(plugin_name), FEATURE_OF["orphan"], rel)
+                dest = OL.off_path(root, FEATURE_OF["orphan"], rel, hint=plugin_name)
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 moved = not os.path.exists(dest)
                 if moved:
                     shutil.move(full, dest)
                 if change_log is not None:
                     change_log.append({"file": rel, "action": f"moved to Off ({job})" if isinstance(job, str) else
-                                       "moved to Off/orphaned after checking global asset availability",
+                                       "moved to Off/orphaned animations after checking global asset availability",
                                        "backup": os.path.relpath(dest, root), "cross_plugin": True})
                 if journal_ops is not None and moved:
                     journal_ops.append({"src": full, "dst": dest})
@@ -491,7 +479,7 @@ def apply_folder(root, fixes, m, game_dir, plugin_name, change_log=None, progres
                     journal_ops.append({"generated": replacement, "sha256": hashlib.sha256(new).hexdigest()})
                 done += 1
                 continue
-            backup = _backup_in_mod(root, rel, full, plugin_name, m, FEATURE_OF.get(kind, "repair"))
+            backup = _backup_in_mod(root, rel, full, plugin_name, m, FEATURE_OF.get(kind, DEFAULT_REASON))
             if kind == "tex" and job.get("convert") and os.path.exists(replacement):
                 # the mod ships its own DDS/TGA of that name, which the game prefers: the PNG only goes to Off
                 os.remove(full)

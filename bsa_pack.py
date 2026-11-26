@@ -225,7 +225,7 @@ def build_for_mod(mod_dir: Path, data_files: Path, ini: Path, manager_dir: Path,
             return 2
     try:
         plugin_name = plugin_folder_name(mod_dir)
-        backups = mod_dir / "Off" / plugin_name / "bsa-pack"
+        backups = mod_dir / "Off" / plugin_name / "packed into bsa"
         ini_backup_dir = backups / "ini"
         backup_ini = _append_archive_ini(ini, archives[0].name, ini_backup_dir)
         for archive in archives[1:]:

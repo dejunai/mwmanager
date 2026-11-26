@@ -39,7 +39,7 @@ class LayerReportTests(unittest.TestCase):
 
 
 class NonAsciiRename(unittest.TestCase):
-    def test_a_renamed_files_original_goes_to_off_plugin_non_ascii(self):
+    def test_a_renamed_files_original_goes_to_off_plugin_ascii(self):
         import tempfile
         mwmanager_upstream.compose()
         import mwdialog_assets
@@ -52,10 +52,10 @@ class NonAsciiRename(unittest.TestCase):
             said = []
             mwdialog_assets.rename_ascii(str(mod), str(mod / "Sound" / "Vo" / "café.mp3"), "Sound\\Vo\\café.mp3",
                                          "Sound\\Vo\\cafe.mp3", said.append)
-            kept = mod / "Off" / "Voices" / "non-ascii" / "Sound" / "Vo" / "café.mp3"
+            kept = mod / "Off" / "Voices" / "ascii" / "Sound" / "Vo" / "café.mp3"
             self.assertEqual(kept.read_bytes(), b"original")
             self.assertFalse((mod / "Off" / "Voices" / "names").exists())
-            self.assertIn(os.path.join("Off", "Voices", "non-ascii", "Sound", "Vo", "café.mp3"), said[0])
+            self.assertIn(os.path.join("Off", "Voices", "ascii", "Sound", "Vo", "café.mp3"), said[0])
 
             # an original an earlier version kept in Off\<plugin>\names\ still counts: no second copy
             (mod / "Sound" / "Vo" / "thé.mp3").write_bytes(b"again")
@@ -67,7 +67,7 @@ class NonAsciiRename(unittest.TestCase):
                                          "Sound\\Vo\\the.mp3", said.append)
             self.assertFalse((mod / "Sound" / "Vo" / "thé.mp3").exists())
             self.assertEqual(old.read_bytes(), b"first original")
-            self.assertFalse((mod / "Off" / "Voices" / "non-ascii" / "Sound" / "Vo" / "thé.mp3").exists())
+            self.assertFalse((mod / "Off" / "Voices" / "ascii" / "Sound" / "Vo" / "thé.mp3").exists())
 
 
 class AssetRepairHeartbeat(unittest.TestCase):
