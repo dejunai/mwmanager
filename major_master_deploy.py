@@ -40,9 +40,9 @@ def sha256(path: Path) -> str:
 
 def staged_masters(staging: Path, configured: list[str]) -> dict[str, Path]:
     wanted = {name.casefold(): name for name in configured}
-    found: dict[str, Path] = {}
+    found: dict[str, list[Path]] = {}
     if not staging.is_dir():
-        return found
+        return {}
     for package in sorted((p for p in staging.iterdir() if p.is_dir() and not p.name.startswith(".")
                            and not p.is_symlink()), key=lambda p: p.name.casefold()):
         for base, dirs, files in os.walk(package):
@@ -51,8 +51,62 @@ def staged_masters(staging: Path, configured: list[str]) -> dict[str, Path]:
             for filename in files:
                 key = filename.casefold()
                 if key in wanted and Path(filename).suffix.casefold() == ".esm":
-                    found.setdefault(key, Path(base) / filename)
-    return found
+                    found.setdefault(key, []).append(Path(base) / filename)
+    return {key: _preferred_staged_plugin(staging, key, paths) for key, paths in found.items()}
+
+
+def _package_of(path: Path, staging: Path) -> Path:
+    return next((parent for parent in Path(path).parents if parent.parent == staging), Path(path).parent)
+
+
+def _staged_package_for_source(source, staging: Path) -> Path | None:
+    source, staging = Path(source), Path(staging)
+    try:
+        resolved = source.resolve() if source.is_absolute() else None
+    except OSError:
+        resolved = None
+    if resolved is None:
+        return None
+    try:
+        if resolved.is_relative_to(staging):
+            parts = resolved.relative_to(staging).parts
+            return staging / parts[0] if parts else None
+    except (ValueError, OSError):
+        return None
+    return None
+
+
+def _preferred_staged_plugin(staging: Path, master_key: str, paths: list[Path]) -> Path:
+    """When two packages ship the same master, prefer the user's chosen HD/SD variant."""
+    if len(paths) == 1:
+        return paths[0]
+    staging = Path(staging)
+
+    def archive_name(package: Path) -> str:
+        try:
+            from core_addons import _read_staged_archive_marker
+            marker = _read_staged_archive_marker(package) or {}
+        except Exception:
+            marker = {}
+        return str(marker.get("archive") or package.name)
+
+    try:
+        from core_addons import _variant_label, master_variant_choices
+        choices = master_variant_choices(staging.parent.parent)
+    except Exception:
+        choices = {}
+        _variant_label = lambda *_a, **_k: None  # noqa: E731
+    chosen = choices.get(master_key)
+    matching = []
+    for path in paths:
+        label = _variant_label(master_key, archive_name(_package_of(path, staging)))
+        if chosen and label == chosen:
+            matching.append(path)
+    if len(matching) == 1:
+        return matching[0]
+    if matching:
+        paths = matching
+    return min(paths, key=lambda p: _package_of(p, staging).name.casefold())
 
 
 def esm_master_names(path):
@@ -127,7 +181,22 @@ def _package_roots(staging: Path, configured: list[str]) -> list[tuple[Path, lis
 
 
 def _bsa_files(package: Path) -> list[Path]:
-    return sorted((p for p in package.glob("*.bsa") if p.is_file()), key=lambda p: p.name.casefold())
+    """BSAs at the package root, or still under a Data Files wrapper before Tidy flattens it."""
+    found: dict[str, Path] = {}
+    package = Path(package)
+    if not package.is_dir():
+        return []
+    for path in package.rglob("*.bsa"):
+        if not path.is_file():
+            continue
+        parts = path.relative_to(package).parts
+        if any(part.startswith(".") or part.casefold() in SKIP_FOLDERS for part in parts[:-1]):
+            continue
+        key = path.name.casefold()
+        previous = found.get(key)
+        if previous is None or len(parts) < len(previous.relative_to(package).parts):
+            found[key] = path
+    return sorted(found.values(), key=lambda p: p.name.casefold())
 
 
 def find_bsapack() -> Path | None:
@@ -449,6 +518,26 @@ def _snapshot_metadata(tx, manager_dir, data_dir):
     tx.snapshot(manager_dir / "game_catalog.sqlite3", database=True)
 
 
+
+def _master_still_available(name, package, staging, data_dir, staged) -> bool:
+    """True when this package can go away because the same master is still provided elsewhere."""
+    other = staged.get(name)
+    if other is not None and not other.resolve().is_relative_to(package):
+        return True
+    package, data_dir = Path(package).resolve(), Path(data_dir)
+    for path in data_dir.glob("*"):
+        if not path.is_file() or path.name.casefold() != name:
+            continue
+        try:
+            for source in package.rglob("*"):
+                if source.is_file() and source.name.casefold() == name and os.path.samefile(source, path):
+                    return False
+        except OSError:
+            pass
+        return True
+    return False
+
+
 def assert_package_disposable(package, staging, data_dir, manager_dir, configured, *, check_dependencies=True):
     """Backend guard shared by Unstage, re-extraction, and staging reset."""
     original = Path(package)
@@ -475,6 +564,10 @@ def assert_package_disposable(package, staging, data_dir, manager_dir, configure
     # A fresh dependency scan, never GUI cached data, before any deletion.
     staged = staged_masters(staging, configured)
     masters = {name.casefold() for name, path in staged.items() if path.resolve().is_relative_to(package)}
+    masters = {name for name in masters if not _master_still_available(
+        name, package, staging, data_dir, staged)}
+    if not masters:
+        return
     for root in (staging, Path(data_dir)):
         for base, dirs, files in os.walk(root):
             dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS and not d.startswith(".")]
@@ -802,6 +895,241 @@ def _remove_deployed(staging: Path, data_dir: Path, manager_dir: Path, progress=
             "archives": list(dict.fromkeys(all_archives)), "registrations": registrations, "edited": edited,
             "pending": sum(len(item.get("operations", [])) + len(item.get("moves", []))
                             for item in pending_deployments)}
+
+def replace_deployed_master(staging: Path, data_dir: Path, manager_dir: Path, configured: list[str],
+                            master: str, *, include_assets: bool = True, progress=None) -> dict:
+    """Replace one already-deployed major master with the staged package now selected for it.
+
+    Dependents stay in Data Files and keep their load order. Files unique to the old package
+    are removed, overlapping files are replaced, BSA registration is updated, and the journal
+    records the change. If the master is staged but not yet in Data Files, this deploys it.
+    """
+    staging, data_dir, manager_dir = (Path(p).resolve() for p in (staging, data_dir, manager_dir))
+    master_key = master.casefold()
+    proper = next((name for name in configured if name.casefold() == master_key), master)
+    with mutation_lock(manager_dir, Path(data_dir).parent):
+        recover_deployment(manager_dir, Path(data_dir).parent, staging)
+        staged = staged_masters(staging, configured)
+        if master_key not in staged:
+            raise ValueError(f"{proper} is not staged, so it cannot be swapped.")
+        new_package = _package_of(staged[master_key], staging)
+        if not (data_dir / proper).is_file() and not any(
+                p.is_file() and p.name.casefold() == master_key for p in data_dir.glob("*")):
+            return _deploy(staging, data_dir, manager_dir, configured, include_assets=include_assets,
+                           progress=progress, selected=[proper])
+        return _replace_deployed_master(
+            staging, data_dir, manager_dir, configured, proper, new_package,
+            include_assets=include_assets, progress=progress)
+
+
+def _replace_deployed_master(staging, data_dir, manager_dir, configured, master, new_package, *,
+                             include_assets, progress):
+    master_key = master.casefold()
+    state = _read_deployment_state(manager_dir)
+    old_packages = []
+    seen = set()
+    for deployment in state["deployments"]:
+        for operation in deployment.get("operations", []):
+            source = Path(operation.get("source", ""))
+            target = Path(operation.get("target", ""))
+            package = _staged_package_for_source(source, staging)
+            if package is None or package == new_package:
+                continue
+            belongs = (target.is_absolute() and target.name.casefold() == master_key) or (
+                package.is_dir() and any(p.name.casefold() == master_key for p in package.rglob("*.esm")))
+            if belongs:
+                key = str(package).casefold()
+                if key not in seen:
+                    seen.add(key)
+                    old_packages.append(package)
+    if not old_packages:
+        # The selected package may already be the live one.
+        if package_has_live_deployment(new_package, data_dir):
+            if progress:
+                progress(f"{master} is already deployed from {new_package.name}.")
+            return {"ready": [master], "linked": [], "removed": [], "archives": [p.name for p in _bsa_files(new_package)],
+                    "replaced": False, "old_packages": [], "new_package": str(new_package)}
+        # Fallback: treat every other staged package that still ships this master as the old one.
+        for path in new_package.parent.iterdir() if new_package.parent.is_dir() else []:
+            if path.is_dir() and not path.name.startswith(".") and path != new_package:
+                if any(p.name.casefold() == master_key for p in path.rglob("*.esm")):
+                    old_packages.append(path)
+    if progress:
+        progress(f"Replacing deployed {master} with {new_package.name}…")
+
+    def deployable_map(package: Path) -> dict[str, Path]:
+        mapping = {}
+        for base, dirs, files in os.walk(package):
+            dirs[:] = [d for d in dirs if d.casefold() not in SKIP_FOLDERS and not d.startswith(".")]
+            for filename in files:
+                source = Path(base) / filename
+                if source.is_symlink() or filename.startswith(".") or filename.casefold() == ".mwmanager-stage.json":
+                    continue
+                if source.suffix.casefold() == ".esm" and filename.casefold() != master_key:
+                    continue
+                if not include_assets and source.suffix.casefold() not in {".esm", ".bsa", ".esp"}:
+                    continue
+                rel = _data_relative(package, source)
+                if not rel.parts:
+                    continue
+                target = (data_dir.parent / rel if rel.parts[0].casefold() in GAME_ROOT_FOLDERS
+                          else data_dir / filename if source.suffix.casefold() in {".esm", ".esp", ".bsa"}
+                          and rel.parts[0].casefold() != "grass"
+                          else data_dir / rel)
+                mapping[os.path.normcase(str(target))] = (source, target, rel)
+        return mapping
+
+    new_files = deployable_map(new_package)
+    old_files = {}
+    for package in old_packages:
+        old_files.update(deployable_map(package))
+    old_bsas = [p for package in old_packages for p in _bsa_files(package)]
+    new_bsas = _bsa_files(new_package)
+    new_bsa_names = {p.name.casefold() for p in new_bsas}
+
+    tx = DurableTransaction(manager_dir / "transactions" / "major-master-swap",
+                            [manager_dir, data_dir.parent, staging]).begin()
+    backup_root = manager_dir / "deployment_backups" / uuid.uuid4().hex
+    operations = []
+    removed_targets = []
+    try:
+        _snapshot_metadata(tx, manager_dir, data_dir)
+        leftovers = [item for key, item in old_files.items() if key not in new_files]
+        for _source, target, rel in leftovers:
+            if not target.is_file():
+                continue
+            tx.move(target, tx.root / ("removed-" + uuid.uuid4().hex))
+            removed_targets.append(target)
+            if progress:
+                progress(f"Removed leftover {rel.as_posix()} from the previous variant.")
+        batch, batch_rel, batch_targets = [], [], set()
+
+        def flush():
+            if not batch:
+                return
+            operations.extend(tx.link_many(batch))
+            batch.clear()
+            batch_rel.clear()
+            batch_targets.clear()
+
+        linked = []
+        for key, (source, target, rel) in new_files.items():
+            if target.is_file():
+                try:
+                    if os.path.samefile(source, target):
+                        continue
+                except OSError:
+                    pass
+                # HD and SD often ship an identical Tamriel_Data.esm; still retarget the
+                # hardlink so the old package no longer owns the live file.
+            if key in batch_targets:
+                flush()
+            backup = backup_root / new_package.name / str(len(operations) + len(batch)) / rel
+            src_digest = tgt_digest = None
+            if target.is_file() and target.stat().st_size == source.stat().st_size:
+                src_digest, tgt_digest = sha256(source), sha256(target)
+            batch.append((source, target, backup, src_digest, tgt_digest))
+            batch_rel.append(str(rel))
+            batch_targets.add(key)
+            linked.append(str(rel))
+            if len(batch) >= 256:
+                flush()
+        flush()
+
+        ini_path = data_dir.parent / "Morrowind.ini"
+        stale_entries = []
+        for deployment in state["deployments"]:
+            for entry in deployment.get("registered_archives", []):
+                name = entry.split("=", 1)[-1].strip() if "=" in entry else entry
+                if name.casefold() in {p.name.casefold() for p in old_bsas} and name.casefold() not in new_bsa_names:
+                    stale_entries.append(entry)
+        unregistered = unregister_archives(ini_path, stale_entries) if stale_entries else 0
+        registered = register_archives(ini_path, new_bsas, manager_dir) if new_bsas else []
+
+        catalog = manager_dir / "database"
+        import sys
+        if str(catalog) not in sys.path:
+            sys.path.insert(0, str(catalog))
+        import catalog as catalog_module
+        db_path = manager_dir / "game_catalog.sqlite3"
+        if db_path.is_file() or catalog.is_dir():
+            import sqlite3
+            from contextlib import closing
+            with closing(sqlite3.connect(db_path)) as db, db:
+                if (catalog / "schema.sql").is_file():
+                    catalog_module.create_schema(db, catalog / "schema.sql")
+                priority = {name.casefold(): index + 3 for index, name in enumerate(configured)}
+                catalog_module.index_esm(db, data_dir / master, priority.get(master_key, 3))
+                for plugin in configured:
+                    if (data_dir / plugin).is_file():
+                        db.execute("UPDATE esm_record SET load_order=? WHERE lower(source_file)=lower(?)",
+                                   (priority.get(plugin.casefold(), 3), plugin))
+                for package in old_packages:
+                    for archive in _bsa_files(package):
+                        if archive.name.casefold() not in new_bsa_names:
+                            db.execute("DELETE FROM bsa_asset WHERE lower(archive_file)=lower(?)",
+                                       (archive.name,))
+                for archive in new_bsas:
+                    live = data_dir / archive.name
+                    catalog_module.index_bsa(db, live if live.is_file() else archive)
+                db.commit()
+
+        import mwmanager_journal
+        from mwmanager_journal import Journal, rel_of
+        ledger = Journal(manager_dir / "journal")
+        if removed_targets:
+            run = ledger.start_run("major_master_deploy.py", {"operation": "swap variant", "master": master})
+            for path in removed_targets:
+                ledger.record(run["run"], rel_of(data_dir.parent, path), "remove", None,
+                              {"kind": "absent"}, tag="major-master-variant-swap")
+            ledger.finish_run(run)
+        if operations:
+            ledger.record_deployment(
+                data_dir.parent, operations, tool="major_master_deploy.py", tag="major-master-deployment",
+                inputs={"masters": [master], "include_assets": include_assets, "operation": "swap variant"},
+                progress=progress)
+
+        # Drop only this master's operations that came from old packages; keep dependents.
+        old_keys = {str(p.resolve()).casefold() for p in old_packages}
+        new_deployments = []
+        for deployment in state["deployments"]:
+            kept_ops, dropped = [], []
+            for operation in deployment.get("operations", []):
+                source = Path(operation.get("source", ""))
+                package = _staged_package_for_source(source, staging)
+                if package is not None and str(package.resolve()).casefold() in old_keys:
+                    dropped.append(operation)
+                else:
+                    kept_ops.append(operation)
+            kept_archives = [entry for entry in deployment.get("registered_archives", [])
+                             if entry not in stale_entries]
+            kept_bsa_names = [name for name in deployment.get("archives", [])
+                              if name.casefold() not in {p.name.casefold() for p in old_bsas}
+                              or name.casefold() in new_bsa_names]
+            masters = [name for name in deployment.get("masters", []) if name.casefold() != master_key]
+            if kept_ops or deployment.get("moves"):
+                new_deployments.append({**deployment, "operations": kept_ops, "masters": masters,
+                                        "archives": kept_bsa_names, "registered_archives": kept_archives})
+        if operations or registered:
+            new_deployments.append({
+                "deployed_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "masters": [master],
+                "archives": [p.name for p in new_bsas],
+                "registered_archives": registered,
+                "operations": operations,
+                "moves": [],
+            })
+        _write_deployment_state(manager_dir, {"version": state.get("version", 1), "deployments": new_deployments})
+        tx.commit()
+    except Exception:
+        tx.rollback()
+        raise
+    return {"ready": [master], "linked": linked, "removed": [str(p) for p in removed_targets],
+            "archives": [p.name for p in new_bsas], "registrations": registered,
+            "unregistered": unregistered, "replaced": True,
+            "old_packages": [str(p) for p in old_packages], "new_package": str(new_package)}
+
+
 
 def deploy(staging: Path, data_dir: Path, manager_dir: Path, configured: list[str], *, build_bsa: bool = False,
            include_assets: bool = True, progress=None, selected: list[str] | None = None) -> dict:

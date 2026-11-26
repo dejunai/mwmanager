@@ -66,6 +66,71 @@ def choose_master_variant(manager_dir: str | os.PathLike, master: str, label: st
     (Path(manager_dir) / MASTER_VARIANT_CHOICES).write_text(json.dumps(choices, indent=2) + "\n", encoding="utf-8")
 
 
+def swap_master_variant(manager_dir: str | os.PathLike, game_dir: str | os.PathLike, master: str, label: str, *,
+                        downloads_dir: str | os.PathLike | None = None, plan: dict | None = None,
+                        progress_callback=None, unstage_old: bool = True) -> dict:
+    """Choose a variant, stage its archive beside existing masters, and replace only that master in Data Files.
+
+    Dependent masters stay deployed and keep their load order. The old package is unstaged once it
+    no longer owns live files. Downloads are not fetched; both variant archives must already be present.
+    """
+    choose_master_variant(manager_dir, master, label)
+    manager, game = Path(manager_dir), Path(game_dir)
+    data_dir = game / "Data Files"
+    if plan is None:
+        if downloads_dir is None:
+            raise ValueError("downloads_dir or plan is required to swap a master variant")
+        plan = scan_downloads(downloads_dir, manager, manager / "outputs",
+                              progress_callback=progress_callback)
+    variants = (plan.get("master_variants") or {}).get(master.casefold(), {})
+    using = variants.get("using")
+    if using and using != label:
+        raise ValueError(f"The {label} archive for {master} was not selected from the downloads "
+                         f"(using {using}). Put both variant archives in the downloads folder.")
+    staging = manager / "staging" / "major_masters"
+    from major_master_deploy import (_package_of, replace_deployed_master, staged_masters,
+                                     unstage_packages)
+    configured = configured_master_names(manager)
+    if not any(name.casefold() == master.casefold() for name in configured):
+        configured = list(configured) + [master]
+    before = []
+    if staging.is_dir():
+        current = staged_masters(staging, configured).get(master.casefold())
+        if current is not None:
+            before.append(_package_of(current, staging))
+    if progress_callback:
+        progress_callback(f"Staging the {label} package for {master}…")
+    stage_core_master_archives(plan, [master], manager, game, clear_staging=False,
+                               progress_callback=progress_callback)
+    result = replace_deployed_master(staging, data_dir, manager, configured, master,
+                                     progress=progress_callback)
+    result["choice"] = label
+    if unstage_old:
+        after = staged_masters(staging, configured).get(master.casefold())
+        keep = _package_of(after, staging) if after is not None else None
+        stale = []
+        for package in before:
+            if keep is not None and package.resolve() == keep.resolve():
+                continue
+            if package.is_dir():
+                stale.append(package)
+        # Also drop any other leftover package that still ships this master but is not the winner.
+        if staging.is_dir():
+            for path in staging.iterdir():
+                if (path.is_dir() and not path.name.startswith(".") and
+                        (keep is None or path.resolve() != keep.resolve()) and
+                        any(item.name.casefold() == master.casefold() for item in path.rglob("*.esm"))):
+                    if path not in stale:
+                        stale.append(path)
+        if stale:
+            if progress_callback:
+                progress_callback("Removing the previous variant's staged package…")
+            unstage_packages(stale, staging, data_dir, manager, configured, progress=progress_callback)
+            result["unstaged"] = [str(p) for p in stale]
+    return result
+
+
+
 def _variant_label(master: str, archive_name: str) -> str | None:
     mod_id = master_mod_id(master, archive_name)
     return next((label for label, i in MASTER_VARIANTS.get(master.casefold(), {}).items() if i == mod_id), None)
