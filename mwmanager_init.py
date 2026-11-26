@@ -200,8 +200,7 @@ def ensure_mlox_rules(game_dir=None, *, dry_run=False, yes=False, disabled=False
         return False
 
     if missing:
-        result = download_mlox_rules(folder, names=missing, overwrite=False,
-                                    backup_dir=backup_file("rules"))
+        result = download_mlox_rules(folder, names=missing, overwrite=False)
         if not result["ok"]:
             for error in result["errors"]:
                 print(f"WARNING: {error}", file=sys.stderr)

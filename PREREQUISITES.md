@@ -73,7 +73,7 @@ the download, retains the selected file under `pre-reqs`, and then processes it 
 **mlox rules.** After the prerequisite checks pass, first-run preflight asks whether to **Download the latest
 mlox rules (from the mlox project on GitHub)** or **Keep using my own mlox rules**. The download fetches
 `mlox_base.txt` and `mlox_user.txt` from the [mlox-rules](https://github.com/DanaePlays/mlox-rules) project
-(the source official mlox uses) into MWManager's `mlox` folder. Existing files are backed up first. A failed
+(the source official mlox uses) into MWManager's `mlox` folder. Community files are not backed up (the published copies stay on GitHub). A failed
 or offline download leaves what you already have and does not stop preflight. Later deploy preflights keep using the rules already in MWManager and do not ask again; `--init`/`--sort` still offer to download them if they are missing.
 
 After preflight passes, the first run offers to record a snapshot of the install as it is (a fresh install
@@ -93,7 +93,7 @@ they are changed. The component-specific deployment manifests remain for uninsta
 a substitute for the install rollback ledger.
 
 
-**Update rules.** After first-run preflight, Tools > Update rules (and `--update-rules`) check the mlox-rules project and download `mlox_base.txt` and `mlox_user.txt` only when they are newer, then prune conflicting downstream rules against those new files, then save pruned effective copies plus a small metadata file in MWManager's `mlox` folder. Personal rules go in `mlox_my_rules.txt` (highest mlox priority; never overwritten by a download). The cleanup omits user or personal rules that duplicate or conflict with `mlox_base.txt`, and rules that only mention uninstalled plugins. Originals stay in place; `--sort` reads the effective copies.
+**Update rules.** After first-run preflight, Tools > Update rules (and `--update-rules`) check the mlox-rules project and download `mlox_base.txt` and `mlox_user.txt` only when they are newer, then comment out conflicting downstream rules in those new files (or the current files, if nothing was fetched), then save a small metadata file in MWManager's `mlox` folder. `--sort` reads the live `mlox_base.txt`, `mlox_user.txt`, and `mlox_my_rules.txt`. Personal rules go in `mlox_my_rules.txt` (highest mlox priority; never overwritten by a download). The cleanup comments out user or personal rules that duplicate or conflict with `mlox_base.txt`, and rules that only mention uninstalled plugins, leaving one `;; MWManager: disabled` comment just above each disabled block. Community files are not backed up. `mlox_my_rules.txt` keeps at most one rolling backup (`mlox_my_rules.txt.bak`), overwritten only when the file actually changes.
 
 ## Tools
 

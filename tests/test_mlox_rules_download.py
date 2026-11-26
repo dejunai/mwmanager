@@ -94,32 +94,31 @@ class MloxRulesDownload(unittest.TestCase):
         self.assertEqual(Path(folder), Path(self.manager) / "mlox")
 
     def test_download_writes_both_files(self):
-        result = mlox.download_mlox_rules(self.folder, opener=self.opener(), backup_dir=self.backup)
+        result = mlox.download_mlox_rules(self.folder, opener=self.opener())
         self.assertTrue(result["ok"], result["errors"])
         self.assertEqual(sorted(result["written"]), ["mlox_base.txt", "mlox_user.txt"])
         self.assertEqual((self.folder / "mlox_base.txt").read_bytes(), self.bodies["mlox_base.txt"])
         self.assertEqual((self.folder / "mlox_user.txt").read_bytes(), self.bodies["mlox_user.txt"])
 
-    def test_existing_files_are_backed_up_before_overwrite(self):
+    def test_download_replaces_community_files_without_a_backup(self):
         self.folder.mkdir()
         (self.folder / "mlox_base.txt").write_text("old base [Order]\nMine.esp\n", encoding="utf-8")
         (self.folder / "mlox_user.txt").write_text("old user [Order]\nMine.esp\n", encoding="utf-8")
-        result = mlox.download_mlox_rules(self.folder, opener=self.opener(), backup_dir=self.backup)
+        result = mlox.download_mlox_rules(self.folder, opener=self.opener())
         self.assertTrue(result["ok"], result["errors"])
         self.assertEqual((self.folder / "mlox_base.txt").read_bytes(), self.bodies["mlox_base.txt"])
-        backed = Path(result["backed_up"]["mlox_base.txt"])
-        self.assertTrue(backed.is_file())
-        self.assertEqual(backed.parent, self.backup)
-        self.assertTrue(backed.name.startswith("mlox_base.txt."))
-        self.assertIn("old base", backed.read_text(encoding="utf-8"))
+        self.assertEqual((self.folder / "mlox_user.txt").read_bytes(), self.bodies["mlox_user.txt"])
+        self.assertFalse((self.folder / "mlox_base.txt.bak").exists())
+        self.assertFalse((self.folder / "mlox_user.txt.bak").exists())
+        self.assertFalse(self.backup.exists())
+        self.assertNotIn("backed_up", result)
 
     def test_failed_download_leaves_existing_files_in_place(self):
         self.folder.mkdir()
         (self.folder / "mlox_base.txt").write_text("keep me [Order]\nMine.esp\n", encoding="utf-8")
         (self.folder / "mlox_user.txt").write_text("keep me too [Order]\nMine.esp\n", encoding="utf-8")
         result = mlox.download_mlox_rules(
-            self.folder, opener=self.opener(errors={"mlox_base.txt": OSError("offline")}),
-            backup_dir=self.backup)
+            self.folder, opener=self.opener(errors={"mlox_base.txt": OSError("offline")}))
         self.assertFalse(result["ok"])
         self.assertIn("offline", result["errors"][0])
         self.assertIn("mlox_base.txt", result["errors"][0])
@@ -131,7 +130,7 @@ class MloxRulesDownload(unittest.TestCase):
 
     def test_invalid_content_is_rejected(self):
         bad = {"mlox_base.txt": b"not a rules file", "mlox_user.txt": _rule_bytes("mlox_user.txt")}
-        result = mlox.download_mlox_rules(self.folder, opener=self.opener(mapping=bad), backup_dir=self.backup)
+        result = mlox.download_mlox_rules(self.folder, opener=self.opener(mapping=bad))
         self.assertFalse(result["ok"])
         self.assertFalse(list(self.folder.glob("mlox_*.txt")))
 
