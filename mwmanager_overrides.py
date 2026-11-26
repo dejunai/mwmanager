@@ -291,6 +291,9 @@ def repair_sound_missing_message():
 
 
 def rules_sources(args, game_dir):
+    """Highest priority first: MWManager's rules file, then personal mlox_my_rules.txt,
+    community mlox_user.txt and mlox_base.txt (effective copies when present)."""
+    import mwmanager_mlox as mlox
     sources = [manager_file(RULES_FILE)]
     if not getattr(args, "no_mlox_rules", False):
         if not ensure_mlox_rules(game_dir, dry_run=getattr(args, "dry_run", False),
@@ -299,9 +302,27 @@ def rules_sources(args, game_dir):
             if not getattr(args, "dry_run", False):
                 args.no_mlox_rules = True
         if not getattr(args, "no_mlox_rules", False):
-            sources += [manager_file(os.path.join("mlox", "mlox_user.txt")),
-                        manager_file(os.path.join("mlox", "mlox_base.txt"))]
+            folder = manager_file("mlox")
+            if not getattr(args, "dry_run", False):
+                mlox.prune_mlox_rules(folder, mlox.installed_plugins(game_dir))
+            sources += mlox.mlox_sort_paths(MANAGER_DIR)
     return sources
+
+
+def run_update_rules(args):
+    """--update-rules: fetch newer community mlox rules if any, then write pruned
+    effective copies for --sort. Same path as Tools > Update rules."""
+    import mwmanager_mlox as mlox
+    game_dir = os.path.dirname(os.path.abspath(args.data_dir))
+    def progress(message):
+        text = str(message)
+        if text.startswith("MWMANAGER-DETAIL:"):
+            print(text, file=sys.stderr)
+        else:
+            print(text)
+    ok = mlox.update_rules(progress, MANAGER_DIR, game_dir=game_dir,
+                           dry_run=getattr(args, "dry_run", False))
+    return 0 if ok else 1
 
 
 def write_ghost_statics(game_dir, data_dir, plugins):
@@ -1181,14 +1202,14 @@ def _main(argv=None):
     lo = ap.add_argument_group("load order (sets plugin dates; masters first, then mlox-style rules)")
     lo.add_argument("--sort", action="store_true",
                     help=f"sort the active plugins: masters before the plugins using them, then the rules in "
-                         f"{RULES_FILE} and mlox's mlox_user.txt/mlox_base.txt; dates are set one day apart")
+                         f"{RULES_FILE}, then mlox_my_rules.txt, mlox_user.txt and mlox_base.txt; dates are set one day apart")
     lo.add_argument("--no-mlox-rules", action="store_true",
                     help=f"with --init/--sort: don't import or use community mlox rules; use only {RULES_FILE}")
     lo.add_argument("--update-rules", action="store_true",
-                    help="remove the steps of mlox's rules (Morrowind\\mlox\\mlox_user.txt, mlox_base.txt) that the "
-                         "sort skips because a master, your rules, a context rule or an earlier mlox rule says "
-                         "otherwise; --dry-run shows the plan and the reason for each. Your own rules file is "
-                         "only reported, never edited")
+                    help="download newer mlox community rules if the mlox-rules project has them, then write "
+                         "pruned effective copies for --sort (duplicates of, or conflicts with, mlox_base, "
+                         "and rules that only mention uninstalled plugins). Originals are left in place; "
+                         "mlox_my_rules.txt is never overwritten. Same path as Tools > Update rules")
     lo.add_argument("--bug-reports", action="store_true",
                     help="write <plugin>.bugreport.txt for plugins with problems of their own (also done by "
                          "--fix and --asset-check)")

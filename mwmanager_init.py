@@ -86,7 +86,7 @@ def _mm_cell_header(raw):
     return raw[:4] + struct.pack("<I", len(out)) + raw[8:16] + out
 
 
-from mwmanager_mlox import MLOX_RULE_URLS, download_mlox_rules
+from mwmanager_mlox import MLOX_MY_RULES, MLOX_RULE_URLS, download_mlox_rules, import_personal_rules
 
 MLOX_SUPPORTED_SECTIONS = {"order", "nearstart", "nearend", "exact"}
 MLOX_SECTION_LINE = re.compile(r"^\s*\[([A-Za-z][A-Za-z0-9_]*)\]\s*(?:;.*)?$")
@@ -151,6 +151,9 @@ def ensure_mlox_rules(game_dir=None, *, dry_run=False, yes=False, disabled=False
                 print(f"MWManager: copied {os.path.join('mlox', name)} into its managed rules folder")
             with open(import_marker, "w", encoding="utf-8") as stream:
                 json.dump({"game_dir": os.path.abspath(game_dir), "files": [name for name, _ in found]}, stream, indent=2)
+    if game_dir and not dry_run:
+        for name in import_personal_rules(game_dir, folder):
+            print(f"MWManager: copied {os.path.join('mlox', name)} into its managed rules folder")
 
     missing = [name for name in MLOX_RULE_URLS if not os.path.isfile(os.path.join(folder, name))]
     if dry_run:

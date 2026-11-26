@@ -92,6 +92,9 @@ pre-`--full` MWSE Lua suite. Originals are copied into the journal's content-add
 they are changed. The component-specific deployment manifests remain for uninstall/redeploy, but are not used as
 a substitute for the install rollback ledger.
 
+
+**Update rules.** After first-run preflight, Tools > Update rules (and `--update-rules`) check the mlox-rules project and download `mlox_base.txt` and `mlox_user.txt` only when they are newer, then prune conflicting downstream rules against those new files, then save pruned effective copies plus a small metadata file in MWManager's `mlox` folder. Personal rules go in `mlox_my_rules.txt` (highest mlox priority; never overwritten by a download). The cleanup omits user or personal rules that duplicate or conflict with `mlox_base.txt`, and rules that only mention uninstalled plugins. Originals stay in place; `--sort` reads the effective copies.
+
 ## Tools
 
 These are used by the repair workflows, not by preflight.
