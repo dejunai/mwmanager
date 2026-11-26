@@ -20,6 +20,10 @@ The whole preflight, in order (everything here only reads the game folder):
   closes the game), Re-check re-reads the logs, and Skip continues with a warning.
 Nexus downloads remain interactive so the user can finish any security check. After a passing preflight, the
 first run offers to record the install's starting state for rollback.
+First-run preflight also offers to download the latest mlox rules (mlox_base.txt and mlox_user.txt from
+the mlox-rules project on GitHub) or to keep using the user's own rules. Later deploy preflights keep using
+rules already in MWManager and do not ask again. A failed or offline download leaves existing files in
+place and does not stop preflight.
 """
 from __future__ import annotations
 
@@ -39,6 +43,7 @@ from pathlib import Path
 
 import mwmanager_prereqs
 from core_addons import _quiet_subprocess_options, _seven_zip
+from mwmanager_mlox import offer_mlox_rules
 
 CORE_FILES = ("Morrowind.esm", "Tribunal.esm", "Bloodmoon.esm",
               "Morrowind.bsa", "Tribunal.bsa", "Bloodmoon.bsa")
@@ -1042,5 +1047,6 @@ def run_preinstall(game_dir: Path, manager_dir: Path, progress, *,
                 if not line.startswith(("Code Patch features seen by the game", "MWSE.log:"))]
     statuses.extend(mwmanager_prereqs.startup_log_lines(mwmanager_prereqs.startup_logs(game_dir)))
     _record_preflight(manager_dir, game_dir, overrides, statuses)
+    offer_mlox_rules(progress, game_dir, manager_dir, first_run=first_run)
     progress("Preflight passed.")
     return True

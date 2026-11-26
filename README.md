@@ -46,7 +46,7 @@ Other modules: `plugin_install.py`, `core_addons.py`, `major_master_deploy.py`, 
 Per-install settings and state (`mwmanager.ini`, GUI settings/state, load order, caches, `outputs/`, `backups/`,
 `staging/`, `disabled_plugins/`) are created on first run and ignored by git. Third-party binaries go in `tools/`
 yourself: LuaJIT in `tools/luajit/` (used by the Lua check), `texconv.exe` (DirectXTex), and the BSA packer.
-`mlox/` rule files are downloaded by `--init`.
+`mlox/` rule files can be downloaded during first-run preflight, or by `--init`, from the community mlox-rules project on GitHub.
 
 `mwmanager_core_hashes.json` is shipped as immutable verification data; first-run code reads it but never
 regenerates or clears it.

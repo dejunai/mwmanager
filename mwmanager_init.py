@@ -86,10 +86,8 @@ def _mm_cell_header(raw):
     return raw[:4] + struct.pack("<I", len(out)) + raw[8:16] + out
 
 
-MLOX_RULE_URLS = {
-    "mlox_base.txt": "https://raw.githubusercontent.com/DanaePlays/mlox-rules/main/mlox_base.txt",
-    "mlox_user.txt": "https://raw.githubusercontent.com/DanaePlays/mlox-rules/main/mlox_user.txt",
-}
+from mwmanager_mlox import MLOX_RULE_URLS, download_mlox_rules
+
 MLOX_SUPPORTED_SECTIONS = {"order", "nearstart", "nearend", "exact"}
 MLOX_SECTION_LINE = re.compile(r"^\s*\[([A-Za-z][A-Za-z0-9_]*)\]\s*(?:;.*)?$")
 
@@ -198,23 +196,15 @@ def ensure_mlox_rules(game_dir=None, *, dry_run=False, yes=False, disabled=False
         print(f"WARNING: cannot create MWManager mlox rules folder: {exc}", file=sys.stderr)
         return False
 
-    for name in missing:
-        url = MLOX_RULE_URLS[name]
-        try:
-            request = urllib.request.Request(url, headers={"User-Agent": "MWManager/1.0"})
-            with urllib.request.urlopen(request, timeout=20) as response:
-                content = response.read(8 * 1024 * 1024 + 1)
-            if len(content) > 8 * 1024 * 1024 or b"[order]" not in content.lower():
-                raise ValueError("download was unexpectedly large or did not look like an mlox rules file")
-            target = os.path.join(folder, name)
-            temp = target + ".download"
-            with open(temp, "wb") as stream:
-                stream.write(content)
-            os.replace(temp, target)
-            print(f"MWManager: downloaded missing mlox rules file {name} from {url}")
-        except Exception as exc:
-            print(f"WARNING: could not download {name} from {url}: {exc}", file=sys.stderr)
+    if missing:
+        result = download_mlox_rules(folder, names=missing, overwrite=False,
+                                    backup_dir=backup_file("rules"))
+        if not result["ok"]:
+            for error in result["errors"]:
+                print(f"WARNING: {error}", file=sys.stderr)
             return False
+        for name in result["written"]:
+            print(f"MWManager: downloaded missing mlox rules file {name} from {MLOX_RULE_URLS[name]}")
 
     for name in MLOX_RULE_URLS:
         changed, error = clean_mlox_rule_file(os.path.join(folder, name))
