@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-26T03:13:59",
+  "SyncedAt": "2026-11-26T04:04:00",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -7,8 +7,8 @@
   "Files": [
     {
       "RelativePath": ".gitignore",
-      "Bytes": 2345,
-      "SHA256": "6877b21ae3888b040f81af21b878e86da34dd2397aa9ca95e7d71b2b6c0a6258",
+      "Bytes": 2531,
+      "SHA256": "55714fa236e6b790f24744fda7a317f60ce3d993f41814f92ec2530e9e85df59",
       "Source": "<Steam Morrowind>\\.gitignore"
     },
     {
@@ -482,10 +482,10 @@
     },
     {
       "RelativePath": "mwdialog_luafix.py",
-      "Bytes": 264638,
-      "SHA256": "2d2b7f127b4e3f3fef120fc2f3fe03185a32b49d2c33bc3a579aed4c2aa1d5e1",
+      "Bytes": 264630,
+      "SHA256": "467714311f523929d98b6905a15e3d78fbdfb80f8d4603d7285065babfa27336",
       "Source": "<morrowind-conflict-tools>\\mwdialog_luafix.py",
-      "SourceModified": "2026-11-26T00:33:16"
+      "SourceModified": "2026-11-26T03:52:39"
     },
     {
       "RelativePath": "mwdialog_mastercheck.py",
@@ -538,10 +538,10 @@
     },
     {
       "RelativePath": "mwdialog_planfile.py",
-      "Bytes": 10638,
-      "SHA256": "7af50343b7f59698663a2299fab6593fc01ddf18b94b6c219d71d5f0f5596e02",
+      "Bytes": 10748,
+      "SHA256": "3b7c48843537649dd855de39553358e80384d86ecfcd2251b78197030bdb6609",
       "Source": "<Steam Morrowind>\\mwdialog_planfile.py",
-      "SourceModified": "2026-11-26T02:33:53"
+      "SourceModified": "2026-11-26T03:42:08"
     },
     {
       "RelativePath": "mwdialog_records.py",
@@ -601,10 +601,10 @@
     },
     {
       "RelativePath": "README.md",
-      "Bytes": 66664,
-      "SHA256": "17bd190747e476312a3b599f033bf70885306e5f66dfd6e6046cb20a97c16a21",
+      "Bytes": 66821,
+      "SHA256": "238d60e811b1ca55dfb096b835f447022f560bb34c6e8c679c453e1be65836cb",
       "Source": "<morrowind-conflict-tools>\\README.md",
-      "SourceModified": "2026-11-26T03:08:24"
+      "SourceModified": "2026-11-26T03:52:39"
     },
     {
       "RelativePath": "MORE_INFO.md",
@@ -846,10 +846,10 @@
     },
     {
       "RelativePath": "vortex_tidy.py",
-      "Bytes": 184998,
-      "SHA256": "480a5a6fd71dc1b2fecc09628c49b38314a136e55e27eb1f2841b321e1db0f94",
+      "Bytes": 211521,
+      "SHA256": "dd9ea28d491ac2112d9d63b03aee54af3321cb06bf229e74e69972cbba0ceeac",
       "Source": "<morrowind-conflict-tools>\\vortex_tidy.py",
-      "SourceModified": "2026-11-26T03:08:24"
+      "SourceModified": "2026-11-26T03:42:08"
     },
     {
       "RelativePath": "vortex_tidy_blacklist.txt",
@@ -2015,9 +2015,9 @@
     {
       "RelativePath": "tests\\test_tidy_convert_omwscripts.py",
       "Source": "<Steam Morrowind>\\tests\\test_tidy_convert_omwscripts.py",
-      "Bytes": 22110,
-      "SHA256": "95ca9fe3c1d45fc11cc6695f541985aaba08904ed152533229c56cabf00ed5d9",
-      "SourceModified": "2026-11-26T03:09:07"
+      "Bytes": 22281,
+      "SHA256": "66d2324d299e6fe41af42ea3f8a5c95e77b196d48eaea803a439ba5bb63b3e73",
+      "SourceModified": "2026-11-26T03:42:08"
     },
     {
       "RelativePath": "tests\\test_tidy_undo_convert.py",
@@ -2046,6 +2046,27 @@
       "Bytes": 18113,
       "SHA256": "2d28f54c48fd39673c70bc0f14faa95920b3c1605849dab434469b6ee789bb72",
       "SourceModified": "2026-11-26T03:10:20"
+    },
+    {
+      "RelativePath": "tests\\test_deploy.py",
+      "Source": "<Steam Morrowind>\\tests\\test_deploy.py",
+      "Bytes": 9735,
+      "SHA256": "321568fc827f0e5f7dc161781ed08cfa691062cd6578e64548a39bc14e06079d",
+      "SourceModified": "2026-11-26T03:52:39"
+    },
+    {
+      "RelativePath": "tests\\test_tidy_convert_audit.py",
+      "Source": "<Steam Morrowind>\\tests\\test_tidy_convert_audit.py",
+      "Bytes": 18541,
+      "SHA256": "ac2585a2f3b7168aec5b0c6476c5c7e23f2876a8fcbd02d9a8419d7e1d5b8cfe",
+      "SourceModified": "2026-11-26T03:42:08"
+    },
+    {
+      "RelativePath": "tests\\test_tidy_real_converter.py",
+      "Source": "<Steam Morrowind>\\tests\\test_tidy_real_converter.py",
+      "Bytes": 6908,
+      "SHA256": "bb5839d4ec085d53e839f1a7cd575c01ad6dd5f011815a424a6d2850b19aaf60",
+      "SourceModified": "2026-11-26T03:42:08"
     }
   ]
 }
