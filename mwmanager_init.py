@@ -453,6 +453,14 @@ RETIRED_MWSE_MODS = ("MWManager", "mwquickfixes", "mwplainpaperfix")
 # mwmanagermenu, which puts the suite's settings pages under one Mod Config Menu entry
 LUA_SOURCES = ("mwse-lua-guards", "mwmanager-menu")
 
+# The suite's layout is the Steam install's, and the same rule for every file: all suite Lua lives under
+# Data Files\\MWSE\\mods\\mwsuite\\ (its module folders, the bootstrap main.lua and OWNMODS_NAME), each
+# module's metadata sits beside the .esm files, and the suite shows as ONE Mod Config Menu entry named
+# SUITE_NAME. MWManager adds no folder or heading of its own under MWSE\\mods.
+SUITE_FOLDER = "mwsuite"
+SUITE_NAME = "MW Conflict Tools"
+OWNMODS_NAME = "ownmods.json"        # the first-party list luafix reads, shipped in the suite folder as in Steam
+
 
 def _suite_source():
     """(reference folder, {mod name: its source folder}, [metadata toml files])."""
@@ -465,6 +473,14 @@ def _suite_source():
         if (root / "metadata").is_dir():
             metadata += sorted((root / "metadata").glob("*-metadata.toml"))
     return reference, mods, metadata
+
+
+def _suite_ownmods():
+    """The suite's ownmods.json as the Steam install has it, from the unchanged conflict-tools snapshot
+    (tools\\steam-upstream), or None. It is copied, never edited here."""
+    here = Path(os.path.dirname(os.path.abspath(__file__)))
+    path = here / "tools" / "steam-upstream" / "lua tools" / "MWSE" / "mods" / SUITE_FOLDER / OWNMODS_NAME
+    return path if path.is_file() else None
 
 
 def _unique_archive(root, name):
@@ -484,7 +500,7 @@ def _copy_replacing(source_file, target):
 
 
 def install_mwse_lua_guards(args):
-    """Install the mw* MWSE Lua suite under MWSE\\mods\\mwsuite and its metadata in Data Files."""
+    """Install the mw* MWSE Lua suite (MW Conflict Tools) under MWSE\\mods\\mwsuite and its metadata in Data Files."""
     data_dir = Path(args.data_dir).resolve()
     mwse_dir = data_dir / "MWSE"
     if not mwse_dir.is_dir():
@@ -496,7 +512,8 @@ def install_mwse_lua_guards(args):
         print(f"--init: MWSE Lua suite source not found: {source}", file=sys.stderr)
         return 2
     target_root = mwse_dir / "mods"
-    suite_root = target_root / "mwsuite"
+    suite_root = target_root / SUITE_FOLDER
+    ownmods = _suite_ownmods()
     bootstrap = source / "mwmanager-menu" / "bootstrap" / "main.lua"
     if not bootstrap.is_file():
         print(f"--init: MWSE Lua suite bootstrap not found: {bootstrap}", file=sys.stderr)
@@ -530,6 +547,8 @@ def install_mwse_lua_guards(args):
         for name in names:
             print(f"--dry-run: would install MWSE Lua suite mod {name} to {suite_root / name}")
         print(f"--dry-run: would install suite bootstrap to {suite_root / 'main.lua'}")
+        if ownmods:
+            print(f"--dry-run: would install {OWNMODS_NAME} to {suite_root / OWNMODS_NAME}")
         for toml in metadata:
             print(f"--dry-run: would install {toml.name} to {data_dir}")
         for old in retired:
@@ -542,7 +561,7 @@ def install_mwse_lua_guards(args):
         candidate = mwmanager_journal.Journal(Path(MANAGER_DIR) / "journal")
         if candidate.has_baseline():
             install_ledger = candidate
-            ledger_run = install_ledger.start_run("mwmanager.py", {"operation": "install MWSE Lua suite"})
+            ledger_run = install_ledger.start_run("mwmanager.py", {"operation": f"install {SUITE_NAME} Lua suite"})
     except (ImportError, NameError):
         pass
 
@@ -584,6 +603,8 @@ def install_mwse_lua_guards(args):
             for rel in sorted(files):
                 copy_file(mod_source / rel, destination / rel)
         copy_file(bootstrap, suite_root / "main.lua")
+        if ownmods:
+            copy_file(ownmods, suite_root / OWNMODS_NAME)
         for toml in metadata:
             copy_file(toml, data_dir / toml.name)
     except OSError as exc:
@@ -591,7 +612,7 @@ def install_mwse_lua_guards(args):
         return 2
     if install_ledger:
         install_ledger.finish_run(ledger_run)
-    print(f"--init: installed the MWSE Lua suite ({len(names)} mods: {', '.join(names)}) under {suite_root}")
+    print(f"--init: installed the {SUITE_NAME} Lua suite ({len(names)} mods: {', '.join(names)}) under {suite_root}")
     for old in retired:
         print(f"--init: moved MWManager's earlier Lua package {old.name} to {legacy_root}")
     return 0

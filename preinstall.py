@@ -500,12 +500,12 @@ def _offer_baseline(game_dir: Path, manager_dir: Path, progress) -> bool:
 def _install_mwse_lua_suite(game_dir: Path, progress) -> bool:
     """Install MWManager's runtime utilities after the clean baseline, before the first full scan."""
     import mwmanager
-    progress("Preflight: installing MWManager's MWSE Lua utilities before the initial --full cycle…")
+    progress("Preflight: installing the MW Conflict Tools Lua suite before the initial --full cycle…")
     if mwmanager.install_mwse_lua_guards(
             types.SimpleNamespace(data_dir=str(game_dir / "Data Files"), dry_run=False)):
-        progress("Preflight: the MWSE Lua utilities could not be installed; initial --full was not started.")
+        progress("Preflight: the MW Conflict Tools Lua suite could not be installed; initial --full was not started.")
         return False
-    progress("Preflight: MWManager's MWSE Lua utilities are installed.")
+    progress("Preflight: the MW Conflict Tools Lua suite is installed.")
     return True
 
 
