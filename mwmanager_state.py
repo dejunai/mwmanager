@@ -329,13 +329,10 @@ def _off_reason(feature):
     try:
         return OL.reason_for(feature)
     except ValueError:
-        # Conflict Tools accepted this name; the next sync adds it to REASONS and LEGACY.
-        if (feature or "").strip().lower() in {"texture-reduction", "reduced textures"}:
-            return "reduced textures"
         return feature
 
 
-# Older reason-folder spellings still read until (and after) they appear in mwdialog_offlayout.LEGACY.
+# Older on-disk reason-folder spellings still read (including names in OL.LEGACY).
 _LEGACY_REASON_FOLDERS = {
     "reduced textures": ("texture-reduction",),
     "executables": ("Executables",),

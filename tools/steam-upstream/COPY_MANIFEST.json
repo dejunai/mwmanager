@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-26T04:15:02",
+  "SyncedAt": "2026-11-26T04:39:11",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -20,10 +20,10 @@
     },
     {
       "RelativePath": "docs\\CHANGES.md",
-      "Bytes": 87950,
-      "SHA256": "abeb871ec33160ba78aa93e2bfe8ac56dfad03086b7ba6ac6ecb2e5b95a829af",
+      "Bytes": 89578,
+      "SHA256": "f09119292d418b9478e164ae5cfdaff16976a5e3292ef707702800ea57d958de",
       "Source": "<morrowind-conflict-tools>\\docs\\CHANGES.md",
-      "SourceModified": "2026-11-26T04:09:17"
+      "SourceModified": "2026-11-26T04:33:46"
     },
     {
       "RelativePath": "lua tools\\mwcustomclasspersistence-metadata.toml",
@@ -874,10 +874,10 @@
     },
     {
       "RelativePath": "mwdialog_offlayout.py",
-      "Bytes": 29144,
-      "SHA256": "cabf125f0170976646b9d73d38c0d1d1e1b16a3e60174ba996b2c5f88c3ecf8d",
+      "Bytes": 29304,
+      "SHA256": "25eb1143373ade258d0890e2dbfb4e06f0d0f75edc8c884cfdce33e5c47cf557",
       "Source": "<Steam Morrowind>\\mwdialog_offlayout.py",
-      "SourceModified": "2026-11-26T03:08:06"
+      "SourceModified": "2026-11-26T04:24:29"
     },
     {
       "RelativePath": "mwdialog_ownership.py",
@@ -1629,10 +1629,10 @@
     },
     {
       "RelativePath": "docs\\OFF-LAYOUT.md",
-      "Bytes": 9864,
-      "SHA256": "a10d1bbb6b6a9c167ac572a583bbd5658ebeaa402257936023c86beff1b42f65",
+      "Bytes": 10376,
+      "SHA256": "d89f133b9a4b4560ea25691aac4fff50459698af19bd0fee5e265b7e451c2258",
       "Source": "<morrowind-conflict-tools>\\docs\\OFF-LAYOUT.md",
-      "SourceModified": "2026-11-26T03:13:10"
+      "SourceModified": "2026-11-26T04:24:29"
     },
     {
       "RelativePath": "docs\\LUA-DEBUGGING.md",
@@ -2057,9 +2057,9 @@
     {
       "RelativePath": "tests\\test_off_layout.py",
       "Source": "<Steam Morrowind>\\tests\\test_off_layout.py",
-      "Bytes": 18113,
-      "SHA256": "2d28f54c48fd39673c70bc0f14faa95920b3c1605849dab434469b6ee789bb72",
-      "SourceModified": "2026-11-26T03:10:20"
+      "Bytes": 18182,
+      "SHA256": "29b975afdda63b4a5fcac1352a6c6ebfc115d9a9e5c2b5e6aa123737971b5c6f",
+      "SourceModified": "2026-11-26T04:24:38"
     },
     {
       "RelativePath": "tests\\test_deploy.py",
