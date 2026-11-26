@@ -57,14 +57,14 @@ class PreOptionTidyTests(unittest.TestCase):
 
     def test_processing_plugin_name_overrides_archive_display_name(self):
         with mock.patch.dict(os.environ, {"MWMANAGER_PLUGIN_NAME": "tamriel_data"}):
-            self.assertEqual(ext.package_name(str(self.mod)), "tamriel_data")
+            self.assertEqual(ext.staging_package_name(str(self.mod)), "tamriel_data")
             self.assertEqual(mock_fomod._package_display_name(self.mod), "tamriel_data")
 
     def test_stage_marker_keeps_plugin_name_after_restart(self):
         (self.mod / ".mwmanager-stage.json").write_text(
             '{"PLUGIN_NAME": "Tamriel Data", "PLUGIN_VERSION": "26.11", '
             '"selected_masters": ["Tamriel_Data.esm"]}', encoding="utf-8")
-        self.assertEqual(ext.package_name(str(self.mod)), "Tamriel Data")
+        self.assertEqual(ext.staging_package_name(str(self.mod)), "Tamriel Data")
         self.assertEqual(mock_fomod._package_display_name(self.mod), "Tamriel Data")
 
     def test_options_and_their_docs_are_found_after_the_pre_tidy(self):
@@ -468,7 +468,7 @@ class ExecutablesTests(unittest.TestCase):
             (mod / rel).write_bytes(b"x")
         plan = ext.plan_mod(str(mod))
         moved = {os.path.relpath(s, mod): os.path.relpath(d, mod) for s, d, _why in plan if d}
-        owner = ext.package_name(str(mod))
+        owner = ext.staging_package_name(str(mod))
         self.assertEqual(moved[os.path.join("Docs", "tamriel_data", "MWLathe.exe")],
                          os.path.join("Off", owner, "Executables", "Docs", "tamriel_data", "MWLathe.exe"))
         self.assertEqual(moved[os.path.join("Textures", "tool.bat")],

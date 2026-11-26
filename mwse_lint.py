@@ -271,8 +271,8 @@ def process(staging: Path, *, apply: bool, report_path: Path, only: list[str] | 
         plugins.sort(key=lambda p: (p.suffix.casefold() != ".esm", p.stem.casefold()))
         plugin_owner = plugins[0].stem if plugins else package.name
         try:
-            from mwmanager_install import package_name
-            owner = package_name(str(package))
+            from mwmanager_install import staging_package_name
+            owner = staging_package_name(str(package))
         except (ImportError, AttributeError, OSError):
             owner = package.name
         owner = re.sub(r'[<>:"/\\|?*]', "_", owner).rstrip(" .") or package.name

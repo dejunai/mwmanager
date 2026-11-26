@@ -31,12 +31,30 @@ class ShortPackageNames(unittest.TestCase):
 
     def test_tidys_extras_name_drops_the_staging_suffix_and_is_capped(self):
         tidy = mwmanager_upstream.compose_tidy()
-        self.assertEqual(tidy.package_name(r"G:\s\Better Telvanni Crystal V2 4k-59196-1-0-1780326665 [2]"),
+        self.assertEqual(tidy.staging_package_name(r"G:\s\Better Telvanni Crystal V2 4k-59196-1-0-1780326665 [2]"),
                          "Better Telvanni Crystal V2 4k")
-        self.assertLessEqual(len(tidy.package_name("G:\\s\\" + "x" * 80 + " [3]")), tidy.PACKAGE_NAME_LIMIT)
-        self.assertEqual(tidy.package_name(r"G:\s\Better Telvanni Crystal V2 4k-59196"),
+        self.assertLessEqual(len(tidy.staging_package_name("G:\\s\\" + "x" * 80 + " [3]")), tidy.PACKAGE_NAME_LIMIT)
+        self.assertEqual(tidy.staging_package_name(r"G:\s\Better Telvanni Crystal V2 4k-59196"),
                          "Better Telvanni Crystal V2 4k")
 
+
+
+    def test_compose_leaves_upstreams_openmw_package_name_alone(self):
+        """vortex_tidy.package_name is omw2mwse's Off\\<plugin>\\OpenMW helper; our staging extras
+        name is staging_package_name. They must not shadow each other after compose_tidy()."""
+        import tempfile
+        tidy = mwmanager_upstream.compose_tidy()
+        self.assertEqual(
+            tidy.staging_package_name(r"G:\s\Better Telvanni Crystal V2 4k-59196-1-0-1780326665 [2]"),
+            "Better Telvanni Crystal V2 4k")
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "My OpenMW Pack [2]"
+            folder.mkdir()
+            (folder / "My OpenMW Pack.omwscripts").write_text("x", encoding="utf-8")
+            self.assertEqual(tidy.package_name(str(folder)), "MyOpenMWPack")
+            empty = Path(tmp) / "Some Mod v1.0"
+            empty.mkdir()
+            self.assertEqual(tidy.package_name(str(empty)), "SomeModv10")
 
 if __name__ == "__main__":
     unittest.main()

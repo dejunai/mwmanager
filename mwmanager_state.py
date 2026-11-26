@@ -893,14 +893,9 @@ def restore_disabled_plugins(data_dir, names):
     return restored
 
 
-CONFLICT_BLACKLIST_DEFAULT = """; mwmanager_conflict_blacklist.txt - plugins that never take part in cell conflicts and
-; always lose: they are left out of --cell-conflicts (no report, no question), and --sort loads each one
-; as early as its masters allow (.esm among the masters, .esp right after the .esm files), so every
-; other mod's version wins, and mwcollide hides its object where two sit on top of each other.
-; One plugin per line (wildcards * ? allowed). Don't list a compatibility patch: it must load after the
-; mods it patches.
-OAAB_Saplings.esm
-"""
+# CONFLICT_BLACKLIST_DEFAULT is gone: upstream 52296ab stopped using that name. OAAB_Saplings.esm is now
+# CONFLICT_BLACKLIST_BUILTIN (always loses whether or not a file exists). The always-lose file path is still
+# CONFLICT_BLACKLIST_FILE (mwmanager_conflict_blacklist.txt).
 DEFAULT_RULES = f"""; {os.path.basename(RULES_FILE)}: your load order rules for mwmanager.py --sort
 ;
 ; The same format as mlox rules (mlox_user.txt / mlox_base.txt). Rules here win over mlox's own:

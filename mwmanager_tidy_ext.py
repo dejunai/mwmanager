@@ -55,14 +55,20 @@ VORTEX_FILES = {"__folder_managed_by_vortex", ".mwmanager-stage.json"}
 PACKAGE_NAME_LIMIT = 40      # the Extras\\<name> folder repeats it in every path below it
 
 
-def package_name(folder):
-    """Use the processing identity, staged primary master, Vortex name, then the download-folder name - without
-    MWManager's " [n]" staging suffix, so the Nexus id and version are stripped too, and at most 40 characters."""
-    name = _package_name(folder)
+def staging_package_name(folder):
+    """MWManager's staging / Extras / bug-report identity for `folder`. Uses the processing identity, staged
+    primary master, Vortex name, then the download-folder name - without MWManager's " [n]" staging suffix, so
+    the Nexus id and version are stripped too, and at most 40 characters.
+
+    Distinct from vortex_tidy's package_name, which is omw2mwse's Off\\<plugin>\\OpenMW helper (the stem of
+    the first *.omwscripts, else the folder name, stripped to letters, digits, _ and -). This function must not
+    replace that name when the tidy layer is composed.
+    """
+    name = _staging_package_name(folder)
     return name[:PACKAGE_NAME_LIMIT].rstrip(" .") or name
 
 
-def _package_name(folder):
+def _staging_package_name(folder):
     base = re.sub(r"\s*\[\d+\]$", "", os.path.basename(folder.rstrip("\\/")))
     base = re.sub(r"-\d{3,7}$", "", base)            # staging/plugins/<name>-<Nexus id>
     fallback = mod_name(base)
@@ -248,7 +254,7 @@ def plan_mod(mod_dir):
     if any(os.path.splitext(e)[1].lower() in GAME_ROOT_EXT for e in entries
            if os.path.isfile(os.path.join(mod_dir, e))):
         return "installs into the game folder (exe/dll/Data Files at its root)"
-    name = package_name(mod_dir)
+    name = staging_package_name(mod_dir)
     fomod_files, fomod_dirs, fomod_recoveries = fomod_declared_paths(mod_dir)
     data_folder = next((os.path.join(mod_dir, e) for e in entries
                         if e.casefold() == "data files" and os.path.isdir(os.path.join(mod_dir, e))), None)
@@ -1037,7 +1043,7 @@ def _tidy_backup_original(path, staging, original_bytes):
     relative = os.path.relpath(path, staging)
     parts = Path(relative).parts
     package = os.path.join(staging, parts[0]) if len(parts) > 1 else staging
-    plugin_name = package_name(package)
+    plugin_name = staging_package_name(package)
     backup = os.path.join(package, "Off", plugin_name, "Reprocessed plugin headers", os.path.relpath(path, package))
     os.makedirs(os.path.dirname(backup), exist_ok=True)
     if not os.path.exists(backup):
@@ -1239,7 +1245,7 @@ def run_plan(args):
         if not res:
             continue
         touched += 1
-        lines.append(f"\n{d}   [{package_name(os.path.join(args.staging, d))}]")
+        lines.append(f"\n{d}   [{staging_package_name(os.path.join(args.staging, d))}]")
         for src, dst, why in res:
             rs = os.path.relpath(src, os.path.join(args.staging, d))
             if dst is None:
@@ -1415,7 +1421,7 @@ def lua_apply(args, lres):
             refused.extend(rejected)
             continue
         package = os.path.join(args.staging, package_name_raw)
-        owner = package_name(package)
+        owner = staging_package_name(package)
         count, rejected = lf.apply_report(
             report, journal=JOURNAL,
             backup_root=os.path.join(package, "Off", owner, "LuaRepairs"),
@@ -1509,7 +1515,7 @@ def _write_package_asset_bug_reports(ares):
         issues, root = entry["issues"], entry["root"]
         if not issues:
             continue
-        owner = package_name(root)
+        owner = staging_package_name(root)
         subject, header = ah.package_bug_report_subject(root, m, owner, "MWManager Tidy")
         lines = ah.package_asset_bug_lines(issues)
         if lines:
@@ -1548,10 +1554,10 @@ def assets_apply(args, ares, moved_mods=()):
         operations = []
         keywords["journal_ops"] = operations
         if fixes:       # upstream passes no progress callback, so the repairs would otherwise run silently
-            print(f"{len(fixes):,} asset(s) in {package_name(root)} found in need of repairs, beginning now…",
+            print(f"{len(fixes):,} asset(s) in {staging_package_name(root)} found in need of repairs, beginning now…",
                   flush=True)
             keywords.setdefault("progress_callback", lambda line: print(line, flush=True))
-        result = original_folder(root, fixes, module, current_game_dir, package_name(root), *positional, **keywords)
+        result = original_folder(root, fixes, module, current_game_dir, staging_package_name(root), *positional, **keywords)
         by_plugin.setdefault(_path_plugin(root, args.staging), []).extend(operations)
         return result
 
@@ -2018,7 +2024,7 @@ def _write_packing_reports(staging, packing):
     ah = _scanner.asset_health_module()
     for package_dir_name, items in packing.items():
         package = os.path.join(staging, package_dir_name)
-        owner = package_name(package)
+        owner = staging_package_name(package)
         subject, header = ah.package_bug_report_subject(package, _scanner, owner, "MWManager Tidy")
         problems = sorted({why[why.index(PACKING_MARK) + len(PACKING_MARK):] for _s, _d, why in items})
         lines = [f"Packing errors: {len(problems)}"] + [f"  - ERROR {p}" for p in problems]
