@@ -1355,6 +1355,13 @@
       "SourceModified": "2026-11-24T00:36:22"
     },
     {
+      "RelativePath": "tools\\luajit\\README.md",
+      "Source": "<morrowind-conflict-tools>\\tools\\luajit\\README.md",
+      "Bytes": 752,
+      "SHA256": "88686f2e3679944c4712b3d643ce6f955eb4c1a141af490bc359140af18a208d",
+      "SourceModified": "2026-11-09T19:27:56"
+    },
+    {
       "RelativePath": "mwdialog_mergeplan.py",
       "Source": "<Steam Morrowind>\\mwdialog_mergeplan.py",
       "Bytes": 13712,
