@@ -2856,7 +2856,7 @@ KNOWN_GRASS_OPTIONS = {
                         "Remiros' Groundcover (also called Remiros' Grass)."),
         "requires": "Remiros' Groundcover",
         "also_called": ("Remiros' Grass",),
-        "nexus_id": "46766",
+        "nexus_id": "46733",  # verified on https://www.nexusmods.com/morrowind/mods/46733 (46766 is For Jiub's Sake)
     },
 }
 

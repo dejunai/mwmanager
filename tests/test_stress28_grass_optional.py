@@ -254,7 +254,7 @@ class KnownGrassDescriptionAndTick(unittest.TestCase):
                 self.assertEqual(records[0]["fomod_description"], want)
 
     def test_the_box_is_ticked_when_remiros_groundcover_is_staged(self):
-        (self.root / "staging" / "plugins" / "Remiros' Groundcover-46766").mkdir(parents=True)
+        (self.root / "staging" / "plugins" / "Remiros' Groundcover-46733").mkdir(parents=True)
         record = self._records()[0]
         self.assertTrue(record["recommended"])
         self.assertFalse(record["always_optional"])
@@ -284,11 +284,19 @@ class KnownGrassDescriptionAndTick(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0]["label"], "Rem-TOTSP.esp")
         self.assertFalse(records[0]["recommended"])
-        (self.root / "staging" / "plugins" / "Remiros' Groundcover-46766").mkdir(parents=True)
+        (self.root / "staging" / "plugins" / "Remiros' Groundcover-46733").mkdir(parents=True)
         records = self._records()
         self.assertTrue(records[0]["recommended"])
         self.assertEqual(records[0]["fomod_description"],
                          mock_fomod.KNOWN_GRASS_OPTIONS["rem-totsp.esp"]["description"])
+
+
+    def test_a_folder_carrying_46766_alone_does_not_tick_the_box(self):
+        """46766 is For Jiub's Sake, not Remiros' Groundcover (46733)."""
+        (self.root / "staging" / "plugins" / "For Jiub's Sake-46766").mkdir(parents=True)
+        record = self._records()[0]
+        self.assertFalse(record["recommended"])
+        self.assertTrue(record["always_optional"])
 
     def test_the_grass_section_note_is_on_every_grass_option_and_in_the_window(self):
         record = self._records()[0]

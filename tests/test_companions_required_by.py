@@ -266,7 +266,7 @@ class Companions(unittest.TestCase):
         self.assertEqual(sorted(Path(rel).name for rel in payload), ["core.dds", "hd.dds"])   # no grass plugin
         answer = mock_fomod._load_answer_file(self.root / "out", "companion:Solstheim Graphical Replacer-46810.7z")
         self.assertTrue(answer["selected"])                                                  # asked once
-        (self.root / "staging" / "plugins" / "Remiros' Groundcover-46766").mkdir(parents=True)   # now staged
+        (self.root / "staging" / "plugins" / "Remiros' Groundcover-46733").mkdir(parents=True)   # now staged
         records = mock_fomod._numbered_folders(root, record, package)
         mock_fomod._mark_grass_options(records, package)
         self.assertTrue(next(r for r in records if "Groundcover" in r["label"])["recommended"])
