@@ -1553,6 +1553,9 @@ def _finish_rollback(journal, game_dir, args, plan, summary) -> int:
     try:
         from workflow_safety import atomic_json
         atomic_json(manager_dir / "major_master_deployments.json", {"version": 1, "deployments": []})
+        # Regular plugin deployments belong to the same install: if they stay, the next
+        # archive scan hides those plugins as already deployed even though rollback removed them.
+        atomic_json(manager_dir / "plugin_deployments.json", {"version": 1, "deployments": []})
     except OSError as exc:
         print_report([str(exc)], "Game rollback verified, but deployment ownership could not be reset:")
         return 1
