@@ -18,11 +18,15 @@
     While it is on, a bard also stops singing while you talk to them, and holds their lute (Weapon
     Sheathing showed it on the back, as it is a shield). The performing animation (the lute) stops at the same
     moment, for any performer, and comes back when the dialogue ends; Animated Dialogue is not patched, it
-    just finds the plain animation where it would have found the lute.
+    just finds the plain animation where it would have found the lute. After the dialogue he stands plainly for
+    a pause (3 s of game time by default, Mod Config slider) before the animation restarts.
+    MWSE throws "Animation file failed to load" for a plain animation (it has no override layer) AFTER it has
+    swapped the model, so that throw counts as loaded and the restore (tes3.loadAnimation{reference}) always
+    runs; menuExit / cellChanged are a backstop for any performer left plain.
 ]]
 
 local CONFIG_NAME = "mwperformers"
-local config = mwse.loadConfig(CONFIG_NAME, { enabled = false, log = true, dialogueAnimation = true })
+local config = mwse.loadConfig(CONFIG_NAME, { enabled = false, log = true, dialogueAnimation = true, restoreDelay = 3 })
 
 local ANIM_PATTERNS = { "bard", "lute", "drum", "perform", "musician" }
 local SCRIPT_PATTERNS = { "bard", "lute", "drum", "perform", "musician", "minstrel" }
@@ -134,6 +138,7 @@ end
 -- builds these afresh; what the last pass held and this one doesn't is let go at the end of it.
 local function weak() return setmetatable({}, { __mode = "k" }) end
 local held, animStopped = weak(), weak()  -- animStopped: reference -> the scene node its animation was changed on
+local touched = weak()                    -- reference -> its safe handle: a performer whose animation a dialogue swapped, until it is given back
 local heldScripts = {}                    -- script -> true, while a scriptExecute filter is registered
 local prevAnim, prevScripts = weak(), {}  -- the last pass's, while a pass runs
 
@@ -155,6 +160,23 @@ local function holdScript(script)
     end
 end
 
+-- MWSE logs "An unhandled exception occurred: Animation file failed to load." from its C++ side for every plain-animation
+-- swap, even inside pcall (the plain animation has no custom animation layer, which MWSE checks for after it has
+-- already swapped the model). The swap works; the entry is harmless. So the entry is never a mystery in MWSE.log,
+-- a notice naming the NPC and the file is written just before it, always (not only when the mod's own log is on).
+local function noticeExpectedThrow(ref, file)
+    local ok, who = pcall(describe, ref)
+    local text = string.format(
+        "[mwperformers] NOTICE: stopping the performance of %s by loading the plain animation '%s'. This animation "
+        .. "has no custom (override) animation file, so MWSE will log 'An unhandled exception occurred: Animation "
+        .. "file failed to load.' immediately after this line. That entry is expected and harmless: the plain "
+        .. "animation is applied, and playback and the restore of the performer's own animation are unaffected. "
+        .. "No action is needed.",
+        ok and who or "an NPC", tostring(file))
+    pcall(mwse.log, "%s", text)
+    log("%s", text)
+end
+
 local function plainAnim(base)
     local race = base.race
     if race and race.isBeast then return "base_animkna.nif" end
@@ -170,7 +192,12 @@ local function stopPerforming(ref)
         local node = ref.sceneNode
         if node and prevAnim[ref] == node then
             animStopped[ref] = node           -- still standing plainly from the last pass
-        elseif node and pcall(tes3.loadAnimation, { reference = ref, file = plainAnim(base) }) then
+        elseif node then
+            -- MWSE swaps the model first and only then looks for an override layer; a plain animation has none, so it
+            -- throws "Animation file failed to load" with the plain animation loaded all the same. Count it as loaded.
+            local file = plainAnim(base)
+            noticeExpectedThrow(ref, file)
+            pcall(tes3.loadAnimation, { reference = ref, file = file })
             animStopped[ref] = ref.sceneNode
         end
     end
@@ -312,6 +339,8 @@ local BACKSTOP = 1.5                          -- seconds: the animation comes ba
 
 local pendingAnim                             -- { handle, plain, groups, ad }: the performer whose animation is stopped
 local backstop                                -- real-time timer for the above
+local settle                                  -- game-time timer: the pause after the dialogue before the animation restarts
+local RESTORE_DELAY = 3                       -- seconds of game time (the Mod Config slider's default; 0 = at once)
 
 local function idleGroup() return tes3.animationGroup and tes3.animationGroup.idle or 0 end
 
@@ -336,6 +365,23 @@ local function cancelBackstop()
     end
 end
 
+local function cancelSettle()
+    if settle then
+        pcall(function() settle:cancel() end)
+        settle = nil
+    end
+end
+
+local function cancelTimers() cancelBackstop() cancelSettle() end
+
+local function restoreDelay()
+    local d = tonumber(config.restoreDelay)
+    if not d then return RESTORE_DELAY end
+    return math.max(0, math.min(d, 10))
+end
+
+local loggedPlainThrow = false
+
 local function stopAnimation(ref)
     if animStopped[ref] or held[ref] then return nil end     -- already standing plainly: nothing to stop or give back
     local data = ref.animationData
@@ -347,7 +393,17 @@ local function stopAnimation(ref)
     if not plain and not performing then return nil end      -- a script performer between songs: nothing playing
     local state = { handle = tes3.makeSafeObjectHandle(ref), groups = groups }
     if plain then
-        if not pcall(tes3.loadAnimation, { reference = ref, file = plainAnim(base) }) then return nil end
+        -- The plain animation is a base animation, with no override layer, so MWSE's loadAnimation swaps the model and
+        -- then throws "Animation file failed to load" (its check for an override layer fails). The performer has the
+        -- plain animation on him all the same: count it as loaded, or restoreAnimation never gives his own back.
+        touched[ref] = state.handle
+        local file = plainAnim(base)
+        noticeExpectedThrow(ref, file)
+        local ok, err = pcall(tes3.loadAnimation, { reference = ref, file = file })
+        if not ok and not loggedPlainThrow then
+            loggedPlainThrow = true
+            log("%s: MWSE says '%s' for the plain animation; it is on him all the same", describe(ref), tostring(err))
+        end
         state.plain = true
     end
     pcall(tes3.playAnimation, { reference = ref, group = idleGroup() })
@@ -359,13 +415,17 @@ end
 local function restoreAnimation()
     local state = pendingAnim
     pendingAnim = nil
-    cancelBackstop()
+    cancelTimers()
     if not state or not state.handle:valid() then return end
     local ref = state.handle:getObject()
-    if not ref or ref.disabled or ref.deleted or not ref.sceneNode then return end   -- gone: its animation goes with it
+    if not ref or ref.disabled or ref.deleted or not ref.sceneNode then             -- gone: its animation goes with it
+        if ref then touched[ref] = nil end
+        return
+    end
     local mobile = ref.mobile
-    if ref.isDead == true or (mobile and mobile.isDead) then return end
+    if ref.isDead == true or (mobile and mobile.isDead) then touched[ref] = nil return end
     if state.plain then pcall(tes3.loadAnimation, { reference = ref }) end           -- its own performing animation again
+    touched[ref] = nil
     local g = state.groups or {}
     local lower, upper, shield = active(g[1]), active(g[2]), active(g[3])
     local p = { reference = ref, shield = shield }
@@ -386,6 +446,26 @@ local function sameRef(state, ref)
     return state and state.handle:valid() and state.handle:getObject() == ref
 end
 
+-- Backstop: a performer whose animation a dialogue swapped, who is not being held plain on purpose and whose
+-- dialogue no longer has him, goes back to his own animation (whatever stopped restoreAnimation from reaching him).
+local function healTouched()
+    for ref in pairs(touched) do
+        local live = pendingAnim and sameRef(pendingAnim, ref)
+        if not live and not held[ref] and not animStopped[ref] then
+            local handle = touched[ref]
+            touched[ref] = nil
+            local ok, here = pcall(function()
+                return handle and handle:valid() and ref.sceneNode ~= nil and not ref.disabled and not ref.deleted
+                    and ref.isDead ~= true and not (ref.mobile and ref.mobile.isDead)
+            end)
+            if ok and here then
+                pcall(tes3.loadAnimation, { reference = ref })
+                log("%s: his own animation given back (backstop)", describe(ref))
+            end
+        end
+    end
+end
+
 local function beginAnimation(ref)
     if not config.dialogueAnimation or sameRef(pendingAnim, ref) then return end
     restoreAnimation()                                   -- another's, if one is still stopped
@@ -398,22 +478,55 @@ local function beginAnimation(ref)
     end
 end
 
+-- The dialogue is over. He keeps standing with the plain animation and idle for a moment (restoreDelay seconds of
+-- game time, so it does not run in a menu), then gets his own animation back. One timer at a time; a new dialogue,
+-- his death, a cell change or a load cancels it (the cell change and the load restore him first where they can).
+-- Without a usable timer he is restored at once: he never stays plain.
+local function scheduleRestore()
+    local state = pendingAnim
+    if not state then return end
+    if settle then return end                                    -- already counting: never stacked
+    local delay = restoreDelay()
+    if delay <= 0 then return restoreAnimation() end
+    cancelBackstop()
+    local ok = pcall(function()
+        settle = timer.start({ type = timer.simulate, duration = delay, callback = function()
+            settle = nil
+            restoreAnimation()
+            healTouched()                                        -- and whoever the restore missed
+        end })
+    end)
+    if not ok or not settle then settle = nil return restoreAnimation() end
+end
+
 -- the dialogue is over: now, or once Animated Dialogue has taken its last picture of the pose (it eases out of it)
 local function onMenuExitAnimation()
     local state = pendingAnim
-    if not state then return end
-    if not state.ad then return restoreAnimation() end
+    if not state or settle then return end
+    if not state.ad then return scheduleRestore() end
     cancelBackstop()
     pcall(function()
-        backstop = timer.start({ type = timer.real, duration = BACKSTOP, callback = restoreAnimation })
+        backstop = timer.start({ type = timer.real, duration = BACKSTOP, callback = function()
+            backstop = nil
+            scheduleRestore()
+        end })
     end)
 end
 
 event.register(AD_STARTED, function() if pendingAnim then pendingAnim.ad = true end end, { priority = AD_LAST })
-event.register(AD_ENDED, restoreAnimation, { priority = AD_LAST })
-event.register(AD_INTERRUPTED, restoreAnimation, { priority = AD_LAST })
-event.register(tes3.event.cellChanged, restoreAnimation)
-event.register(tes3.event.loaded, function() pendingAnim = nil cancelBackstop() end)    -- the old references are gone
+event.register(AD_ENDED, scheduleRestore, { priority = AD_LAST })
+event.register(AD_INTERRUPTED, scheduleRestore, { priority = AD_LAST })
+event.register(tes3.event.cellChanged, function() restoreAnimation() healTouched() end)
+event.register(tes3.event.loaded, function() pendingAnim = nil touched = weak() cancelTimers() end)    -- the old references are gone
+-- he died while waiting: nothing to give back (a dead performer's animation is left as it is)
+event.register(tes3.event.death, function(e)
+    if pendingAnim and e.reference and sameRef(pendingAnim, e.reference) then
+        local ref = e.reference
+        pendingAnim = nil
+        cancelTimers()
+        touched[ref] = nil
+    end
+end)
 
 local function onMenuDialogActivated(e)
     local target = tes3ui.getServiceActor()
@@ -424,6 +537,7 @@ local function onMenuDialogActivated(e)
     local ref = target and target.reference
     endQuiet()
     if pendingAnim and not (ref and sameRef(pendingAnim, ref)) then restoreAnimation() end
+    if pendingAnim then cancelTimers() end                -- the same performer again: he stays plain for this one too
     if not config.enabled or not ref or not isBardRef(ref) then return end
     quietBard = tes3.makeSafeObjectHandle(ref)
     skipScriptFrame(ref)                 -- first, or the script starts the next song
@@ -433,7 +547,7 @@ local function onMenuDialogActivated(e)
     beginAnimation(ref)                  -- before Animated Dialogue (priority), so it starts from the plain animation
 end
 event.register(tes3.event.uiActivated, onMenuDialogActivated, { filter = "MenuDialog", priority = 100 })
-event.register(tes3.event.menuExit, function() endQuiet() onMenuExitAnimation() end)
+event.register(tes3.event.menuExit, function() endQuiet() onMenuExitAnimation() healTouched() end)
 event.register(tes3.event.loaded, endQuiet)
 
 -- Mod Config menu ---------------------------------------------------------------------------------
@@ -460,6 +574,13 @@ event.register(tes3.event.modConfigReady, function()
         description = "While you talk to a performer, the lute (or drum) animation stops along with the singing, and "
             .. "it is back when the dialogue ends. Off: only the singing stops.",
         variable = mwse.mcm.createTableVariable({ id = "dialogueAnimation", table = config }),
+    })
+    page:createSlider({
+        label = "Pause before the animation restarts (seconds)",
+        description = "After a dialogue with a performer ends, he stands for this long (game time, it does not run "
+            .. "in a menu) before the lute or drum animation starts again. 0 = at once. Default 3.",
+        min = 0, max = 10, step = 0.5, jump = 1, decimalPlaces = 1,
+        variable = mwse.mcm.createTableVariable({ id = "restoreDelay", table = config }),
     })
     page:createButton({
         buttonText = "Pick again here now",

@@ -118,7 +118,8 @@ from mwdialog_datatree import (  # noqa: E402,F401
     asset_health_module, asset_owner_folder, collect_sound_files, DataTree, GENERATED_RECORD, generated_rels, hard_link_names,
     IGNORED_MAP_RE, longpaths_module, mastercheck_module, ModelAssets, _real_dir, sound_names_under, VortexRepo)
 from mwdialog_console import (  # noqa: E402,F401
-    ask, cap_fix_log, console_interactive, FIX_LOG_ARCHIVE, FIX_LOG_CAP, fix_log_line, set_title)
+    ask, begin_count, cap_fix_log, console_interactive, count_title, end_count,
+    FIX_LOG_ARCHIVE, FIX_LOG_CAP, fix_log_line, set_title)
 from mwdialog_masters import (  # noqa: E402,F401
     add_master, added_master_in_use, check_masters_for_play, covered_by_patches, FIXABLE_EXT, master_closure, _refs_use_master,
     remove_master, write_inplace)
@@ -435,6 +436,15 @@ class Report:
             off, op, desc = fix
             self.fixes.append((plugin, off, op, desc, issue_label(topic, info, msg), topic, info))
 
+
+
+def header_size_rewritten(verdict, header_size):
+    """True when a plugin's header no longer holds the master size it was saved with: the original is known
+    (fix log, size record or download archive) and differs from what the header says now, so an earlier sync
+    rewrote it. Such a header is no evidence of a mismatch any more (the original is kept where it was found)."""
+    orig = (verdict or {}).get("original_size")
+    return (orig is not None and header_size is not None and orig != header_size
+            and (verdict or {}).get("size_source") not in (None, "header"))
 
 class World:
     def __init__(self, report):
@@ -1193,6 +1203,10 @@ class World:
         self._check_lua_orphans()
         self._check_big_textures()
         self._check_text_keys()
+        try:
+            self._deployed_mesh_textures()
+        except Exception as e:                      # never let it stop the scan
+            print(f"(texture check of every model failed: {e})", file=sys.stderr)
         ign = sorted(getattr(self.assets, "ignored_normals", ()))
         if ign:
             try:
@@ -1301,21 +1315,84 @@ class World:
                 continue
             mesh_owner = self._mesh_owner(v)
             blamed, blamed_dir = mesh_owner if mesh_owner else (win[1], None)
-            for t in A.missing_textures(v):
+            self._missing_texture_stand_ins(v, A.missing_textures(v), blamed, blamed_dir)
+
+    def _missing_texture_stand_ins(self, v, missing, blamed, blamed_dir):
+        """Stand-ins for the textures `missing` (paths under Textures, as model v names them): the file from
+        .Orphaned or an undeployed Vortex folder, else a placeholder (a flat one for a normal map)."""
+        A = self.assets
+        for t in missing:
+            rel_t = re.sub(r"^[\\/]+", "", t)
+            orphan = A.find_orphaned("textures", rel_t, any_ext=True)
+            if orphan:
+                self.generated.append((os.path.join("Textures", os.path.splitext(rel_t)[0] + os.path.splitext(orphan)[1]),
+                                       f"model '{v}' ({blamed})", orphan, blamed, blamed_dir))
+                continue
+            hit = self.vortex.find("textures", rel_t, any_ext=True) if self.vortex is not None else None
+            if hit:
+                rel = os.path.join("Textures", os.path.splitext(rel_t)[0] + os.path.splitext(hit[0])[1].lower())
+                self.generated.append((rel, f"model '{v}' ({blamed}) from Vortex mod '{hit[1]}'",
+                                       hit[0], blamed, blamed_dir))
+            else:
+                self.generated.append((os.path.join("Textures", os.path.splitext(rel_t)[0] + ".dds"),
+                                       f"model '{v}' ({blamed})", None, blamed, blamed_dir))
+
+    def _texture_found_by_game(self, t):
+        """Whether the game finds texture t (a path under Textures, as a model names it): the path itself
+        with any of .dds/.tga/.bmp, loose or in a BSA; else the same file name directly under Textures
+        (what the game tries next: textures\\betcreat\\a_nm.dds is found as textures\\a_nm.dds, never in
+        another subfolder)."""
+        A = self.assets
+        stem = os.path.splitext(t.replace("/", "\\").lower().strip("\\"))[0]
+        return stem in A.tex_stems or stem.rpartition("\\")[2] in A.tex_stems
+
+    def _deployed_mesh_textures(self):
+        """--asset-check: every model the game can load, not only the ones records name (the x-prefixed twin a
+        creature is drawn with, body parts, models scripts or other models pull in): each winning loose file
+        under Meshes and each BSA copy. Every texture it names, in any slot (base, dark, detail, glow, and the
+        normal / bump maps some authors name for engines that use them: the game still loads each one and
+        warns "tex not found"), is looked up the way the game does (_texture_found_by_game); one that exists
+        nowhere gets the usual stand-in (_missing_texture_stand_ins). Reported per mod."""
+        A = self.assets
+        def key(rel):                              # a stand-in's path without extension: .tga copies count too
+            return os.path.splitext(rel.replace("/", "\\").lower())[0]
+        have = {key(g[0]) for g in self.generated}
+        by_owner = defaultdict(lambda: [set(), set()])            # owner -> [models, missing textures]
+        ign = self.assets.__dict__.setdefault("ignored_normals", set())
+        for m in sorted(set(A.mesh_loose) | set(A.mesh_bsa)):
+            if not m.endswith(".nif"):
+                continue
+            try:
+                names = A.texture_names(m)
+            except Exception:                    # a damaged model: the model checks report it
+                continue
+            miss = []
+            for t in names:
                 rel_t = re.sub(r"^[\\/]+", "", t)
-                orphan = A.find_orphaned("textures", rel_t, any_ext=True)
-                if orphan:
-                    self.generated.append((os.path.join("Textures", os.path.splitext(rel_t)[0] + os.path.splitext(orphan)[1]),
-                                           f"model '{v}' ({blamed})", orphan, blamed, blamed_dir))
+                if self._texture_found_by_game(rel_t):
                     continue
-                hit = self.vortex.find("textures", rel_t, any_ext=True) if self.vortex is not None else None
-                if hit:
-                    rel = os.path.join("Textures", os.path.splitext(rel_t)[0] + os.path.splitext(hit[0])[1].lower())
-                    self.generated.append((rel, f"model '{v}' ({blamed}) from Vortex mod '{hit[1]}'",
-                                           hit[0], blamed, blamed_dir))
-                else:
-                    self.generated.append((os.path.join("Textures", os.path.splitext(rel_t)[0] + ".dds"),
-                                           f"model '{v}' ({blamed})", None, blamed, blamed_dir))
+                gen = key("textures\\" + rel_t)
+                if IGNORED_MAP_RE.search(os.path.splitext(rel_t)[0].replace("/", "\\").rpartition("\\")[2]):
+                    ign.add(("Meshes\\" + m, rel_t))
+                if gen in have:
+                    continue
+                have.add(gen)
+                miss.append(rel_t)
+            if not miss:
+                continue
+            owner = self._mesh_owner(m)
+            blamed, blamed_dir = owner if owner else ("Data Files", None)
+            by_owner[blamed][0].add(m)
+            by_owner[blamed][1].update(miss)
+            self._missing_texture_stand_ins("Meshes\\" + m, miss, blamed, blamed_dir)
+        for blamed, (models, miss) in sorted(by_owner.items()):
+            ex = sorted(models)[0]
+            names = sorted(t.replace("/", "\\").rpartition("\\")[2] for t in miss)
+            self.r.add("INFO", blamed, "", "",
+                       f"{len(models)} model(s) it ships (e.g. Meshes\\{ex}) name {len(miss)} texture(s) that exist "
+                       f"nowhere ({', '.join(names[:3])}{' ...' if len(names) > 3 else ''}); the game warns "
+                       f"\"tex not found\" for each: --fix puts a stand-in in place (the file from a Vortex mod "
+                       f"folder, else a placeholder)")
 
     def _fallback_pool(self):
         """Working files by (record type, subtype, field), counted over the winning records."""
@@ -2092,6 +2169,16 @@ class World:
             msg = f"master '{master}' has changed size since this plugin was saved; the game warns at startup"
             if not plugin.lower().endswith(FIXABLE_EXT):
                 r.add("INFO", plugin, "", "", msg + " (a master; not changed)", master=master)
+            elif getattr(self, "master_verdicts", {}).get((plugin.lower(), master.lower()), {}).get("kind") == "different mod" \
+                    and header_size_rewritten(self.master_verdicts[(plugin.lower(), master.lower())], expected):
+                # the header holds a size an earlier sync wrote, not the one the plugin was saved with (that one is
+                # kept in the fix log / size record): it is no evidence any more, so keep it in step with the master
+                v = self.master_verdicts[(plugin.lower(), master.lower())]
+                r.add("ERROR", plugin, "", "", msg + f" (it looks made for a different '{master}', but its header "
+                                                    f"was synced before: saved against {v['original_size']} bytes)",
+                      fix=(0, ("sync_master", master, actual),
+                           f"synced the size recorded for '{master}' ({expected} -> {actual}); the header held an "
+                           f"earlier sync, not the size the plugin was saved with"), master=master)
             elif getattr(self, "master_verdicts", {}).get((plugin.lower(), master.lower()), {}).get("kind") == "different mod":
                 v = self.master_verdicts[(plugin.lower(), master.lower())]
                 r.add("WARN", plugin, "", "", msg + f"; not synced: it looks made for a different '{master}' "
@@ -3597,9 +3684,15 @@ def scan(args, plugins, bsas, data_dirs, report):
             world.file_sizes[name.lower()] = os.path.getsize(path)
         except OSError:
             pass
-    for i, (name, path) in enumerate(plugins, 1):
-        print(f"[{i}/{len(plugins)}] reading {name}", file=sys.stderr)
-        world.load_plugin(path, name)
+    set_title("mwdialog_check - scanning plugins")
+    begin_count()
+    try:
+        for i, (name, path) in enumerate(plugins, 1):
+            count_title("mwdialog_check - scanning plugins", i, len(plugins))
+            print(f"[{i}/{len(plugins)}] reading {name}", file=sys.stderr)
+            world.load_plugin(path, name)
+    finally:
+        end_count("mwdialog_check - scanning plugins")
     tree = None
     if getattr(args, "asset_check", False):
         print("Indexing meshes, textures, icons, sounds, music, video and fonts...", file=sys.stderr)
@@ -3711,6 +3804,7 @@ def run_fix(args, plugins, bsas, data_dirs, report, world, only, hidden=frozense
     print("\n" + "=" * 70)
     print("FIX PLAN (ERRORs only)")
     print("=" * 70)
+    set_title("mwdialog_check - fix plan")
     for plugin, why in skipped.items():
         print(f"  SKIP {plugin}: {why}")
 
@@ -4066,13 +4160,19 @@ def run_fix(args, plugins, bsas, data_dirs, report, world, only, hidden=frozense
             place_log.append((PLACE_PATCH_NAME, f"scripts act on '{v['id']}' but no copy is placed ({v['why']})",
                               f"placed one in the hidden cell '{PLACEHOLDER_CELL}'"))
 
+    defer_patches = defer_generated_fixes(args)
     conflict_records_for_patch, _conflict_winners = major_master_patch_records(
         {name.lower(): path for name, path in plugins})
-    if esm_plans or early or early_placed or item_esm or os.path.exists(patch_path) or conflict_records_for_patch \
-            or getattr(args, "_cell_deletes", None):
-        build_patch()                      # also clears out what older versions put in it
-    if placeholders or placements or os.path.exists(place_path):
-        build_place()
+    if defer_patches:
+        if esm_plans or early or early_placed or item_esm or placeholders or placements \
+                or getattr(args, "_cell_deletes", None) or conflict_records_for_patch:
+            print("  ESM / placeholder patches: deferred to --full's last --fix (after --clean and the last sort).")
+    else:
+        if esm_plans or early or early_placed or item_esm or os.path.exists(patch_path) or conflict_records_for_patch \
+                or getattr(args, "_cell_deletes", None):
+            build_patch()                      # also clears out what older versions put in it
+        if placeholders or placements or os.path.exists(place_path):
+            build_place()
 
     def rescan_list():
         """The load order as the game will see it: ESM patch where it loads, placeholder patch last."""
@@ -4134,7 +4234,7 @@ def run_fix(args, plugins, bsas, data_dirs, report, world, only, hidden=frozense
                 print(f"  {plugin}: {k} change(s) written")
             except (OSError, FormatError) as e:
                 print(f"  {plugin}: NOT changed ({e})")
-        if follow_esm:
+        if follow_esm and not defer_patches:
             for plugin, plan in follow_esm.items():
                 dest = esm_plans.setdefault(plugin, defaultdict(list))
                 for off, items in plan.items():
@@ -4142,6 +4242,11 @@ def run_fix(args, plugins, bsas, data_dirs, report, world, only, hidden=frozense
                         if item not in dest[off]:
                             dest[off].append(item)
             build_patch()
+        elif follow_esm and defer_patches:
+            print("  ESM follow-on fixes: deferred to --full's last --fix (after --clean and the last sort).")
+            if not follow:
+                fresh = report2
+                break
     log.extend(patch_log)
     log.extend(place_log)
     patch_path = patch_path if patch_built[0] else None
@@ -5062,6 +5167,7 @@ def run_clean(args, plugins, only):
     lookup = {n.lower(): p for n, p in plugins}
     targets = list(clean_targets(plugins, only))
     print(f"\nCLEAN: checking {len(targets)} plugin(s) against their masters...", file=sys.stderr)
+    set_title("mwdialog_check - clean")
     needs, info = defaultdict(lambda: (set(), set())), {}
     for name, path in targets:
         with open(path, "rb") as f:
@@ -6450,9 +6556,13 @@ def fix_cell_winners(args, plugins, report=None):
       - the cell's lighting/water/flags and its pathgrid are the ones they'd be without the loser
       - every door into the place (any plugin's, anywhere) that the loser set up is pointed at an arrival
         spot of the winner's layout: the one used from the same place if there is one, else the main one"""
+    if defer_generated_fixes(args):
+        print("  Cell Fixes: deferred to --full's last --fix (after --clean and the last sort).")
+        return
     data_dir = os.path.abspath(args.data_dir)
     game_dir = os.path.dirname(data_dir)
     print("\n" + "=" * 70 + "\nCELL FIXES: rebuilt interiors, door arrivals, objects on reshaped land\n" + "=" * 70)
+    set_title("mwdialog_check - Cell Fixes")
     entries = read_cell_winners(game_dir)
     out_path = os.path.join(data_dir, CELL_WINNER_PATCH)
     ours = {x.lower() for x in OUR_PATCHES} | {CELL_WINNER_PATCH.lower(), PERFORMER_PATCH.lower()}
@@ -7206,68 +7316,78 @@ def fix_cell_winners(args, plugins, report=None):
                 print(f"      ... and {len(float_left) - 10} more")
 
     # pathgrids walking people into what a mod their plugin doesn't know built. Runs after all that moves objects.
+    # --full runs this only on the last --fix (FULL_FINAL_PASS), after --clean and the last --sort.
     ext_pathgrids = {g: (pi, off) for nm, g, pi, off in all_pgrd if nm not in interiors}
-    pg_t0 = time.time()
-    if ext_pathgrids and not tag_of:
-        print("  Pathgrids: reading what every plugin's objects are...", flush=True)
-        tag_of, model_of, _scripted = object_info(order)
+    new_pgrds, paths_fixed, paths_left, pg_reused = {}, [], [], 0
+    if not (IN_FULL and not FULL_FINAL_PASS and getattr(args, "fix", False)):
+        pg_t0 = time.time()
+        if ext_pathgrids and not tag_of:
+            print("  Pathgrids: reading what every plugin's objects are...", flush=True)
+            tag_of, model_of, _scripted = object_info(order)
 
-    def pg_progress(done, total):
-        set_title(f"mwdialog_check - pathgrids {done}/{total}")
-        print(f"  Pathgrids: checking {done}/{total} outdoor cells for paths into objects...",
-              end="\n" if done == total else "\r", flush=True)
-    pg_cache_path = MP.state_path(game_dir, PATHGRID_CACHE_FILE)
-    pg_cache = load_pathgrid_cache(pg_cache_path)
-    new_pgrds, paths_fixed, paths_left, pg_reused = repair_pathgrids(
-        world, ext_pathgrids, out, tag_of, model_of, shapes,
-        progress=pg_progress if ext_pathgrids else None, cache=pg_cache)
-    if pg_reused:
-        print(f"  Pathgrids: {pg_reused} cell(s) unchanged since an earlier check: taken from {PATHGRID_CACHE_FILE}")
-    # the stage's time, as the asset check prints its own: [seconds] what
-    print(f"[{int(time.time() - pg_t0)}s] Pathgrids: {len(ext_pathgrids)} outdoor pathgrid(s), {pg_reused} taken from "
-          f"{PATHGRID_CACHE_FILE}", file=sys.stderr, flush=True)
-    if not args.dry_run:
+        def pg_progress(done, total):
+            count_title("mwdialog_check - pathgrids", done, total)
+            print(f"  Pathgrids: checking {done}/{total} outdoor cells for paths into objects...",
+                  end="\n" if done == total else "\r", flush=True)
+        pg_cache_path = MP.state_path(game_dir, PATHGRID_CACHE_FILE)
+        pg_cache = load_pathgrid_cache(pg_cache_path)
+        if ext_pathgrids:
+            begin_count()
         try:
-            save_pathgrid_cache(pg_cache_path, pg_cache)
-        except OSError as e:
-            print(f"  (could not write {PATHGRID_CACHE_FILE}: {e})", file=sys.stderr)
-    for g in new_pgrds:
-        out_heads.setdefault(("e",) + g, heads.get(("e",) + g))
-    if paths_fixed:
-        print(f"  Pathgrids: {len(new_pgrds)} cell(s) whose paths ran into objects another mod put there, "
-              f"{len(paths_fixed)} put right:")
-        for line in paths_fixed[:20]:
-            print(f"      {line}")
-        if len(paths_fixed) > 20:
-            print(f"      ... and {len(paths_fixed) - 20} more")
-    if paths_left:
-        print(f"  Pathgrids: {len(paths_left)} left to check (all listed in {PATHGRID_FIXES_FILE}):")
-        for line in paths_left[:10]:
-            print(f"      {line}")
-        if len(paths_left) > 10:
-            print(f"      ... and {len(paths_left) - 10} more")
-    if report is not None:
-        real = {n.lower(): n for n, _p in plugins}
-        for sev, lines, why in (("WARN", paths_fixed, f"--fix reroutes it in {CELL_WINNER_PATCH}"),
-                                ("INFO", paths_left, "left as it is")):
-            for line in lines:
-                m = PATHGRID_LINE_RE.match(line)
-                if m:
-                    report.add(sev, real.get(m["author"], m["author"]), f"pathgrid #{m['cell']}", "",
-                               f"{m['msg']} (an object another plugin placed; {why})")
-                else:
-                    report.add(sev, CELL_WINNER_PATCH, "pathgrid", "", line)
-    pg_file = MP.state_path(game_dir, PATHGRID_FIXES_FILE)
-    if not args.dry_run and (paths_fixed or paths_left):
-        with open(pg_file, "w", encoding="utf-8") as f:
-            f.write(f"; pathgrids, {time.strftime('%Y-%m-%d %H:%M:%S')}: FIXED in {CELL_WINNER_PATCH}; REPORTED "
-                    f"with why it was left as it is\n")
-            f.writelines(f"FIXED     {x}\n" for x in paths_fixed)
-            f.writelines(f"REPORTED  {x}\n" for x in paths_left)
-    elif not args.dry_run and os.path.exists(pg_file):
-        os.remove(pg_file)
+            new_pgrds, paths_fixed, paths_left, pg_reused = repair_pathgrids(
+                world, ext_pathgrids, out, tag_of, model_of, shapes,
+                progress=pg_progress if ext_pathgrids else None, cache=pg_cache)
+        finally:
+            if ext_pathgrids:
+                end_count("mwdialog_check - Cell Fixes")
+        if pg_reused:
+            print(f"  Pathgrids: {pg_reused} cell(s) unchanged since an earlier check: taken from {PATHGRID_CACHE_FILE}")
+        # the stage's time, as the asset check prints its own: [seconds] what
+        print(f"[{int(time.time() - pg_t0)}s] Pathgrids: {len(ext_pathgrids)} outdoor pathgrid(s), {pg_reused} taken from "
+              f"{PATHGRID_CACHE_FILE}", file=sys.stderr, flush=True)
+        if not args.dry_run:
+            try:
+                save_pathgrid_cache(pg_cache_path, pg_cache)
+            except OSError as e:
+                print(f"  (could not write {PATHGRID_CACHE_FILE}: {e})", file=sys.stderr)
+        for g in new_pgrds:
+            out_heads.setdefault(("e",) + g, heads.get(("e",) + g))
+        if paths_fixed:
+            print(f"  Pathgrids: {len(new_pgrds)} cell(s) whose paths ran into objects another mod put there, "
+                  f"{len(paths_fixed)} put right:")
+            for line in paths_fixed[:20]:
+                print(f"      {line}")
+            if len(paths_fixed) > 20:
+                print(f"      ... and {len(paths_fixed) - 20} more")
+        if paths_left:
+            print(f"  Pathgrids: {len(paths_left)} left to check (all listed in {PATHGRID_FIXES_FILE}):")
+            for line in paths_left[:10]:
+                print(f"      {line}")
+            if len(paths_left) > 10:
+                print(f"      ... and {len(paths_left) - 10} more")
+        if report is not None:
+            real = {n.lower(): n for n, _p in plugins}
+            for sev, lines, why in (("WARN", paths_fixed, f"--fix reroutes it in {CELL_WINNER_PATCH}"),
+                                    ("INFO", paths_left, "left as it is")):
+                for line in lines:
+                    m = PATHGRID_LINE_RE.match(line)
+                    if m:
+                        report.add(sev, real.get(m["author"], m["author"]), f"pathgrid #{m['cell']}", "",
+                                   f"{m['msg']} (an object another plugin placed; {why})")
+                    else:
+                        report.add(sev, CELL_WINNER_PATCH, "pathgrid", "", line)
+        pg_file = MP.state_path(game_dir, PATHGRID_FIXES_FILE)
+        if not args.dry_run and (paths_fixed or paths_left):
+            with open(pg_file, "w", encoding="utf-8") as f:
+                f.write(f"; pathgrids, {time.strftime('%Y-%m-%d %H:%M:%S')}: FIXED in {CELL_WINNER_PATCH}; REPORTED "
+                        f"with why it was left as it is\n")
+                f.writelines(f"FIXED     {x}\n" for x in paths_fixed)
+                f.writelines(f"REPORTED  {x}\n" for x in paths_left)
+        elif not args.dry_run and os.path.exists(pg_file):
+            os.remove(pg_file)
 
     # door owners copied with a cloned door (door_owner_verdicts): only the two clear rules are applied
+    set_title("mwdialog_check - Cell Fixes: door owners")
     doors, finals = [], {}
     for bk, hist in door_hist.items():
         pl, grp, blk, ck = hist[-1]
@@ -7336,6 +7456,7 @@ def fix_cell_winners(args, plugins, report=None):
             f.writelines(f"CHANGED  {x}\n" for x in owners_fixed)
             f.writelines(f"LEFT     {x}\n" for x in owners_left)
 
+    set_title("mwdialog_check - Cell Fixes: writing the patch")
     if not any(out.values()) and not pgrds and not new_pgrds:
         print("  Nothing to change.")
         drop_patch()
@@ -7922,8 +8043,9 @@ def fix_cell_layouts(args, plugins):
       - an XSCL (scale) after its reference's DATA/DELE: moved before it
       - the plugin's own reference placed identically in two exterior cells, one of them not the cell its
         position is in: the misplaced copy goes
-    An .esp is repaired in place (.bak first, date kept). An .esm is never edited: its misplaced copy is deleted in
-    the ESM patch (unless another plugin changes that copy), its late scales are only reported. Each finding goes
+    An .esp is repaired in place (.bak first, date kept). An .esm is never edited: its misplaced copies and late
+    scales are only reported (a patch can't delete one copy of a doubled reference number: the game warns that
+    the reference is missing in the master). Each finding goes
     in the plugin's bug report. Each plugin's result is cached by its size and date (TR_Mainland takes seconds)."""
     data_dir = os.path.abspath(args.data_dir)
     game_dir = os.path.dirname(data_dir)
@@ -7998,11 +8120,15 @@ def fix_cell_layouts(args, plugins):
             else:
                 keep.append(f)
         if keep:
-            args._cell_deletes[name] = keep
-            lines.append(f"  {name}: {len(keep)} misplaced duplicate placement(s) deleted in {PATCH_NAME}")
+            # Not deleted in the ESM patch: the game keeps one reference per number, so a patch's DELE for the
+            # other copy finds nothing there and the game warns "Object reference ... missing in master file"
+            # (TR_Mainland.esm 26.11.19: ex_cave_entrance_wg_01 in (27,-24) and (27,-26)).
+            lines.append(f"  {name}: {len(keep)} misplaced duplicate placement(s); a master is never edited and a "
+                         f"patch can't reach that copy, so only reported")
             note_own(name, "; ".join(f"'{f['name']}' (FRMR {f['frmr']:#x}) placed again in cell {f['cell']}, which "
                                      f"its position is not in" for f in keep[:5])
-                     + f": that copy deleted in {PATCH_NAME}")
+                     + "; not changed (a master is never edited, and the game keeps one reference per number, so a "
+                       "patch can't delete the other copy)", repaired=False)
     cache.flush()
     if lines:
         print("\n" + "=" * 70 + "\nCELL REFERENCES MGE XE'S DISTANT LAND REJECTS\n" + "=" * 70)
@@ -9297,6 +9423,7 @@ def run_update_rules(args):
 def run_sort(args, plugins):
     """--sort: compute the load order and set file dates to match (one day apart from 2000-01-01)."""
     print("\n" + "=" * 70 + "\nLOAD ORDER\n" + "=" * 70)
+    set_title("mwdialog_check - sort")
     game_dir = os.path.dirname(os.path.abspath(args.data_dir))
     rules_path = MP.state_path(game_dir, RULES_FILE)
     if not os.path.exists(rules_path) and not args.dry_run:
@@ -9558,9 +9685,118 @@ def full_missing_masters(args, game_dir):
     return missing
 
 
-def full_check(args, game_dir, stage):
+def sync_master_sizes_now(args, plugins, world=None):
+    """Set each plugin's MAST DATA sizes to the files as they are on disk now. This is the last step after
+    plugin writes (clean, AutoMerge, generated patches, in-place --fix) so the game does not warn that a
+    master has changed. Each plugin's file date is kept (load order). A pair is left alone when mastercheck
+    says the installed master is a different mod, or when the last scan said its references do not line up
+    with that master."""
+    if not plugins or getattr(args, "dry_run", False):
+        return 0
+    set_title("mwdialog_check - syncing master sizes")
+    print("\n  Syncing master sizes in plugin headers (after all writes)...")
+    sizes = {}
+    for name, path in plugins:
+        try:
+            sizes[name.lower()] = os.path.getsize(path)
+        except OSError:
+            continue
+    verdicts = getattr(world, "master_verdicts", None) or {}
+    ref_err = getattr(world, "ref_error_masters", None) or set()
+    n = 0
+    for name, path in plugins:
+        low = name.lower()
+        if not (low.endswith(FIXABLE_EXT) or is_our_patch(name) or low == AUTO_MERGE_NAME.lower()):
+            continue
+        if _sync_one_plugin_master_sizes(path, name, sizes, verdicts, ref_err):
+            n += 1
+            print(f"  {name}: master size(s) synced")
+    if n:
+        print(f"  Master sizes: {n} plugin(s) updated to the files as they are now (dates kept).")
+    else:
+        print("  Master sizes: already in sync.")
+    return n
+
+
+def _sync_one_plugin_master_sizes(path, plugin, sizes, verdicts, ref_err):
+    """Rewrite the TES3 header's MAST DATA sizes when they are stale. Returns True if the file changed."""
+    try:
+        data = read_plugin_bytes(path)
+    except OSError:
+        return False
+    try:
+        recs = list(iter_records(data))
+    except FormatError:
+        return False
+    if not recs or recs[0][1] != "TES3":
+        return False
+    off, tag, flags, body = recs[0]
+    hsubs = [[n, d] for n, d in iter_subs(body, off)]
+    cur_m = None
+    changed = False
+    for item in hsubs:
+        if item[0] == "MAST":
+            cur_m = cstr(item[1])
+        elif item[0] == "DATA" and cur_m is not None:
+            actual = sizes.get(cur_m.lower())
+            expected = struct.unpack_from("<Q", item[1])[0] if len(item[1]) >= 8 else None
+            skip = False
+            if actual is None or expected is None or expected == actual:
+                skip = True
+            elif (plugin.lower(), cur_m.lower()) in ref_err:
+                skip = True
+            elif verdicts.get((plugin.lower(), cur_m.lower()), {}).get("kind") == "different mod" \
+                    and not header_size_rewritten(verdicts.get((plugin.lower(), cur_m.lower())), expected):
+                # leave the header alone when it still holds the original size (evidence). If an earlier
+                # sync already rewrote it, keep it in step with the master (CT-50).
+                skip = True
+            if not skip:
+                item[1] = struct.pack("<Q", actual)
+                changed = True
+            cur_m = None
+    if not changed:
+        return False
+    nb = b"".join(pack_sub(n, d) for n, d in hsubs)
+    header_rest = data[off + 8:off + 16]
+    new_tes3 = tag.encode("ascii") + struct.pack("<I", len(nb)) + header_rest + nb
+    rest = data[off + 16 + len(body):]
+    st = os.stat(path)
+    write_plugin_bytes(path, new_tes3 + rest, keep_times=st)
+    return True
+
+
+def _count_unfixable_errors(args):
+    """ERROR findings a later --fix would not auto-repair (used by --full's mid-check when patches are deferred)."""
+    report = Report()
+    plugins, bsas, data_dirs = resolve(args, report)
+    if not plugins:
+        return sum(1 for i in report.issues if i[0] == "ERROR")
+    world = scan(args, plugins, bsas, data_dirs, report)
+    esp_plans, esm_plans, _skipped, _manual = plan_fixes(report, world, plugins, None, True)
+    planned = {(p.lower(), x[2]) for plans in (esp_plans, esm_plans)
+               for p, pp in plans.items() for items in pp.values() for x in items}
+    item_plugins = {fx["plugin"].lower() for fx in getattr(world, "item_fixes", [])
+                    if fx["plugin"].lower() not in world.unfixable}
+    covered = set()
+    for pn in (PATCH_NAME, PLACE_PATCH_NAME):
+        covered |= patch_contents(os.path.join(args.data_dir, pn))
+    n = 0
+    for sev, plugin, topic, info, msg in report.issues:
+        if sev != "ERROR" or is_our_patch(plugin):
+            continue
+        label = issue_label(topic, info, msg)
+        if (plugin.lower(), label) in planned or plugin.lower() in item_plugins:
+            continue
+        if covered_by_patches((sev, plugin, topic, info, msg), covered):
+            continue
+        n += 1
+    return n
+
+
+def full_check(args, game_dir, stage, allow_fixable=False):
     """The plain scan, like double-clicking the batch file: report to mwdialog_report.txt. If it has any
-    ERROR, open it and say so. Returns the number of errors."""
+    ERROR, open it and say so. Returns the number of errors. With allow_fixable, errors the last --fix
+    will repair do not stop --full (patches are built only on that last pass)."""
     report_path = MP.state_path(game_dir, "mwdialog_report.txt")
     print(f"\n--full: checking for errors after {stage} (report: mwdialog_report.txt)...")
     import contextlib
@@ -9571,8 +9807,20 @@ def full_check(args, game_dir, stage):
         for line in f:
             if line.lstrip().startswith("ERROR"):
                 errors += 1
-    if errors:
+    if errors and allow_fixable:
+        try:
+            unfix = _count_unfixable_errors(args)
+        except (OSError, FormatError, ValueError) as e:
+            print(f"--full: could not classify fixable errors after {stage} ({e}); treating them as unfixable.")
+            unfix = errors
+        if unfix == 0:
+            print(f"--full: {errors} error(s) after {stage} that the last --fix will repair; continuing.")
+            return 0
+        errors = unfix
+        print(f"--full: {errors} unfixable error(s) left after {stage}; stopping here so nothing builds on them.")
+    elif errors:
         print(f"--full: {errors} error(s) left after {stage}; stopping here so nothing builds on them.")
+    if errors:
         try:
             subprocess.Popen(["notepad", report_path])
         except OSError:
@@ -9583,6 +9831,14 @@ def full_check(args, game_dir, stage):
 
 
 IN_FULL = False
+FULL_FINAL_PASS = False         # --full's last --fix --multipatch: all generated patches are built on this pass
+
+
+def defer_generated_fixes(args=None):
+    """True during --full before the last --fix --multipatch: skip Cell Fixes, ESM/place patches,
+    soundfix, Multipatch, and the MWSE aux/sound cache. A standalone --fix / --all still builds them.
+    In-place ESP dialogue/item fixes still run in phase 1 so AutoMerge sees the same records."""
+    return bool(IN_FULL and not FULL_FINAL_PASS and (args is None or getattr(args, "fix", False)))
 
 
 def back_in_load_order(args, name):
@@ -9656,7 +9912,10 @@ def run_full(args):
         choices, in mwdialog_redundant.txt, are kept), report cell conflicts (asking the
         new ones), sort, set the old Multipatch aside, clean and fix with
         the asset check, sort again;
-        stop and open the report if any error is left; otherwise auto-merge, sort, --all, sort again;
+        stop and open the report if any error is left; otherwise auto-merge, sort, --clean, sort again
+        (no follow-up), then --fix --multipatch so every generated patch (Cell Fixes, pathgrids, ESM
+        and placeholder patches, soundfix, Multipatch, MWSE aux and the sound cache) is built once,
+        after the final --clean and the last sort;
         stop and open the report if any error is left; otherwise offer the interactive --cell-conflicts.
     It doesn't start at all while a plugin's master is missing from Data Files."""
     data_dir = os.path.abspath(args.data_dir)
@@ -9718,18 +9977,23 @@ def run_full(args):
     second = [
         ("auto-merge", ["--auto-merge", "--no-follow-up"]),
         ("sort (merged)", ["--sort", "--no-follow-up"]),
-        ("--all (merged)", ["--all"]),
-        ("sort again (after --all's changes)", ["--sort"]),
+        ("clean (merged)", ["--clean"]),
+        ("sort again (after --clean's changes)", ["--sort", "--no-follow-up"]),
+        # generated patches once, after this --clean and sort: earlier --fix skips them
+        ("fix and Multipatch (generated patches, after sort)", ["--fix", "--multipatch"]),
     ]
     if args.dry_run:
         print("--full --dry-run: each step only shows its plan, so later steps see the load order as it is now.")
-    global IN_FULL
+    global IN_FULL, FULL_FINAL_PASS
     IN_FULL = True
     done, stopped = [], None
     total = len(first) + len(second)
     try:
         for phase, steps in ((1, first), (2, second)):
             for what, extra in steps:
+                # the last --fix --multipatch is the only pass that builds generated patches
+                FULL_FINAL_PASS = bool(extra and isinstance(extra, list)
+                                       and "--fix" in extra and "--multipatch" in extra)
                 n = len(done) + 1
                 set_title(f"mwdialog_check --full - step {n}/{total}: {what}")
                 print("\n" + "#" * 70 + f"\n# --full step {n}/{total}: {what}"
@@ -9757,12 +10021,14 @@ def run_full(args):
                 break
             if not args.dry_run:
                 set_title(f"mwdialog_check --full - checking for errors ({'before' if phase == 1 else 'after'} the auto-merge)")
-                errs = full_check(args, game_dir, "the unmerged load order" if phase == 1 else "the auto-merge")
+                errs = full_check(args, game_dir, "the unmerged load order" if phase == 1 else "the auto-merge",
+                                  allow_fixable=(phase == 1))
                 if errs:
                     stopped = f"{errs} error(s) after {'the unmerged load order' if phase == 1 else 'the auto-merge'}"
                     break
     finally:
         IN_FULL = False
+        FULL_FINAL_PASS = False
     set_title("mwdialog_check --full - " + (f"stopped: {stopped}" if stopped else "finished"))
     print("\n" + "=" * 70 + "\n--full summary\n" + "=" * 70)
     for what, rc, secs in done:
@@ -9966,7 +10232,8 @@ def check_parser():
                          "rules and asset stand-ins), turn off redundant plugins (asking in a console; "
                          "--no-redundant skips it), --cell-conflicts (report), --sort, set the old Multipatch aside, "
                          "clean and fix with the asset check (no Multipatch yet), sort again; if any ERROR is left, "
-                         "stop and open mwdialog_report.txt; else --auto-merge, --sort, --all, sort again; if any "
+                         "stop and open mwdialog_report.txt; else --auto-merge, --sort, --all, sort again, then "
+                         "--fix --multipatch (pathgrids run once, after --clean and that sort); if any "
                          "ERROR is left, stop and open the report; else offer the interactive --cell-conflicts. "
                          "--yes: no questions; --add-all-esp: add every plugin first; --play: start the game at the end")
     tc.add_argument("--header", nargs="+", metavar="FILE",
@@ -10549,40 +10816,55 @@ def _main(argv=None):
     fixed = False
     if args.fix or args.patch_esm:
         fixed = run_fix(args, plugins, bsas, data_dirs, report, world, only, hidden)
-    if args.fix and only is None and not args.openmw_cfg and not args.no_soundfix and preserve_saves(args):
-        print("\n  Sound-script patch: not rebuilt (--preserve-saves: it adds script variables a saved game holds "
-              "values for)")
-    elif args.fix and only is None and not args.openmw_cfg and not args.no_soundfix:
-        import mwdialog_soundfix                     # after the fixes and the auto-merge, before the Multipatch
-        sf_plugins, sf_bsas, _dirs = resolve(args, Report())
-        if mwdialog_soundfix.run_soundfix(args, sf_plugins, sf_bsas, standalone=False) == 2:
-            print("  (the sound-script patch was not rebuilt; the rest of --fix is unaffected)")
-    if args.multipatch:
-        run_multipatch(args, plugins, world)
-    if args.fix and only is None and not args.dry_run and not args.openmw_cfg:
-        # the MWSE suite's data last, from the load order the game will load - resolve() reads
-        # generated\mwdialog_load_order.txt, the list --play gives the game, never a [Game Files] section that
-        # Windows may have cut short - with Cell Fixes (rebuilt above), the
-        # auto-merge, the sound patch and the Multipatch included - Cell Fixes is the last word on what is where
-        # and what is gone. (The --cell-conflicts step of --full runs before any of them are rebuilt.)
-        print("\n  Refreshing the MWSE suite's data (mwfloatfix / mwcollide / mwstranded) from the final load order...")
-        try:
-            final_plugins, _b, _d = resolve(args, Report())
-            run_cell_conflicts(args, final_plugins, aux_only=True)
-        except (OSError, FormatError, ValueError) as e:
-            print(f"  (the suite's data was not refreshed: {e})", file=sys.stderr)
+    defer_patches = defer_generated_fixes(args)
+    if defer_patches:
+        print("  Sound-script patch, Multipatch, and MWSE aux/sound cache: deferred to --full's last --fix "
+              "(after --clean and the last sort).")
+    else:
+        if args.fix and only is None and not args.openmw_cfg and not args.no_soundfix and preserve_saves(args):
+            print("\n  Sound-script patch: not rebuilt (--preserve-saves: it adds script variables a saved game holds "
+                  "values for)")
+        elif args.fix and only is None and not args.openmw_cfg and not args.no_soundfix:
+            set_title("mwdialog_check - sound-script patch")
+            import mwdialog_soundfix                     # after the fixes and the auto-merge, before the Multipatch
+            sf_plugins, sf_bsas, _dirs = resolve(args, Report())
+            if mwdialog_soundfix.run_soundfix(args, sf_plugins, sf_bsas, standalone=False) == 2:
+                print("  (the sound-script patch was not rebuilt; the rest of --fix is unaffected)")
+        if args.multipatch:
+            run_multipatch(args, plugins, world)
+        if args.fix and only is None and not args.dry_run and not args.openmw_cfg:
+            # the MWSE suite's data last, from the load order the game will load - resolve() reads
+            # generated\mwdialog_load_order.txt, the list --play gives the game, never a [Game Files] section that
+            # Windows may have cut short - with Cell Fixes (rebuilt above), the
+            # auto-merge, the sound patch and the Multipatch included - Cell Fixes is the last word on what is where
+            # and what is gone. (The --cell-conflicts step of --full runs before any of them are rebuilt.)
+            print("\n  Refreshing the MWSE suite's data (mwfloatfix / mwcollide / mwstranded) from the final load order...")
+            set_title("mwdialog_check - refreshing suite data")
+            try:
+                final_plugins, _b, _d = resolve(args, Report())
+                run_cell_conflicts(args, final_plugins, aux_only=True)
+            except (OSError, FormatError, ValueError) as e:
+                print(f"  (the suite's data was not refreshed: {e})", file=sys.stderr)
 
-    if args.fix and fixed and not args.dry_run and only is None and not args.openmw_cfg:
-        from mwdialog_soundcache import write_sound_cache
+        if args.fix and fixed and not args.dry_run and only is None and not args.openmw_cfg:
+            from mwdialog_soundcache import write_sound_cache
+            try:
+                final_report = Report()
+                final_plugins, _bsas, _dirs = resolve(args, final_report)
+                if any(issue[0] == "ERROR" for issue in final_report.issues):
+                    raise ValueError("the final load order contains missing plugins")
+                write_sound_cache(args.data_dir, final_plugins)
+            except (OSError, FormatError, ValueError) as e:
+                print(f"  sound cache: NOT written ({e})", file=sys.stderr)
+                return 2
+
+    # after every plugin write in this run (clean, in-place fixes, generated patches): MAST DATA sizes last
+    if not args.dry_run and (args.fix or args.clean or args.multipatch or args.patch_esm):
         try:
-            final_report = Report()
-            final_plugins, _bsas, _dirs = resolve(args, final_report)
-            if any(issue[0] == "ERROR" for issue in final_report.issues):
-                raise ValueError("the final load order contains missing plugins")
-            write_sound_cache(args.data_dir, final_plugins)
-        except (OSError, FormatError, ValueError) as e:
-            print(f"  sound cache: NOT written ({e})", file=sys.stderr)
-            return 2
+            final_plugins, _bsas, _dirs = resolve(args, Report())
+        except (OSError, FormatError, ValueError):
+            final_plugins = plugins
+        sync_master_sizes_now(args, final_plugins, world)
 
     return 1 if counts["ERROR"] else 0
 

@@ -1,6 +1,6 @@
 {
   "Description": "The user's mw* MWSE Lua suite as it is in the Steam Morrowind install, copied byte for byte. dejespreplacements (formerly mwespreplacements) is excluded (user's personal load-order patches).",
-  "CopiedAt": "2026-11-26 (sync.py)",
+  "CopiedAt": "2026-11-27 (sync.py)",
   "Files": [
     {
       "Path": "metadata/mwcustomclasspersistence-metadata.toml",
@@ -152,9 +152,9 @@
     {
       "Path": "mods/mwperformers/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwperformers\\main.lua",
-      "SHA256": "71478b83668482cf097b977d741511f6e5c8b414bc486c1e26ebc5fbfc1bab24",
-      "Length": 23119,
-      "SourceModified": "2026-11-26T07:21:06"
+      "SHA256": "9994904b5ba89e3777fce0e775655e90c3d881f0c965389a99fc0ca91d39f0cf",
+      "Length": 29262,
+      "SourceModified": "2026-11-27T05:37:52"
     },
     {
       "Path": "mods/mwpluginpatches/config.lua",
@@ -292,9 +292,9 @@
     {
       "Path": "mods/mwsaveguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwsaveguard\\main.lua",
-      "SHA256": "67c8cd3c3530d006ba89236031196310649e9553d1e29ea3671db923f51f7260",
-      "Length": 22279,
-      "SourceModified": "2026-11-25T21:09:04"
+      "SHA256": "0afb1b02399c155a71a0ac16e4d60d83a3e344537928ab5ebb2a5865b82a9aa8",
+      "Length": 27617,
+      "SourceModified": "2026-11-27T01:02:14"
     },
     {
       "Path": "mods/mwsaveguard/validator.lua",
@@ -383,16 +383,16 @@
     {
       "Path": "mods/mwcriminal/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcriminal\\main.lua",
-      "SHA256": "d465f7b019473f5689eea2319665123cf6a28583bde550a1741c427d84081abd",
-      "Length": 13133,
-      "SourceModified": "2026-11-26T20:53:23"
+      "SHA256": "114e28f8de3f7e937b2af050f918ea0cb6c1ba384f5d2becebb80b51c3337127",
+      "Length": 14024,
+      "SourceModified": "2026-11-27T09:12:57"
     },
     {
       "Path": "mods/mwcriminal/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcriminal\\mcm.lua",
-      "SHA256": "74c73374df5dcede334b5fb95b769540909fd383dee2f217231a4570c138fe7c",
-      "Length": 9778,
-      "SourceModified": "2026-11-26T20:53:23"
+      "SHA256": "495697b1edc6f27e88e4489910deacd513afbea646fb3583594f0cf40cf41fce",
+      "Length": 9853,
+      "SourceModified": "2026-11-27T09:12:57"
     },
     {
       "Path": "mods/mwcriminal/interop.lua",
@@ -628,9 +628,9 @@
     {
       "Path": "mods/mwconsole/selection/panel.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwconsole\\selection\\panel.lua",
-      "SHA256": "40a11199ab4881a09783ae7af8f4db8c22ae4d0ef3076aa34865be54a5d5a686",
-      "Length": 8992,
-      "SourceModified": "2026-11-26T20:53:23"
+      "SHA256": "a8a0b14b6a6b6783a22d23e3be588035867b1d297a81a285a080a116939cc130",
+      "Length": 9845,
+      "SourceModified": "2026-11-27T00:58:39"
     },
     {
       "Path": "mods/mwconsole/toggles.lua",
@@ -726,9 +726,9 @@
     {
       "Path": "mods/mwpluginpatches/patches/aheadOfTheClassesEquip.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpluginpatches\\patches\\aheadOfTheClassesEquip.lua",
-      "SHA256": "c9067e4262ef15dc0c3ac5e7843da83ff6b4a0f27a96ed1495158c3b59ecf63f",
-      "Length": 10875,
-      "SourceModified": "2026-11-26T08:30:22"
+      "SHA256": "5209f0a06526c856e492317fc357005de49beefa1042a7831a2521aa0f4975a4",
+      "Length": 12795,
+      "SourceModified": "2026-11-26T23:03:28"
     },
     {
       "Path": "mods/mwpluginpatches/patches/attendMeRays.lua",
@@ -761,9 +761,9 @@
     {
       "Path": "mods/mwpluginpatches/patches/ruinesRelicsJournal.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpluginpatches\\patches\\ruinesRelicsJournal.lua",
-      "SHA256": "487e9e64a175bad8d721c3f5d849e840d53a9445cc127d2899cff36e170e383a",
-      "Length": 12297,
-      "SourceModified": "2026-11-26T20:53:23"
+      "SHA256": "1f10f166118a1372e0ad1127759ba47cc1ad3c209e9d2daa83065e7a3a73062e",
+      "Length": 15235,
+      "SourceModified": "2026-11-27T01:03:56"
     }
   ]
 }
