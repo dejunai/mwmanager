@@ -547,6 +547,45 @@ class PluginPathSafetyTests(unittest.TestCase):
                 plugin_install.unpack_again(manager, package, Path(tmp) / "gone.zip")
             self.assertTrue(package.is_dir())                  # no archive: the folder is left as it is
 
+    def test_repair_from_archive_replaces_a_hardlinked_deployed_plugin(self):
+        """A corrupt staged plugin is the same file as the deployed one; repair restores both from the archive."""
+        import zipfile
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = Path(tmp) / "manager"
+            data = Path(tmp) / "game" / "Data Files"
+            package = manager / "staging" / "plugins" / "Mod"
+            data.mkdir(parents=True)
+            source = package / "Mod.esp"
+            source.parent.mkdir(parents=True)
+            source.write_bytes(b"plugin as shipped")
+            os.link(source, data / "Mod.esp")
+            archive = Path(tmp) / "Mod-123-1-0.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("Mod.esp", "plugin as shipped")
+            state = {"version": 1, "deployments": [{
+                "id": "mod", "label": "Mod", "plugins": ["Mod.esp"], "archive": str(archive),
+                "staging_package": str(package),
+                "operations": [{"source": str(source), "target": str(data / "Mod.esp"),
+                                "source_relative": "Mod.esp", "target_relative": "Mod.esp",
+                                "backup": None, "size": 17, "sha256": None}]}]}
+            (manager / "plugin_deployments.json").write_text(json.dumps(state), encoding="utf-8")
+            source.write_bytes(b"CORRUPT")
+            self.assertEqual((data / "Mod.esp").read_bytes(), b"CORRUPT")
+            self.assertTrue(os.path.samefile(source, data / "Mod.esp"))
+            with mock.patch.object(plugin_install, "analyze_archive", return_value={"blocked": False}):
+                with self.assertRaises(FileNotFoundError) as raised:
+                    plugin_install.repair_package_from_archive(
+                        manager, package, None, data)
+                self.assertIn("archive is not available to unpack again", str(raised.exception))
+                self.assertEqual(source.read_bytes(), b"CORRUPT")
+                self.assertEqual((data / "Mod.esp").read_bytes(), b"CORRUPT")
+                result = plugin_install.repair_package_from_archive(
+                    manager, package, archive, data)
+            self.assertTrue(result["repaired"])
+            self.assertEqual((package / "Mod.esp").read_bytes(), b"plugin as shipped")
+            self.assertEqual((data / "Mod.esp").read_bytes(), b"plugin as shipped")
+            self.assertTrue(os.path.samefile(package / "Mod.esp", data / "Mod.esp"))
+
 
 class JobCancellationTests(unittest.TestCase):
     def test_tidy_without_output_still_observes_cancellation(self):

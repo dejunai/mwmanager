@@ -1633,3 +1633,73 @@ def unpack_again(manager: Path, package: Path, archive: str | Path | None) -> No
         from mwmanager_journal import wipe_folder
         wipe_folder(package)
     extract_archive({"archive": str(archive)}, package, manager)
+
+
+def repair_package_from_archive(manager: Path, package: Path, archive: str | Path | None,
+                                data_dir: Path | None = None) -> dict:
+    """Restore a staged package from its archive, and replace any still-deployed game
+    files that came from it.
+
+    Deployed plugins are usually hard links to the staged files, so a corrupt
+    staged plugin is also the one in Data Files. unpack_again only rebuilds the
+    staged folder; the install would keep the damaged file unless those links
+    are remade from the new extract. Without an archive, unpack_again raises
+    and leaves the staged folder as it is, so the user can roll back.
+    """
+    package = Path(package).resolve()
+    unpack_again(manager, package, archive)
+    refreshed = []
+    if data_dir is None:
+        return {"repaired": True, "refreshed": refreshed}
+    data_dir = Path(data_dir).resolve()
+    for entry in _read_deployment_state(manager).get("deployments") or []:
+        staged = entry.get("staging_package")
+        if not staged:
+            continue
+        try:
+            if Path(staged).resolve() != package:
+                continue
+        except OSError:
+            continue
+        for op in entry.get("operations") or []:
+            rel = op.get("source_relative")
+            target = op.get("target")
+            if not rel or not target:
+                continue
+            source = (package / Path(str(rel).replace("\\", "/"))).resolve()
+            try:
+                source.relative_to(package)
+            except ValueError:
+                continue
+            if not source.is_file():
+                continue
+            target_path = Path(target)
+            try:
+                target_path.resolve().relative_to(data_dir)
+            except (ValueError, OSError):
+                continue
+            _refresh_deployed_file(source, target_path)
+            refreshed.append(str(target_path))
+    return {"repaired": True, "refreshed": refreshed}
+
+
+def _refresh_deployed_file(source: Path, target: Path) -> None:
+    """Replace a deployed game file with a new hard link or copy of source."""
+    target = Path(target)
+    source = Path(source)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        if target.exists() and target.is_file() and os.path.samefile(source, target):
+            return
+    except OSError:
+        pass
+    temporary = target.with_name(f".{target.name}.{uuid.uuid4().hex}.repairing")
+    try:
+        try:
+            os.link(source, temporary)
+        except OSError:
+            shutil.copy2(source, temporary)
+        os.replace(temporary, target)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
