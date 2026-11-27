@@ -497,36 +497,57 @@ class TidySteps(unittest.TestCase):
         self.assertEqual(seen, [["ModA-1-1-0"]])
         self.assertEqual(args.only, [])
 
-    def test_init_targets_live_data_files_and_auto_applies(self):
-        with mock.patch.object(self.t, "run_initial_tidy", return_value=0) as run:
-            rc = self.t.mwmanager_main(["--init", "--game-data-files", str(self.data), "--apply", "--yes"])
+    def test_init_is_staged_tidy_and_does_not_write_data_files(self):
+        with mock.patch.object(self.t, "run_initial_tidy", return_value=0) as run, \
+                mock.patch.object(self.t, "plan_main", return_value=0) as plan, \
+                mock.patch.object(self.t, "apply_main", return_value=0) as apply, \
+                mock.patch.object(self.t, "update_omwaddon_masters", return_value=None), \
+                mock.patch.object(self.t, "align_master_versions", return_value=None), \
+                mock.patch.object(self.t, "clear_readonly_flags", return_value=0), \
+                mock.patch.object(self.t._scanner, "main") as scan:
+            rc = self.t.mwmanager_main([
+                "--init", "--staging", str(self.staging),
+                "--game-data-files", str(self.data), "--apply", "--yes",
+                "--no-lua", "--no-assets",
+            ])
         self.assertEqual(rc, 0)
-        run.assert_called_once_with(str(self.data), apply_changes=True)
+        run.assert_not_called()
+        apply.assert_called_once()
+        plan.assert_not_called()
+        scan.assert_not_called()
+
+    def test_init_refuses_data_files_as_the_staging_root(self):
+        with self.assertRaises(SystemExit) as raised:
+            # argparse error or our return 2: either is a refusal
+            rc = self.t.mwmanager_main([
+                "--init", "--staging", str(self.data),
+                "--game-data-files", str(self.data), "--apply", "--yes",
+            ])
+            if rc == 2:
+                raise SystemExit(rc)
+        self.assertTrue(raised.exception)
 
     def test_staged_tidy_refuses_an_invented_data_files_default(self):
         with mock.patch.dict(os.environ, {"MWMANAGER_DATA_FILES": ""}):
             with self.assertRaises(SystemExit):
                 self.t.mwmanager_main(["--staging", str(self.staging), "--no-lua", "--no-assets"])
 
-    def test_initial_tidy_commits_asset_cache_before_full(self):
-        assets = mock.Mock()
-        with mock.patch.object(self.t, "run_data_files_tidy", return_value=0), \
-                mock.patch.object(self.t._scanner, "main", return_value=0) as scan, \
-                mock.patch.object(self.t._scanner, "asset_health_module", return_value=assets):
-            rc = self.t.run_initial_tidy(str(self.data), apply_changes=True)
+    def test_initial_tidy_does_not_run_the_scanner_on_data_files(self):
+        with mock.patch.object(self.t, "mwmanager_main", return_value=0) as main, \
+                mock.patch.object(self.t._scanner, "main") as scan:
+            rc = self.t.run_initial_tidy(str(self.data), apply_changes=True, staging=str(self.staging))
         self.assertEqual(rc, 0)
-        self.assertIn("--asset-check", scan.call_args.args[0])
-        self.assertNotIn("--asset-repair", scan.call_args.args[0])
-        assets.close_caches.assert_called_once_with()
+        scan.assert_not_called()
+        argv = main.call_args.args[0]
+        self.assertIn("--staging", argv)
+        self.assertEqual(argv[argv.index("--staging") + 1], str(self.staging))
+        self.assertIn("--game-data-files", argv)
+        self.assertEqual(argv[argv.index("--game-data-files") + 1], str(self.data))
+        self.assertNotIn("--init", argv)
 
-    def test_initial_tidy_continues_after_repairs(self):
-        assets = mock.Mock()
-        with mock.patch.object(self.t, "run_data_files_tidy", return_value=0), \
-                mock.patch.object(self.t._scanner, "main", return_value=1), \
-                mock.patch.object(self.t._scanner, "asset_health_module", return_value=assets):
-            rc = self.t.run_initial_tidy(str(self.data), apply_changes=True)
-        self.assertEqual(rc, 0)
-        assets.close_caches.assert_called_once_with()
+    def test_initial_tidy_refuses_data_files_as_the_write_root(self):
+        with self.assertRaises(ValueError):
+            self.t.run_initial_tidy(str(self.data), apply_changes=True, staging=str(self.data))
 
     def test_staged_asset_repair_returns_exact_restore_record(self):
         root = self.staging / "ModA-1-1-0"

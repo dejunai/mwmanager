@@ -414,3 +414,50 @@ class DurableTransaction:
         else:
             raise RuntimeError("Invalid transaction phase; recovery needs review.")
         return True
+
+
+def is_data_files_tree(path) -> bool:
+    """True when `path` is a Data Files folder (the live game tree, not a staging root)."""
+    from pathlib import Path as _P
+    try:
+        resolved = _P(path).resolve()
+    except OSError:
+        resolved = _P(os.path.abspath(path))
+    return resolved.name.casefold() == "data files"
+
+
+def require_staging_write_root(path, *, data_dir=None, game_dir=None, what="Tidy"):
+    """Refuse a write/working root that is (or is inside) the live Data Files or game folder.
+
+    Tidy, luafix, the omw2mwse converter, and other pre-deploy repairs write under
+    MWManager or Vortex staging. Data Files is only written by the final deploy step
+    and by the existing deploy-time stand-ins and patches.
+    """
+    from pathlib import Path as _P
+
+    def _resolve(value):
+        try:
+            return _P(value).resolve()
+        except OSError:
+            return _P(os.path.abspath(value))
+
+    root = _resolve(path)
+    if is_data_files_tree(root):
+        raise ValueError("%s must write under staging, not Data Files: %s" % (what, root))
+    forbidden = []
+    if data_dir:
+        forbidden.append(_resolve(data_dir))
+    if game_dir:
+        game = _resolve(game_dir)
+        if root == game:
+            raise ValueError("%s must write under staging, not the game folder: %s" % (what, root))
+        forbidden.append(game / "Data Files")
+    for base in forbidden:
+        if root == base:
+            raise ValueError("%s must write under staging, not %s: %s" % (what, base, root))
+        try:
+            root.relative_to(base)
+        except ValueError:
+            continue
+        raise ValueError("%s must write under staging, not under %s: %s" % (what, base, root))
+    return root
