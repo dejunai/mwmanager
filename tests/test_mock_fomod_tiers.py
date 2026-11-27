@@ -72,6 +72,49 @@ class TierTests(unittest.TestCase):
                                                                ("Example 2048", None, "Example 2048", [])))
         self.assertEqual(variants["Example 2048"], "")          # "example" is in every label, "2048" nowhere
 
+    def test_unmentioned_package_readme_goes_to_the_sole_optional(self):
+        text = (
+            "--- Readme.txt ---\n"
+            "You are welcome to create your own version of the artwork.\n"
+            "Save them, for instance to the provided small folder.\n"
+            "Direct output to the upscaled folder when you are done.\n"
+        )
+        extras = options(
+            ("Extras/Travel Tooltips/00 Core", 0, "Core", []),
+            ("Extras/Travel Tooltips/01 For modders", 1, "For modders", []),
+        )
+        extras[0]["outputs"] = {"textures/tew/map.tga"}
+        extras[1]["outputs"] = {"upscaled/template.tga"}
+        excerpts = mock_fomod._option_excerpts(text, extras)
+        self.assertEqual(excerpts["Extras/Travel Tooltips/00 Core"], "")
+        docs = excerpts["Extras/Travel Tooltips/01 For modders"]
+        self.assertIn("create your own version of the artwork", docs)
+        self.assertIn("upscaled folder", docs)
+        self.assertNotIn("--- Readme.txt ---", docs)
+
+    def test_a_general_package_readme_is_not_used_as_the_sole_optional(self):
+        text = (
+            "Poison Crafting\nBy Greatness7\nDescription\n"
+            "Opens up an entire new facet of gameplay by granting the ability to use potions offensively.\n"
+        )
+        excerpts = mock_fomod._option_excerpts(text, options(
+            ("00 Core", 0, "Core", []),
+            ("01 Labelled Potions", 1, "Labelled Potions", []),
+        ))
+        self.assertEqual(excerpts["00 Core"], "")
+        self.assertEqual(excerpts["01 Labelled Potions"], "")
+
+    def test_unmentioned_readme_is_not_guessed_when_two_optionals_exist(self):
+        text = "A general package note that names none of the folders.\n"
+        excerpts = mock_fomod._option_excerpts(text, options(
+            ("00 Core", 0, "Core", []),
+            ("01 One", 1, "One", []),
+            ("02 Two", 2, "Two", []),
+        ))
+        self.assertEqual(excerpts["00 Core"], "")
+        self.assertEqual(excerpts["01 One"], "")
+        self.assertEqual(excerpts["02 Two"], "")
+
     def test_the_option_window_shows_the_matched_text_unchanged(self):
         record = {"label": "Core", "docs": self.text["00 Core"], "targets": []}
         shown = mock_fomod._option_description(record, Path("."))

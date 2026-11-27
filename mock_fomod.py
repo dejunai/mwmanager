@@ -693,6 +693,8 @@ def _line_tier(line: str, keys: dict) -> tuple[int, str] | None:
         return _TIER_SCORE["name"], "name"
     if any(re.search(rf"(?<![\w.]){re.escape(p)}(?![\w])", line) for p in keys["plugins"]):
         return _TIER_SCORE["plugin"], "plugin"
+    if any(re.search(rf"(?<![\w.]){re.escape(p)}(?![\w])", line) for p in keys.get("payload", ())):
+        return _TIER_SCORE["name"], "name"
     words = set(re.findall(r"[a-z0-9]{3,}", line))
     if number is not None:
         lead = re.match(r"[\[(]?(\d{1,3})[\])]?(?:\s*[-:.)]\s*|\s+)", line)
@@ -710,9 +712,27 @@ def _line_tier(line: str, keys: dict) -> tuple[int, str] | None:
     return None
 
 
+_ASSET_STOP = {"meshes", "mesh", "textures", "texture", "icons", "icon", "sounds", "sound",
+               "music", "mwse", "mge3", "shaders", "shader", "splash", "video", "videos",
+               "bookart", "fonts", "font", "docs", "extras", "scripts", "script", "mods"}
+
+
+def _payload_tokens(outputs) -> set[str]:
+    """Distinctive file and folder names an option would install, for matching a how-to in the readme."""
+    stop = _KEY_STOP | _ASSET_STOP
+    tokens = set()
+    for rel in outputs or ():
+        path = Path(str(rel).replace("\\", "/"))
+        for part in (*path.parts[:-1], path.stem):
+            tokens.update(token for token in re.findall(r"[a-z0-9]{4,}", part.casefold()) if token not in stop)
+    return tokens
+
+
 def _option_excerpts(text: str, options: list[dict]) -> dict[str, str]:
+
     """The readme text for each option of one package, keyed by folder. Each line belongs to the option(s) naming it
-    best, so siblings no longer share one line. An option the readme does not mention gets no text."""
+    best, so siblings no longer share one line. An option the readme does not mention gets no text, unless the
+    package documentation names files or folders only that option installs: then the whole document is its how-to."""
     lines = text.splitlines()
     norm = [_normalize_line(line) for line in lines]
     token_sets = [{t for t in re.findall(r"[a-z0-9]{3,}", _normalize_line(o.get("label") or o["folder"]))}
@@ -724,6 +744,14 @@ def _option_excerpts(text: str, options: list[dict]) -> dict[str, str]:
             seen_plugins[plugin] = seen_plugins.get(plugin, 0) + 1
     shared_plugins = {p for p, count in seen_plugins.items() if count > 1}   # a patch replacing the core's .esp
     keys = [_option_keys(o, common, shared_plugins) for o in options]
+    payload_sets = [_payload_tokens(o.get("outputs")) for o in options]
+    payload_counts: dict[str, int] = {}
+    for tokens in payload_sets:
+        for token in tokens:
+            payload_counts[token] = payload_counts.get(token, 0) + 1
+    shared_payload = {token for token, count in payload_counts.items() if count > 1}
+    for key, tokens in zip(keys, payload_sets):
+        key["payload"] = tokens - shared_payload
     owners: dict[int, list[tuple[int, int, str]]] = {}
     separators = {index for index, line in enumerate(lines) if _DOC_SEPARATOR_RE.match(line)}
     for index, line in enumerate(norm):
@@ -739,6 +767,15 @@ def _option_excerpts(text: str, options: list[dict]) -> dict[str, str]:
         if scored:
             best = max(score for score, _n, _tier in scored)
             owners[index] = [item for item in scored if item[0] == best]
+    # a how-to that only names files one option installs is that option's document, intro included
+    mentioned = {owner for owned in owners.values() for _score, owner, _tier in owned}
+    body_words = {token for i, line in enumerate(norm) if i not in separators
+                  for token in re.findall(r"[a-z0-9]{4,}", line)}
+    payload_hits = [n for n, key in enumerate(keys) if key.get("payload") and key["payload"] & body_words]
+    if len(payload_hits) == 1 and not (mentioned - {payload_hits[0]}):
+        start = next((i for i, line in enumerate(norm) if line and i not in separators), None)
+        if start is not None:
+            owners[start] = [(_TIER_SCORE["heading"], payload_hits[0], "document")]
 
     def block(start: int, tier: str) -> list[str]:
         end = start + 1
@@ -1016,7 +1053,8 @@ def _discover(mod_dir: Path, installed: set[str]) -> list[dict]:
         specs.append({"folder": str(path.relative_to(mod_dir)), "number": int(match.group(1)) if match else None,
                       "label": match.group(2).strip() if match else path.name,
                       "plugins": [p.name for p in _safe_rglob(path) if p.is_file()
-                                  and p.suffix.casefold() in PLUGIN_EXTS]})
+                                  and p.suffix.casefold() in PLUGIN_EXTS],
+                      "outputs": _option_outputs(path)})
     shared_excerpts = _option_excerpts(shared_docs, specs) if shared_docs else {}
     records = []
     loose_records = []
