@@ -345,6 +345,19 @@ class LedgerTests(Fixture):
         self.assertTrue(setup["steps"]["paths_confirmed"]["completed_at"])
         self.assertIsNone(setup["steps"]["preflight_complete"]["completed_at"])
 
+    def test_rollback_reports_a_journal_entry_that_has_no_path(self):
+        self.journal.capture_baseline(self.game)
+        self.journal.ledger.parent.mkdir(parents=True, exist_ok=True)
+        self.journal.ledger.write_text(
+            '{"op": "deploy", "mod": "GhostMod", "ts": "2000-01-01T00:00:00"}\n',
+            encoding="utf-8")
+        rc = mj.main(["--game-dir", str(self.game), "--journal-dir", str(self.journal.root),
+                      "--rollback", "--gog-only"])
+        self.assertEqual(rc, 1)
+        entries, problems = self.journal.entries()
+        self.assertEqual(entries, [])
+        self.assertTrue(any("no path" in p for p in problems))
+
     def test_rollback_archives_install_decisions_and_order_state(self):
         self.journal.capture_baseline(self.game)
         write(self.manager / "disabled_plugins/Old.esp", b"old")

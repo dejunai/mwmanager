@@ -650,6 +650,15 @@ class Journal:
 
     def _expanded(self, path: Path) -> tuple[list[dict], list[str]]:
         raw, problems = self._read_jsonl(path)
+        usable = []
+        for entry in raw:
+            if entry.get("manifest") or entry.get("path"):
+                usable.append(entry)
+            else:
+                problems.append(
+                    f"{path.name}: a journal entry has no path and cannot be used for rollback or verify"
+                )
+        raw = usable
         if not any(e.get("manifest") for e in raw):
             return raw, problems
         cached = _LEDGER_CACHE.get(_ledger_key(path))

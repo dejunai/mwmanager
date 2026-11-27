@@ -79,13 +79,15 @@ class RecoveryCenterTests(unittest.TestCase):
         self.assertEqual(before, {
             path: hashlib.sha256(path.read_bytes()).hexdigest() for path in tracked
         })
-        self.assertEqual(first["counts"]["items"], 5)
+        self.assertEqual(first["counts"]["items"], 6)
         labels = {item["label"] for item in first["items"]}
         self.assertIn("Example plugin", labels)
         self.assertTrue(all("\n" not in label and "\r" not in label
                             for label in labels))
-        self.assertTrue(any(item["kind"] == "problem" and item["source"] == "journal"
-                            for item in first["items"]))
+        journal_labels = [item["label"] for item in first["items"]
+                          if item["kind"] == "problem" and item["source"] == "journal"]
+        self.assertTrue(any("no path" in label for label in journal_labels))
+        self.assertTrue(any("hash chain" in label for label in journal_labels))
 
     def test_selected_transaction_is_recovered_safely(self):
         source = self.put(self.manager, "staging/source", b"new")
