@@ -2122,11 +2122,7 @@ class ManagerGUI(tk.Tk):
                                    worker, completed)
 
     def _run_initial_tidy(self, on_success):
-        """Sort shipped plugins, then Tidy staging, before the first full pass.
-
-        Tidy writes under MWManager staging; --game-data-files is only a lookup. Live Data Files
-        is not a Tidy write target (--full later still builds deploy-time stand-ins and patches).
-        """
+        """Apply the live Data Files tidy (--init) and sort every shipped plugin before the first full pass."""
         data_dir = Path(self.settings["game_dir"]) / "Data Files"
         present = {name.casefold() for name in plugins_in_data(data_dir)}
         self.active_names.update(name.casefold() for name in OFFICIAL_SHIPPED_ESPS
@@ -2145,11 +2141,9 @@ class ManagerGUI(tk.Tk):
                              [python, "-u", str(APP_DIR / "mwmanager.py"), str(data_dir), "--sort", "--yes",
                               "--no-follow-up"]))
         if not self._setup_done("tidy_complete"):
-            staging_root = APP_DIR / "staging" / "plugins"
-            staging_root.mkdir(parents=True, exist_ok=True)
-            commands.append(("tidy_complete", "Tidying staged packages…",
-                             [python, "-u", str(TIDY_SCRIPT), "--staging", str(staging_root),
-                              "--game-data-files", str(data_dir), "--apply", "--yes"]))
+            commands.append(("tidy_complete", "Tidying Data Files and applying safe fixes…",
+                             [python, "-u", str(TIDY_SCRIPT), "--init", "--game-data-files", str(data_dir),
+                              "--apply", "--yes"]))
         log_path = APP_DIR / "outputs" / "mwmanager_initial_setup.log"
 
         if not commands:

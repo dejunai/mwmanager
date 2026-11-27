@@ -426,12 +426,17 @@ def is_data_files_tree(path) -> bool:
     return resolved.name.casefold() == "data files"
 
 
-def require_staging_write_root(path, *, data_dir=None, game_dir=None, what="Tidy"):
+# The only Tidy contexts allowed to write under live Data Files. Not a general bypass:
+# any other allow= value is rejected, and the default (None) still requires staging.
+DATA_FILES_TIDY_ALLOWED = frozenset({"init"})
+
+
+def require_staging_write_root(path, *, data_dir=None, game_dir=None, what="Tidy", allow=None):
     """Refuse a write/working root that is (or is inside) the live Data Files or game folder.
 
-    Tidy, luafix, the omw2mwse converter, and other pre-deploy repairs write under
-    MWManager or Vortex staging. Data Files is only written by the final deploy step
-    and by the existing deploy-time stand-ins and patches.
+    Tidy is confined to MWManager or Vortex staging, except allow="init"
+    (Tidy --init / first-run Initial Tidy). Generated patches and the
+    --full asset-check still write Data Files on their own paths; this guard is for Tidy.
     """
     from pathlib import Path as _P
 
@@ -441,7 +446,14 @@ def require_staging_write_root(path, *, data_dir=None, game_dir=None, what="Tidy
         except OSError:
             return _P(os.path.abspath(value))
 
+    if allow is not None and allow not in DATA_FILES_TIDY_ALLOWED:
+        raise ValueError("%s: unknown Data Files tidy allow context %r (allowed: %s)"
+                         % (what, allow, ", ".join(sorted(DATA_FILES_TIDY_ALLOWED))))
+
     root = _resolve(path)
+    if allow in DATA_FILES_TIDY_ALLOWED:
+        return root
+
     if is_data_files_tree(root):
         raise ValueError("%s must write under staging, not Data Files: %s" % (what, root))
     forbidden = []

@@ -351,12 +351,10 @@ class GuiSmokeTests(unittest.TestCase):
         saved = self.g.SORT_FILE.read_text(encoding="utf-8")
         self.assertTrue(all(name.casefold() in saved.casefold() for name in self.g.OFFICIAL_SHIPPED_ESPS))
         self.assertEqual(commands[0][-3:], ["--sort", "--yes", "--no-follow-up"])
-        self.assertIn("--staging", commands[1])
-        self.assertNotIn("--init", commands[1])
-        staging = Path(commands[1][commands[1].index("--staging") + 1])
-        self.assertEqual(staging.name.casefold(), "plugins")
-        self.assertNotEqual(staging.name.casefold(), "data files")
+        self.assertIn("--init", commands[1])
         self.assertIn("--game-data-files", commands[1])
+        self.assertEqual(Path(commands[1][commands[1].index("--game-data-files") + 1]).name.casefold(),
+                         "data files")
         self.assertNotIn(stale, self.app.order)
         self.assertNotIn(stale.casefold(), self.app.active_names)
 

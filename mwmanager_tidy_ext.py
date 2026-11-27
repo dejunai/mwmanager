@@ -9,9 +9,10 @@ changed), then the Lua check's patches and (with the asset-repair switch on) the
     are kept, never deleted), the journal with empty-folder pruning and option undo;
   * the installer's BAIN/FOMOD option step (mock_fomod) and the re-tidy of the payloads it activates;
   * .omwaddon master renames and master version alignment after --apply;
-  * --init is staged Tidy (the live Data Files path is only a lookup via --game-data-files);
-  * --data-files still organizes root-level documents in a Data Files folder, if asked explicitly;
-  * the Data Files folder upstream reads next to itself comes from --game-data-files instead.
+  * --init tidies the live --game-data-files tree (document tidy plus scanner --fix --asset-check);
+    this is the only allowlisted exception to staging-only Tidy;
+  * --data-files organizes root-level documents in a Data Files folder;
+  * every other Tidy call writes under --staging; --game-data-files is then a lookup only.
 """
 import argparse
 import filecmp
@@ -2390,19 +2391,35 @@ def run_data_files_tidy(data_dir, *, apply_changes=False, marker=None, dry_run=F
     return 0
 
 
-def run_initial_tidy(data_dir, *, apply_changes=True, staging=None):
-    """Initial Tidy is staged Tidy. `data_dir` is only a read-only lookup (masters, BSAs).
+def run_live_data_files_tidy(data_dir, *, apply_changes=True, allow):
+    """Tidy the live Data Files tree: organize documents, then scanner --fix --asset-check.
 
-    Pre-deploy repairs do not write to the live Data Files tree; --full later still builds
-    deploy-time stand-ins and patches there.
+    `allow` must be an allowlisted context from workflow_safety.DATA_FILES_TIDY_ALLOWED
+    (currently only "init"). This is not a general bypass.
     """
     import workflow_safety
-    staging = staging or STAGING
-    workflow_safety.require_staging_write_root(staging, data_dir=data_dir, what="Initial Tidy")
-    argv = ["--staging", str(staging), "--game-data-files", str(data_dir)]
-    if apply_changes:
-        argv += ["--apply", "--yes"]
-    return mwmanager_main(argv)
+    workflow_safety.require_staging_write_root(
+        data_dir, data_dir=data_dir, what="Tidy", allow=allow)
+    rc = run_data_files_tidy(data_dir, apply_changes=apply_changes, dry_run=not apply_changes)
+    if rc:
+        return rc
+    command = [data_dir, "--fix", "--asset-check", "--no-interactive"]
+    command += ["--yes"] if apply_changes else ["--dry-run"]
+    print("\nTidy: checking official plugins and live Data Files assets.")
+    try:
+        result = _scanner.main(command)
+        if apply_changes and result == 1:
+            print("Tidy repaired reported errors; --full will verify the result.")
+            return 0
+        return result
+    finally:
+        # --full may run next in another process; commit the SQLite facts it will reuse first.
+        _scanner.asset_health_module().close_caches()
+
+
+def run_initial_tidy(data_dir, *, apply_changes=True):
+    """Tidy the live initial install, then apply the scanner's safe plugin and asset repairs."""
+    return run_live_data_files_tidy(data_dir, apply_changes=apply_changes, allow="init")
 
 
 # ---- the Data Files folder upstream looks for next to vortex_tidy.py --------------------------------------------
@@ -2487,7 +2504,7 @@ def mwmanager_parser():
                                "MWManager's per-mod staging folders, or organize Data Files documents.")
     ap.add_argument("--data-files", metavar="PATH", help="organize root-level documents in a Data Files folder")
     ap.add_argument("--init", action="store_true",
-                    help="initial Tidy of --staging (default staging folder); --game-data-files is a lookup only")
+                    help="initial install: tidy and auto-repair the live --game-data-files tree")
     ap.add_argument("--once-marker", metavar="PATH",
                     help="with --data-files: write this marker after a successful tidy; skip if it exists")
     ap.add_argument("--dry-run", action="store_true", help="with --data-files: show the plan, change nothing")
@@ -2541,8 +2558,7 @@ def mwmanager_main(argv=None):
         data_files = args.game_data_files or os.environ.get("MWMANAGER_DATA_FILES")
         if not data_files:
             ap.error("--init requires --game-data-files")
-        # --init is staged Tidy: fall through and treat --game-data-files as a lookup only.
-        args.game_data_files = data_files
+        return run_initial_tidy(data_files, apply_changes=args.apply)
     if args.data_files:
         if args.undo or args.options or args.options_only:
             ap.error("--undo and --options cannot be combined with --data-files")
