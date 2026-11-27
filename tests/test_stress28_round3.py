@@ -97,7 +97,57 @@ class RemovalWithCatalog(unittest.TestCase):
             plugin_install.remove_deployments(manager, data, {"mod"})
             self.assertFalse((data / "Mod.esp").exists())
             self.assertEqual(list(manager.glob(".game_catalog.sqlite3.*.rollback")), [])
+            # Removing every deployment also deletes the catalog cache; a leftover
+            # rollback copy or an open handle would still be a failure.
+            self.assertFalse((manager / "game_catalog.sqlite3").exists())
+            self.assertEqual(list(manager.glob("game_catalog.sqlite3*")), [])
+
+    def test_partial_removal_leaves_the_catalog_and_holds_no_handle(self):
+        import gc
+        import json
+        import os
+        import sqlite3
+        import tempfile
+        from pathlib import Path
+        import plugin_install
+        gc.disable()
+        self.addCleanup(gc.enable)
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = Path(tmp) / "manager"
+            data = Path(tmp) / "game" / "Data Files"
+            pkg_a = manager / "staging" / "plugins" / "A"
+            pkg_b = manager / "staging" / "plugins" / "B"
+            pkg_a.mkdir(parents=True)
+            pkg_b.mkdir(parents=True)
+            data.mkdir(parents=True)
+            (pkg_a / "A.esp").write_bytes(b"A")
+            (pkg_b / "B.esp").write_bytes(b"B")
+            os.link(pkg_a / "A.esp", data / "A.esp")
+            os.link(pkg_b / "B.esp", data / "B.esp")
+            import sys
+            root = Path(__file__).resolve().parents[1]
+            sys.path.insert(0, str(root / "database"))
+            import catalog as catalog_module
+            connection = sqlite3.connect(manager / "game_catalog.sqlite3")
+            catalog_module.create_schema(connection, root / "database" / "schema.sql")
+            connection.commit()
+            connection.close()
+            def ops(package, name):
+                return [{"source": str(package / name), "target": str(data / name), "backup": None,
+                         "size": 1, "sha256": None}]
+            state = {"version": 1, "deployments": [
+                {"id": "a", "label": "A", "plugins": ["A.esp"], "archives": [], "registered_archives": [],
+                 "staging_package": str(pkg_a), "operations": ops(pkg_a, "A.esp")},
+                {"id": "b", "label": "B", "plugins": ["B.esp"], "archives": [], "registered_archives": [],
+                 "staging_package": str(pkg_b), "operations": ops(pkg_b, "B.esp")},
+            ]}
+            (manager / "plugin_deployments.json").write_text(json.dumps(state), encoding="utf-8")
+            plugin_install.remove_deployments(manager, data, {"a"})
+            self.assertFalse((data / "A.esp").exists())
+            self.assertTrue((data / "B.esp").is_file())
+            self.assertEqual(list(manager.glob(".game_catalog.sqlite3.*.rollback")), [])
             os.replace(manager / "game_catalog.sqlite3", manager / "moved.sqlite3")   # nothing holds it open
+            self.assertTrue((manager / "moved.sqlite3").is_file())
 
     def test_catalog_context_closes_the_connection(self):
         import os

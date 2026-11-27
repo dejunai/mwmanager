@@ -454,6 +454,8 @@ def _journal_mwse_data(args, filename, write):
             ledger.record(run["run"], mwmanager_journal.rel_of(game_dir, target),
                           "replace" if original["kind"] != "absent" else "create",
                           mwmanager_journal.sha256_file(target), original, tag="mwse-data")
+            import mwmanager_generated
+            mwmanager_generated.register_game_generated(MANAGER_DIR, game_dir, target)
         ledger.finish_run(run)
     return result
 
@@ -492,6 +494,9 @@ def write_plugin_bytes(path, data, keep_times=None):
                       "replace" if original["kind"] != "absent" else "create",
                       mwmanager_journal.sha256_file(target), original, tag="plugin-write")
         ledger.finish_run(run)
+        if original["kind"] == "absent":
+            import mwmanager_generated
+            mwmanager_generated.register_game_generated(MANAGER_DIR, data_dir.parent, target)
     return result
 
 

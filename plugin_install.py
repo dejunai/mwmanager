@@ -1563,6 +1563,9 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
     for recovery, _target, _backup in recoveries:
         if recovery:
             recovery.unlink(missing_ok=True)
+    if not kept and not pending:
+        import mwmanager_generated
+        mwmanager_generated.cleanup_generated(manager, data_dir.parent)
     return {"removed": removed, "restored": restored,
             "pending": sum(len(item["operations"]) for item in pending),
             "unpack": unpack,

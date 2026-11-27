@@ -1417,6 +1417,8 @@ class Journal:
                     except OSError:
                         break
                     folder = folder.parent
+        import mwmanager_generated
+        mwmanager_generated.cleanup_generated(self.root.parent, game_dir)
 
     def cleanup_used_backups(self, game_dir, plan: dict, *, apply: bool = False) -> list[str]:
         """After a verified rollback: remove the Data Files\\Off / MWSE\\backups copies that were used."""
