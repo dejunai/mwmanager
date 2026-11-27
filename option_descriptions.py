@@ -70,6 +70,12 @@ def refine(text: str, limit: int = MAX_CHARS) -> str:
             in_changelog = False
         if len(line) < 3 or _CHROME.match(line):
             continue
+        try:
+            from mwnexus_parse import is_credit_line
+            if is_credit_line(line):
+                continue
+        except ImportError:
+            pass
         key = line.casefold()
         if key in seen:
             continue

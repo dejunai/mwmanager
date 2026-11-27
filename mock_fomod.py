@@ -1796,7 +1796,8 @@ def _nexus_page_text(mod_dir: Path, *, refresh=False) -> str:
     return result
 
 
-def _option_description(record: dict, mod_dir: Path, page_text: str = "") -> str:
+def _option_description(record: dict, mod_dir: Path, page_text: str = "",
+                        sibling_labels=()) -> str:
     """Choose the most relevant packaged or already-fetched online description."""
     if record.get("fomod_description"):
         return ""
@@ -1836,7 +1837,8 @@ def _option_description(record: dict, mod_dir: Path, page_text: str = "") -> str
     if folder and Path(folder).name.casefold() != label.casefold():
         names.append(Path(folder).name)
     for name in names:
-        chosen = best_option_sentences(page_text, name, extra_terms=record.get("targets", []))
+        chosen = best_option_sentences(page_text, name, extra_terms=record.get("targets", []),
+                                           sibling_labels=sibling_labels)
         if chosen:
             return refine("\n".join(chosen))
     return ""
@@ -2509,7 +2511,12 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
                           + "\nThis option may be deployed, but Morrowind may refuse to load it or abort at runtime.\n\n")
         if item.get("fomod_description"):
             target.insert("end", item["fomod_description"] + "\n\n")
-        description = _option_description(item, Path(item.get("mod_dir") or item["path"]), page_text)
+        here = str(item.get("mod_dir") or item.get("path") or "").casefold()
+        siblings = [r.get("label") or Path(str(r.get("path") or "")).name
+                    for r in records
+                    if r is not item and str(r.get("mod_dir") or r.get("path") or "").casefold() == here]
+        description = _option_description(item, Path(item.get("mod_dir") or item["path"]), page_text,
+                                          sibling_labels=siblings)
         note = _maintainer_notes(item)
         if description:
             target.insert("end", "Suggested option description:\n" + description + "\n\n")
