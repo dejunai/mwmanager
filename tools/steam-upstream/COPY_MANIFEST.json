@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-27T11:49:43",
+  "SyncedAt": "2026-11-27T12:41:16",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -1126,9 +1126,9 @@
     {
       "RelativePath": "tests\\test_performers_bards.py",
       "Source": "<Steam Morrowind>\\tests\\test_performers_bards.py",
-      "Bytes": 24605,
-      "SHA256": "f1e331d3c3d7323d4efd9081cdaf4edbc6d75e24a1a9d695028d7a945d1b7e03",
-      "SourceModified": "2026-11-27T05:37:52"
+      "Bytes": 24641,
+      "SHA256": "dce713b58f576cb48cf792b137415b436d8671e8f6a4f09b519e50b77ddaf5e7",
+      "SourceModified": "2026-11-27T11:48:41"
     },
     {
       "RelativePath": "tests\\test_performers_patch_retired.py",
