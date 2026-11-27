@@ -1,5 +1,5 @@
 {
-  "SyncedAt": "2026-11-26T15:02:04",
+  "SyncedAt": "2026-11-26T15:30:57",
   "TimeZone": "America/Los_Angeles",
   "SourceRoot": "<Steam Morrowind> = the Steam Morrowind install root",
   "FileSetGuide": "public repo dejunai/morrowind-conflict-tools @master plus reviewed Lua suite updates: code, docs, tests, the mw* MWSE Lua suite and its metadata files, each copied from the Steam root",
@@ -20,10 +20,10 @@
     },
     {
       "RelativePath": "docs\\CHANGES.md",
-      "Bytes": 106578,
-      "SHA256": "9638202480a69cf490305017daace03e721f2771afac92888beae6a0e600e06d",
+      "Bytes": 107167,
+      "SHA256": "3e977876b7258b784e16bd854687f504cd14899ffd7234088740b84adb4524fd",
       "Source": "<morrowind-conflict-tools>\\docs\\CHANGES.md",
-      "SourceModified": "2026-11-26T14:48:37"
+      "SourceModified": "2026-11-26T15:14:50"
     },
     {
       "RelativePath": "lua tools\\mwcustomclasspersistence-metadata.toml",
@@ -482,10 +482,10 @@
     },
     {
       "RelativePath": "mwdialog_luafix.py",
-      "Bytes": 285302,
-      "SHA256": "fd3caf58f2adf8f54c918778c0c813eaf79e50b8ffa82702de999f8689042721",
+      "Bytes": 285320,
+      "SHA256": "9faf590087c90fc585eb05698d53051a1ec0e2c42f55e29597f837d69729f88c",
       "Source": "<morrowind-conflict-tools>\\mwdialog_luafix.py",
-      "SourceModified": "2026-11-26T13:40:39"
+      "SourceModified": "2026-11-26T15:14:50"
     },
     {
       "RelativePath": "mwdialog_mastercheck.py",
@@ -608,10 +608,10 @@
     },
     {
       "RelativePath": "docs\\MORE_INFO.md",
-      "Bytes": 137331,
-      "SHA256": "8f42bed7b28caecefc1f1a067009240b8413a396cada3f8d57896d691633505c",
+      "Bytes": 137325,
+      "SHA256": "a339b3dd68dbf0f010a1736b545d38cf51aea884da15b9c7724cd204f2be174b",
       "Source": "<morrowind-conflict-tools>\\docs\\MORE_INFO.md",
-      "SourceModified": "2026-11-26T13:40:39"
+      "SourceModified": "2026-11-26T15:14:50"
     },
     {
       "RelativePath": "LICENSE",
@@ -707,9 +707,9 @@
     {
       "RelativePath": "tests\\test_luafix_frame_patches.py",
       "Source": "<Steam Morrowind>\\tests\\test_luafix_frame_patches.py",
-      "Bytes": 17501,
-      "SHA256": "874cb33fcb73368e437027ecbc668d02da9992e011e2b7a993f22070c6b8f84a",
-      "SourceModified": "2026-11-26T13:40:39"
+      "Bytes": 17469,
+      "SHA256": "bf4a83673cec5c63eeb659e6ea6f5e77bb200c590b2b16f8656d56865b50c3f1",
+      "SourceModified": "2026-11-26T15:14:50"
     },
     {
       "RelativePath": "tests\\test_mastercheck.py",
@@ -859,20 +859,6 @@
       "SourceModified": "2026-11-06T10:14:54"
     },
     {
-      "RelativePath": "MWCRIMINAL_DESIGN.md",
-      "Source": "<Steam Morrowind>\\mwdialog_backup\\docs\\MWCRIMINAL_DESIGN.md",
-      "Bytes": 9469,
-      "SHA256": "ccc8567b6b6ec0ae117c5a8b99e674f8682eb24965b6e0ee4abbac5730afbb22",
-      "SourceModified": "2026-11-21T23:35:55"
-    },
-    {
-      "RelativePath": "RESUME.md",
-      "Source": "<Steam Morrowind>\\RESUME.md",
-      "Bytes": 30571,
-      "SHA256": "fd5e14489273db47b6d1f5b8e4eee27b59f6d2e4598f41ec6ed71d1d977bb6aa",
-      "SourceModified": "2026-11-22T15:29:14"
-    },
-    {
       "RelativePath": "mwdialog_offlayout.py",
       "Bytes": 29304,
       "SHA256": "25eb1143373ade258d0890e2dbfb4e06f0d0f75edc8c884cfdce33e5c47cf557",
@@ -892,13 +878,6 @@
       "Bytes": 23882,
       "SHA256": "61684c76e176a95faf47f0ff6ea75098069fe918a3c1d698f27027a6e08c458a",
       "SourceModified": "2026-11-21T15:37:25"
-    },
-    {
-      "RelativePath": "MWCOMPANIONS_DESIGN.md",
-      "Source": "<Steam Morrowind>\\mwdialog_backup\\docs\\MWCOMPANIONS_DESIGN.md",
-      "Bytes": 12452,
-      "SHA256": "a6d5a89484cad64841ef9da5fc59a6dc9b5e83e35ee79950f7522a6dcc167a11",
-      "SourceModified": "2026-11-22T02:37:53"
     },
     {
       "RelativePath": "LUA_EDIT_AUDIT.md",
@@ -2239,9 +2218,9 @@
     {
       "RelativePath": "tests\\test_kp_intercepts.py",
       "Source": "<Steam Morrowind>\\tests\\test_kp_intercepts.py",
-      "Bytes": 16297,
-      "SHA256": "ad067d87743310ceef783b62a6664f0acae2d9382e3957117690f075bf742801",
-      "SourceModified": "2026-11-26T14:10:20"
+      "Bytes": 16279,
+      "SHA256": "1d9ec8b061bd03a470122adfe247810844a37c03140ebdc08aca433d8365a9a7",
+      "SourceModified": "2026-11-26T15:14:50"
     },
     {
       "RelativePath": "tests\\test_tes3conv_vendored.py",
