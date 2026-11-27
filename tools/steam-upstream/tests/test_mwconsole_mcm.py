@@ -21,6 +21,9 @@ mwse = {
         if SAVED == "old" then
             return { enabled = true, effects = { hotkey = { keyCode = 34, isAltDown = false, isShiftDown = true, isControlDown = false } } }
         end
+        if SAVED == "altI" then
+            return { enabled = true, panel = { hotkey = { keyCode = 23, isAltDown = true, isShiftDown = false, isControlDown = false } } }
+        end
         return defaults
     end,
     saveConfig = function() end,
@@ -136,3 +139,11 @@ assert(k and k.keyCode == 34 and k.isShiftDown, "the saved key is kept")
 assert(config.effects.hotkey == nil, "and removed from effects")
 assert(config.panel.on == true, "other panel defaults still filled")
 ''', saved="old")
+
+
+def test_a_saved_alt_i_stays_alt_i():
+    run_lua(r'''
+local k = config.panel.hotkey
+assert(k.keyCode == 23 and k.isAltDown and not k.isControlDown and not k.isShiftDown, "saved Alt+I stays")
+assert(config.panel.hotkeyMoved == nil, "no hotkeyMoved flag")
+''', saved="altI")

@@ -38,6 +38,43 @@ class LayerReportTests(unittest.TestCase):
 
 
 
+class StagedDataRebase(unittest.TestCase):
+    """texture_index / assets_check / lua_check must take --game-data-files through StagedData."""
+
+    def test_rebase_sends_texture_index_through_staged_data(self):
+        import tempfile
+        tidy = mwmanager_upstream.compose_tidy()
+        with tempfile.TemporaryDirectory() as tmp:
+            game = Path(tmp) / "Game"
+            data = game / "Data Files"
+            staging = Path(tmp) / "staging"
+            data.mkdir(parents=True)
+            staging.mkdir()
+            previous = tidy.GAME_DATA_FILES
+            index = getattr(tidy, "_TEX_INDEX", None)
+            try:
+                tidy.GAME_DATA_FILES = str(data)
+                if index is not None:
+                    index.clear()
+                seen = []
+                real = tidy.mwmanager_staged_data
+
+                def hook(*args, **kwargs):
+                    staged = real(*args, **kwargs)
+                    seen.append(staged)
+                    return staged
+
+                with mock.patch.object(tidy, "mwmanager_staged_data", side_effect=hook):
+                    tidy.texture_index(str(staging))
+                self.assertTrue(seen, "texture_index did not call mwmanager_staged_data")
+                self.assertEqual(Path(seen[0].game_dir).resolve(), game.resolve())
+                self.assertEqual(Path(seen[0].data_dir).resolve(), data.resolve())
+            finally:
+                tidy.GAME_DATA_FILES = previous
+                if index is not None:
+                    index.clear()
+
+
 class NonAsciiRename(unittest.TestCase):
     def test_a_renamed_files_original_goes_to_off_plugin_ascii(self):
         import tempfile

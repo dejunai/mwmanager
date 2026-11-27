@@ -60,9 +60,6 @@ Rules (thresholds come from MWSE\\config\\mwguard.json when it exists - the same
      (local X = tes3.worldController.x / tes3.player.x / tes3.mobilePlayer.x at the top of main.lua,
      never assigned again: nil-safe at load and read again where used, (X or <chain>), medium)        fix
   H5 require cycles inside a mod                                                                      report
-  I1 a .tga/.bmp it names is gone and a real .dds of that name is there (loose under Data Files or the
-     mod, in textures\\ or icons\\, or in a loaded BSA) -> names the .dds; x.dds.dds whose x.dds is there
-     -> one extension; a path whose file is in exactly one place one folder off (medium) -> that path  fix
   I2 a repeating real-time timer that redraws UI keeps running through a save -> skips while saving fix
   I3 a config written inside a save handler (during the save) -> written the frame after it        fix
   H6 tes3.messageBox inside a loop                                                                    report
@@ -124,6 +121,7 @@ import mwdialog_lua as L                                   # noqa: E402
 import mwdialog_planfile as PF                             # noqa: E402
 import mwdialog_text as MT                                 # noqa: E402
 import mwdialog_paths as MP                                # noqa: E402
+import mwdialog_staged as MS                               # noqa: E402
 print = MT.printer()                                       # noqa: A001
 
 sys.setrecursionlimit(max(sys.getrecursionlimit(), 20000))
@@ -156,9 +154,12 @@ OWN_FIX_RULES = frozenset({"A1", "A2", "A3", "A4", "A5", "F1"})
 
 
 def own_mods_path(data_dir):
-    """The ownMods file under data_dir (a Data Files folder), or None."""
+    """The ownMods file under data_dir (a Data Files folder), or None. For staged files (a StagedData: before
+    deploy) the first staged mod or lua tools folder that ships it; None when none does."""
     if not data_dir:
         return None
+    if isinstance(data_dir, MS.StagedData):
+        return data_dir.find(os.path.join("MWSE", *OWN_MODS_REL.split("/")))
     return os.path.join(data_dir, "MWSE", *OWN_MODS_REL.split("/"))
 
 
@@ -382,7 +383,8 @@ REF_FIELDS = {"reference", "target", "mobile", "attacker", "attackerReference", 
               "targetReference", "targetMobile", "actor", "current", "previous"}
 NON_ACTOR_TYPES = {"activator", "alchemy", "ammunition", "apparatus", "armor", "book", "clothing", "container",
                    "door", "ingredient", "light", "lockpick", "miscItem", "probe", "repairItem", "static", "weapon"}
-RULES_REV = 5                  # bump when a rule changes, so cached findings are worked out again
+RULES_REV = 6                  # bump when a rule changes, so cached findings are worked out again
+                               # (6: the I1 image-path rule is gone: icons and textures stay as the mod ships them)
 # console-only commands; replacement suggestions follow the guide's table where it has one
 CONSOLE_ONLY = {"togglepov": "tes3.togglePOV() (or tes3.force1stPerson() / tes3.force3rdPerson())",
                 "tcl": "console only (no script command)", "tai": "console only (no script command)",
@@ -404,7 +406,10 @@ def load_config(game_dir=HERE, data_dir=None):
     cfg = dict(DEFAULTS)
     cfg["log"] = dict(DEFAULTS["log"])
     data_dir = data_dir or os.path.join(game_dir, "Data Files")
-    guard = os.path.join(data_dir, "MWSE", "config", "mwguard.json")
+    # MWSE\\config\\mwguard.json is the user's in-game settings (written by the game, never staged): one of the
+    # documented read-only exceptions of the pre-deploy rule (mwdialog_staged), also for staged files
+    guard = os.path.join(MS.data_path_of(data_dir) or os.path.join(game_dir, "Data Files"), "MWSE", "config",
+                         "mwguard.json")
     src = []
     for path, section in ((guard, None), (guard, "luafix"), (MP.state_path(game_dir, "mwdialog_luafix.json"), "")):
         try:
@@ -444,9 +449,15 @@ def cfg_hash(cfg):
 
 def mwguard_log_cover(data_dir, cfg, mod_key):
     """(covered, why): is mwguard's runtime log-spam guard clearly going to catch this mod's lines?"""
-    main = os.path.join(data_dir or "", "MWSE", "mods", "mwsuite", "mwguard", "main.lua")
-    if not os.path.isfile(main):
-        main = os.path.join(data_dir or "", "MWSE", "mods", "mwguard", "main.lua")
+    if isinstance(data_dir, MS.StagedData):          # before deploy: the mwguard that will be deployed
+        main = (data_dir.find(os.path.join("MWSE", "mods", "mwsuite", "mwguard", "main.lua"))
+                or data_dir.find(os.path.join("MWSE", "mods", "mwguard", "main.lua")))
+        if not main:
+            return False, "mwguard is not staged (nor in lua tools)"
+    else:
+        main = os.path.join(data_dir or "", "MWSE", "mods", "mwsuite", "mwguard", "main.lua")
+        if not os.path.isfile(main):
+            main = os.path.join(data_dir or "", "MWSE", "mods", "mwguard", "main.lua")
     if not data_dir or not os.path.isfile(main):
         return False, "mwguard is not installed in Data Files"
     try:
@@ -2645,182 +2656,6 @@ SAVE_HELPER = ('local localpatch_save do localpatch_save = package.loaded["local
                'event.register("loaded", function() localpatch_save.saving = false end) '
                'event.register("menuExit", function() localpatch_save.saving = false end) end end ')
 
-IMAGE_LIT_RE = re.compile(r'(["\'])([^"\'\r\n]{1,260}?)\.(tga|bmp|dds)\1', re.I)
-IMAGE_DIRS = ("", "textures", "icons")            # where a path in a string is looked up (MWSE: icons, textures)
-
-
-def _is_dds(path):
-    try:
-        with open(path, "rb") as f:
-            return f.read(4) == b"DDS "
-    except OSError:
-        return False
-
-
-_BSA_NAMES = {}
-
-
-def bsa_names(data_dir):
-    """{lowercase backslash path} of every file in the BSAs the game loads (Morrowind.bsa and Morrowind.ini's
-    [Archives], read from the folder above Data Files); empty when there is none. Read once per run."""
-    if not data_dir:
-        return frozenset()
-    key = os.path.normcase(os.path.abspath(data_dir))
-    if key in _BSA_NAMES:
-        return _BSA_NAMES[key]
-    names = ["Morrowind.bsa"]
-    ini = os.path.join(os.path.dirname(os.path.abspath(data_dir)), "Morrowind.ini")
-    try:
-        with open(ini, encoding="latin-1") as f:
-            sec = ""
-            for ln in f:
-                ln = ln.strip()
-                if ln.startswith("["):
-                    sec = ln.lower()
-                elif sec == "[archives]" and "=" in ln and ln.lower().startswith("archive"):
-                    names.append(ln.split("=", 1)[1].strip())
-    except OSError:
-        pass
-    out = set()
-    try:
-        here = {n.lower(): n for n in os.listdir(data_dir)}
-    except OSError:
-        here = {}
-    import mwdialog_bsa as B
-    for nm in names:
-        real = here.get(nm.lower())
-        if not real:
-            continue
-        try:
-            out |= {x.replace("/", "\\") for x in B.bsa_file_names(os.path.join(data_dir, real))}
-        except Exception:                          # a damaged archive: its names are just not known
-            pass
-    _BSA_NAMES[key] = frozenset(out)
-    return _BSA_NAMES[key]
-
-
-def _image_there(root, rel, bsa, need_dds=False):
-    """Is rel (backslash path, with its extension) a file under root (loose) or in the BSAs, in any IMAGE_DIRS?"""
-    rel_os = rel.replace("\\", os.sep)
-    for d in IMAGE_DIRS:
-        p = os.path.join(root, d, rel_os) if d else os.path.join(root, rel_os)
-        if (_is_dds(p) if need_dds else os.path.isfile(p)):
-            return True
-        if (d + "\\" + rel if d else rel).lower() in bsa:
-            return True
-    return False
-
-
-_IMAGE_NAMES = {}
-
-
-def _image_names(root, bsa):
-    """{lowercase file name: {backslash path under root}} of every image under root's textures and icons, loose
-    and in the BSAs (for I1's unique-name match). Built once per root."""
-    key = (os.path.normcase(os.path.abspath(root)), id(bsa))
-    if key in _IMAGE_NAMES:
-        return _IMAGE_NAMES[key]
-    out = {}
-    for d in ("textures", "icons"):
-        top = os.path.join(root, d)
-        for dp, _dn, fns in os.walk(top):
-            for fn in fns:
-                if fn.lower().endswith((".dds", ".tga", ".bmp")):
-                    rel = os.path.relpath(os.path.join(dp, fn), root).replace("/", "\\")
-                    out.setdefault(fn.lower(), set()).add(rel)
-    for b in bsa:
-        if b.startswith(("textures\\", "icons\\")):
-            out.setdefault(b.rsplit("\\", 1)[-1], set()).add(b)
-    _IMAGE_NAMES[key] = out
-    return out
-
-
-def _one_folder_off(named, found):
-    """named (as written, with or without textures\\ or icons\\ first) and found (a path under Data Files) differ by
-    one folder, one too many or one too few: the same file in a neighbouring folder, not a file of the same name
-    elsewhere. Returns the corrected parts of named (its own spelling, found's for an added folder), else None."""
-    a = [x for x in named.split("\\") if x]
-    b = [x for x in found.split("\\") if x]
-    if a and a[0].lower() not in ("textures", "icons") and b and b[0].lower() in ("textures", "icons"):
-        b = b[1:]
-    if abs(len(a) - len(b)) != 1 or a[-1].lower() != b[-1].lower():
-        return None
-    al, bl = [x.lower() for x in a], [x.lower() for x in b]
-    if len(a) > len(b):
-        for i in range(len(a) - 1):
-            if al[:i] + al[i + 1:] == bl:
-                return a[:i] + a[i + 1:]
-    else:
-        for i in range(len(b) - 1):
-            if bl[:i] + bl[i + 1:] == al:
-                return a[:i] + [b[i]] + a[i:]
-    return None
-
-
-def _concat_next_to(src, mo):
-    """The literal is an operand of '..' (a piece of a path built at run time: not a whole path)."""
-    i, j = mo.start() - 1, mo.end()
-    while i >= 0 and src[i] in " \t":
-        i -= 1
-    while j < len(src) and src[j] in " \t":
-        j += 1
-    return i >= 0 and src[i] == "." or src.startswith("..", j)
-
-
-def image_findings(src, roots, bsa=frozenset()):
-    """I1: a string naming an image the game can't find while the right one is there (loose under `roots` - Data
-    Files, the mod's own package - in their textures\\ or icons\\, or in a loaded BSA). Lua loads images by exact
-    name, with no fallback. High: a .tga/.bmp whose .dds is there (with a real DDS header when loose); a doubled
-    extension (x.dds.dds) whose single one is there. Medium: a path whose file name exists in exactly one place
-    under textures\\ or icons\\ (the folder in the string is wrong)."""
-    out = []
-    for mo in IMAGE_LIT_RE.finditer(src):
-        raw = mo.group(2)
-        lead = len(raw) - len(raw.lstrip("\\/"))
-        name = raw.replace("/", "\\").replace("\\\\", "\\").lstrip("\\")
-        if name.lower().startswith("data files\\"):
-            name = name[len("data files\\"):]
-        ext = mo.group(3)
-        full = f"{name}.{ext}"
-        if any(_image_there(r, full, bsa) for r in roots):
-            continue
-        hit = None
-        if ext.lower() in ("tga", "bmp"):
-            for root in roots:
-                if _image_there(root, name + ".dds", bsa, need_dds=True):
-                    hit = Finding(rule="I1", line=src.count("\n", 0, mo.start()) + 1,
-                                  what=f"names '{raw}.{ext}', which is gone; a .dds of that name is there",
-                                  fix="names the .dds", conf="high", edits=[(mo.start(3), mo.end(3), "dds")],
-                                  needs=set())
-                    break
-        if hit is None and name.lower().endswith((".dds", ".tga")):
-            single = name
-            if any(_image_there(r, single, bsa) for r in roots):
-                hit = Finding(rule="I1", line=src.count("\n", 0, mo.start()) + 1,
-                              what=f"names '{raw}.{ext}' (the extension twice); '{single}' is there",
-                              fix="one extension", conf="high", edits=[(mo.end(2) - 4, mo.end(2), "")], needs=set())
-        if hit is None and ("\\" in name or "/" in name) and not _concat_next_to(src, mo):
-            fname = full.rsplit("\\", 1)[-1].lower()
-            places = set()
-            for root in roots:
-                places |= _image_names(root, bsa).get(fname, set())
-            low = {p.lower() for p in places}
-            parts = _one_folder_off(full, next(iter(low))) if len(low) == 1 else None
-            if parts:
-                found = sorted(places)[0]
-                sep = "\\\\" if "\\\\" in raw else ("/" if "/" in raw else "\\")
-                new = raw[:lead] + sep.join(parts)
-                new = new[:-(len(ext) + 1)] if new.lower().endswith("." + ext.lower()) else new
-                if new != raw:
-                    hit = Finding(rule="I1", line=src.count("\n", 0, mo.start()) + 1,
-                                  what=f"names '{raw}.{ext}', which is not there; the only file of that name is "
-                                       f"'{found}'", fix="names that file", conf="medium",
-                                  edits=[(mo.start(2), mo.end(2), new)], needs=set())
-        if hit:
-            out.append(hit)
-    return out
-
-
 # (rule, owner, path under MWSE\mods or MWSE, exact vulnerable text, replacement, bug description)
 KNOWN_BUGS = [
     ("KB1", "AttendMeMWSE", "attendmemwse/followers.lua",
@@ -3628,6 +3463,40 @@ KNOWN_BUGS += [
 ]
 
 
+KB52 = ("Tamriel Data's Detect Invisibility opacity pass (detectInvisibilityOpacity, every simulate) walks the "
+        "file-local tables invisibleReferences / invisibleOpacityModifiedReferences, which nothing empties on a "
+        "load. A reference the engine freed in the game being left stays in the table, `actor.mobile` on it raises "
+        "'sol: received nil for self argument', and the error ends the pass before the entry can go, so it repeats "
+        "every frame (MWSE.log 2026-11-26: 1,876 errors at magic.lua:2127, about 20 a second, from one second "
+        "after a load). The tables are emptied on load, and a reference whose mobile can't be read is dropped "
+        "(no rule can express this: both tables are local upvalues of magic.lua that only code inside the module can "
+        "empty or prune, and no general rule can know a local table keyed by references must be cleared on load; "
+        "mwpluginpatches intercepts act on events and engine calls and cannot reach them)")
+KNOWN_BUGS += [
+    ("KB52", "Tamriel Data", "tamrieldata/magic.lua",
+     "local invisibleReferences = {}\nlocal invisibleOpacityModifiedReferences = {}\n",
+     "local invisibleReferences, invisibleOpacityModifiedReferences = {}, {}\n"
+     "\n"
+     "-- local fix (KB52): both tables hold references of the game being left; a stale one makes the opacity pass fail every frame\n"
+     "local function readMobile(ref) return ref.mobile end\n"
+     "event.register(tes3.event.load, function()\n"
+     "\tfor ref in pairs(invisibleReferences) do invisibleReferences[ref] = nil end\n"
+     "\tfor ref in pairs(invisibleOpacityModifiedReferences) do invisibleOpacityModifiedReferences[ref] = nil end\n"
+     "end)\n", KB52),
+    ("KB52", "Tamriel Data", "tamrieldata/magic.lua",
+     "\t\tfor actor in pairs(invisibleReferences) do\n\t\t\t---@cast actor tes3reference\n",
+     "\t\tfor actor in pairs(invisibleReferences) do\t-- local fix (KB52): drop a reference whose mobile can't be read, or it errors every frame\n"
+     "\t\t\tif not pcall(readMobile, actor) then\n"
+     "\t\t\t\tinvisibleReferences[actor] = nil\n"
+     "\t\t\t\tinvisibleOpacityModifiedReferences[actor] = nil\n"
+     "\t\t\tend\n"
+     "\t\tend\n"
+     "\n"
+     "\t\tfor actor in pairs(invisibleReferences) do\t-- (KB52: the stale ones are gone)\n\t\t\t---@cast actor tes3reference\n", KB52),
+]
+KNOWN_BUGS_WHOLE |= {"KB52"}
+
+
 # ---- Timer safe handles (KR), asked for site by site (2026-11-25). skipKnown (mwguard.json "luafix") turns one off.
 # (KP1-KP4, the frame-drain patches, were removed on 2026-11-26: not bugs; mwpluginpatches has intercepts for KP1, KP2 and KP4.)
 KR1 = ("the fade timers keep the sound's reference and call tes3.getSoundPlaying / tes3.removeSound on it for the "
@@ -3703,7 +3572,7 @@ KNOWN_BUGS += [
 ]
 KNOWN_BUGS_WHOLE |= {"KR1", "KR2"}
 
-# KB20 and up: local hand repairs of third-party Lua (asset names, syntax, nil guards, handlers registered again on
+# KB23 and KB29 up: local hand repairs of third-party Lua (syntax, nil guards, handlers registered again on
 # every load), kept as exact text so the mod can go back to its released files and still get them.
 import mwdialog_luafix_kb as KBH                             # noqa: E402
 KNOWN_BUGS += KBH.RULES
@@ -4283,8 +4152,14 @@ def sha(b):
 
 
 def write_in_place(path, data):
-    """Rewrite the file through the same handle (r+b, then truncate): the file keeps its identity, so Vortex's
-    hard link between staging and Data Files keeps sharing it."""
+    """Rewrite the file through the same handle (r+b, then truncate): the file keeps its identity (deploy-time use,
+    --core-only). Before deploy (a staged run, mwdialog_staged) a staged file is replaced by a new one instead, so
+    a Vortex hard link into Data Files is broken, never written through, and a write into Data Files is refused."""
+    if MS.active():
+        MS.check_write(path)
+        if MS.must_replace(path):
+            MS.replace_bytes(path, data)               # writes, reads back, then replaces
+            return
     with open(path, "r+b") as f:
         f.seek(0)
         f.write(data)
@@ -4471,7 +4346,6 @@ def check_paths(paths, cfg, include_own=False, checker=None, level="high", data_
                                fixable=bool(f["edits"])) for f in ent["findings"]]})
     _mark_dead(rep, by_mod, paths, data_dir)
     for (mroot, key), files in sorted(by_mod.items()):
-        roots = [r for r in (data_dir, os.path.dirname(os.path.dirname(mroot)) if mroot else None) if r]
         if (mroot, key) in kb_only:
             for p, rel in files:
                 ent = rep.files[p]
@@ -4569,9 +4443,8 @@ def check_paths(paths, cfg, include_own=False, checker=None, level="high", data_
                 a.findings[:] = kept
                 ent["findings"] = _drop_load_like(a.findings, loadlike) + [
                     f for f in ent["findings"] if f["rule"] in ("H5", "H7", "T1")]
-            images = image_findings(a.src, roots, bsa_names(data_dir))
-            ent["findings"] = rules_before_kb([f for f in ent["findings"] if f["rule"] != "I1"] + images)
-            findings = rules_before_kb(a.findings + images)
+            ent["findings"] = rules_before_kb(ent["findings"])
+            findings = rules_before_kb(a.findings)
             if own_rules is not None:
                 findings = [f for f in findings if f["rule"] in own_rules]
             new, rules = build_patch(a.src, findings, key, cfg, level, want_shim)
@@ -4643,14 +4516,15 @@ _EXTERNAL_REFS = {}
 def _external_refs(data_dir):
     """Module names any Lua file under Data Files\\MWSE (mods and lib) quotes (cached per process): what other
     mods may load, when a check covers one staged mod at a time."""
-    root = os.path.join(data_dir, "MWSE") if data_dir else None
-    if not root or not os.path.isdir(root):
+    tops = [os.path.join(r, "MWSE") for r in MS.roots_of(data_dir)]      # staged: every staged mod and lua tools
+    tops = [t for t in tops if os.path.isdir(t)]
+    if not tops:
         return None
-    stamp = tuple(os.stat(d).st_mtime_ns for d in (root, os.path.join(root, "mods")) if os.path.isdir(d))
-    key = (os.path.normcase(os.path.abspath(root)), stamp)    # a mod folder added or removed: read again
+    stamp = tuple(os.stat(d).st_mtime_ns for t in tops for d in (t, os.path.join(t, "mods")) if os.path.isdir(d))
+    key = (tuple(os.path.normcase(os.path.abspath(t)) for t in tops), stamp)   # a mod folder added or removed: read again
     if key not in _EXTERNAL_REFS:
         got = set()
-        for base, dirs, files in os.walk(root):
+        for base, dirs, files in (w for t in tops for w in os.walk(t)):
             dirs[:] = [d for d in dirs if not skipped_dir(base, d)]
             for fn in files:
                 if fn.lower().endswith(".lua"):
@@ -5355,7 +5229,9 @@ def _core_only_main(args, ap):
 def main(argv=None):
     MT.install()
     ap = MT.parser(description="Check MWSE Lua mods for bad habits and patch the safe ones.")
-    ap.add_argument("paths", nargs="*", help="folders or files (default: Data Files\\MWSE\\mods of the Morrowind folder)")
+    ap.add_argument("paths", nargs="*", help="staged mod folders or files (default: every staged mod with an MWSE "
+                                             "folder; Data Files is never checked or patched before deploy)")
+    ap.add_argument("--staging", help="the staging folder (Vortex's or MWManager's; default: from Vortex's settings)")
     ap.add_argument("--apply", action="store_true", help="patch (without it, only the plan is shown)")
     ap.add_argument("--yes", action="store_true", help="with --apply: don't ask first")
     ap.add_argument("--undo", action="store_true", help="put back the files the last --apply patched")
@@ -5385,18 +5261,56 @@ def main(argv=None):
     if args.dry_run and not args.core_only:
         ap.error("--dry-run goes with --core-only (plan mode is already a dry run)")
     if args.core_only:
-        return _core_only_main(args, ap)
+        return _core_only_main(args, ap)            # the deploy step's MWSE core repair (writes Data Files)
+    staged = staged_targets(args, ap)
+    if staged is None:
+        return 2
     if not MP.acquire_run_lock() or not MP.acquire_game_lock(HERE):
         print(MP.RUN_LOCKED_MESSAGE, file=sys.stderr)
         return 1
+    with MS.staged_run(staged[1] or staged[0], HERE):
+        return _main_staged(args, staged)
+
+
+def staged_targets(args, ap=None):
+    """(paths to check, staging folder or None, StagedData) for a plan or --apply before deploy: the given
+    folders/files, else every staged mod with an MWSE folder. A path inside Data Files is refused (the pre-deploy
+    rule: mwdialog_staged; --core-only is the deploy step's way to patch MWSE core there). None when refused."""
+    data_files = os.path.join(HERE, "Data Files")
+    bad = [(p, MS.write_root_problem(p, HERE, data_files, mode="luafix")) for p in args.paths]
+    bad = [(p, why) for p, why in bad if why]
+    if getattr(args, "staging", None):
+        why = MS.write_root_problem(args.staging, HERE, data_files, mode="luafix")
+        if why:
+            bad.insert(0, (args.staging, why))
+    if bad:
+        print(f"Not checking {bad[0][0]}: it is in Data Files ({bad[0][1]}). mwdialog_luafix works on staged mod "
+              f"folders before deploy (pass a staged mod folder, or --core-only for MWSE core at deploy).",
+              file=sys.stderr)
+        return None
+    staging = getattr(args, "staging", None)
+    try:
+        staging = MP.resolve_staging(staging, required=not args.paths and not args.undo)
+    except MP.VortexPathError as e:
+        print(f"{e}\n(mwdialog_luafix checks staged mods before deploy; pass --staging or folders.)", file=sys.stderr)
+        return None
+    if args.paths:
+        roots = [os.path.abspath(p) if os.path.isdir(p) else os.path.dirname(os.path.abspath(p)) for p in args.paths]
+        data = MS.StagedData(staging, HERE, extra=(MP.LUA_TOOLS_DIR,), mods=None if staging else roots)
+        return list(args.paths), staging, data
+    mods = MS.StagedData(staging, HERE).roots if staging else []
+    paths = [r for r in mods if any(e.lower() == "mwse" for e in os.listdir(r))]
+    return paths, staging, MS.StagedData(staging, HERE, extra=(MP.LUA_TOOLS_DIR,))
+
+
+def _main_staged(args, staged):
+    paths, _staging, data_dir = staged
     if args.undo:
         return undo(force=args.force)             # works from the journal; the plan file plays no part
     reviewed = PF.read(PLAN_FILE) if args.apply else None
     if args.apply and (PF.state(PLAN_FILE) != "pending" or not PF.has_any_actions(reviewed)):
         print(PF.no_plan_message(PLAN_FILE, "mwdialog_luafix.py"))
         return 2
-    data_dir = os.path.join(HERE, "Data Files")
-    paths = args.paths or [os.path.join(data_dir, "MWSE", "mods")] + known_core_files(os.path.join(data_dir, "MWSE"))
     cfg = load_config(HERE, data_dir)
     checker = None if args.no_syntax_check else find_checker(args.luajit, HERE)
     print(f"mwdialog_luafix {VERSION}: syntax check {checker.name if checker else 'NONE'}; priority limit "

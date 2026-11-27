@@ -26,9 +26,9 @@
     {
       "Path": "metadata/mwpluginpatches-metadata.toml",
       "Source": "<Steam Morrowind>\\Data Files\\mwpluginpatches-metadata.toml",
-      "SHA256": "c56dbc96bf1ea6409455e9719c6ae07217f9859472be96d104e77c1ba41cccc9",
-      "Length": 1699,
-      "SourceModified": "2026-11-26T14:10:20"
+      "SHA256": "47db94cbd49ec2d973f11deb771ae505fd7d23eb65a77c165d3b95c730cfa1a4",
+      "Length": 1805,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "metadata/mwsaveguard-metadata.toml",
@@ -75,23 +75,23 @@
     {
       "Path": "mods/mwexitguard/config.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwexitguard\\config.lua",
-      "SHA256": "eecca0a45d26c4af92e14f732dbe7306bf8e1ae99b7d44c60f9b4fe67a7f4a7f",
-      "Length": 438,
-      "SourceModified": "2026-11-21T13:37:25"
+      "SHA256": "517c6e018149d8fbba3ff84446c9da2bae710453e1e569efd9ee3c05d56e7476",
+      "Length": 550,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwexitguard/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwexitguard\\main.lua",
-      "SHA256": "0c1c67aa9b948c1030922786c0891d4f9f34566f4b573ea2265ce4d6a61dcaaf",
-      "Length": 3412,
-      "SourceModified": "2026-11-25T00:53:02"
+      "SHA256": "a0cd874661c8a235537f1a94e2f768d640446f24f302584afcfcb6d7dde6bdf8",
+      "Length": 3698,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwexitguard/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwexitguard\\mcm.lua",
-      "SHA256": "be1f97a3f4c02a9805cbb61c93174820f1580ac4254ce8cabef589ca6a0f8f8e",
-      "Length": 1931,
-      "SourceModified": "2026-11-25T16:12:42"
+      "SHA256": "b8278586710093f693662e9a14b725a52a278f5d67817c3bfca18ae2fbfd0117",
+      "Length": 3206,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwfloatfix/main.lua",
@@ -159,23 +159,23 @@
     {
       "Path": "mods/mwpluginpatches/config.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpluginpatches\\config.lua",
-      "SHA256": "123be0bebd010890b4d015bc465d89db4e4f938fba516db0c7527b356764e278",
-      "Length": 13630,
-      "SourceModified": "2026-11-26T14:10:20"
+      "SHA256": "b511a3f292ea1b637e10fb46ad1350b03fc08a18a750015993672aa8d590016a",
+      "Length": 14100,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwpluginpatches/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpluginpatches\\main.lua",
-      "SHA256": "9233661fc4cc788fb71bdacf7002697ebf934bc75e59300f831749929b2cb5de",
-      "Length": 6454,
-      "SourceModified": "2026-11-26T14:10:20"
+      "SHA256": "bd86288b84a94ae8103af98745fcdef92c121a59f373b3f7f658815f47c357a6",
+      "Length": 6648,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwpluginpatches/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpluginpatches\\mcm.lua",
-      "SHA256": "8497aed607749786a5177d090c8ca4e445f989f29a1943ccffbcdd10357fb63b",
-      "Length": 27806,
-      "SourceModified": "2026-11-26T14:10:20"
+      "SHA256": "6644a30d9093988f277373e870af7f2edfdb28afae398d8de6f0c601fbdffee9",
+      "Length": 28880,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwpluginpatches/patches/autoStartup.lua",
@@ -369,30 +369,30 @@
     {
       "Path": "mods/mwcriminal/config.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcriminal\\config.lua",
-      "SHA256": "6d3069d2131053c35d2e46028ebe6d63b127f1da0777ed5d7a8b0aeb8d4311fd",
-      "Length": 5342,
-      "SourceModified": "2026-11-24T03:49:31"
+      "SHA256": "926ddc5205729a96a871c12af82f23a430cdd58a6718a32b55c89a6c5dff6e6d",
+      "Length": 5664,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwcriminal/core.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcriminal\\core.lua",
-      "SHA256": "ac6450c73cd06011210a0a2e4925c0d9d1ddf191577d53ce49ddbc742faa543f",
-      "Length": 14024,
-      "SourceModified": "2026-11-25T16:40:06"
+      "SHA256": "993128d3dff70fd4d0dbddc58e45eb06998fba0327377e7ba28b5e55f8621eed",
+      "Length": 15268,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwcriminal/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcriminal\\main.lua",
-      "SHA256": "841b120fae381d350bcdcd206944d53c28bb6e6fb692807be82be87567a8d8de",
-      "Length": 12729,
-      "SourceModified": "2026-11-25T16:40:06"
+      "SHA256": "d465f7b019473f5689eea2319665123cf6a28583bde550a1741c427d84081abd",
+      "Length": 13133,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwcriminal/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcriminal\\mcm.lua",
-      "SHA256": "602840188b0033fe046f5cd1071e97b9bd5718ad0178beeefeabe7523ee4e15b",
-      "Length": 9419,
-      "SourceModified": "2026-11-26T13:46:51"
+      "SHA256": "74c73374df5dcede334b5fb95b769540909fd383dee2f217231a4570c138fe7c",
+      "Length": 9778,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwcriminal/interop.lua",
@@ -425,16 +425,16 @@
     {
       "Path": "mods/mwcompanions/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcompanions\\main.lua",
-      "SHA256": "ee70fdbb39afca1edcab249581a9c3779a78c4de94ba3d8c23525632d47d9852",
-      "Length": 13478,
-      "SourceModified": "2026-11-25T16:40:06"
+      "SHA256": "64a27e8e5b5f442b43b025f23e634b02c1aa869dbcce94f5ab0a0fa42a8be086",
+      "Length": 15099,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwcompanions/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwcompanions\\mcm.lua",
-      "SHA256": "00c7e47ac32d16b02a57208950dd26ec7b48859b63c033fadde1a077b155ae85",
-      "Length": 7357,
-      "SourceModified": "2026-11-26T13:46:51"
+      "SHA256": "0ab57b363f6408a453acaf18070b54bba68fd4c1af65d0a185cca8aa0c33e471",
+      "Length": 7303,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwsoundfix/main.lua",
@@ -579,9 +579,9 @@
     {
       "Path": "mods/mwconsole/guard.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwconsole\\guard.lua",
-      "SHA256": "7ca64239029267786fca48097559c860d6a271742aded63f0988d6a92c78060a",
-      "Length": 8560,
-      "SourceModified": "2026-11-25T19:03:23"
+      "SHA256": "86e316e9250be8f81ab26a1270d1246e79b778f63861b068bc3d7943be529d03",
+      "Length": 9966,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwconsole/log.lua",
@@ -593,16 +593,16 @@
     {
       "Path": "mods/mwconsole/main.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwconsole\\main.lua",
-      "SHA256": "cd802802240fa1c6a28a488f29ca74a777bc6547ce7220354c07a605f761addb",
-      "Length": 8728,
-      "SourceModified": "2026-11-25T19:03:23"
+      "SHA256": "abc56727de744f424d2fdc13fddac82fa2461a3519fea8b2571093233f963820",
+      "Length": 10093,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwconsole/mcm.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwconsole\\mcm.lua",
-      "SHA256": "1d40dbac9fb965a2d55593b58399472cf686466494b76bc9e3c3de9192a9f354",
-      "Length": 17285,
-      "SourceModified": "2026-11-26T13:46:51"
+      "SHA256": "c20e1f223f781bf8542cd6ed7c5c96f74421e4560c479308ac83030394497e6d",
+      "Length": 17131,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwconsole/parser.lua",
@@ -628,9 +628,9 @@
     {
       "Path": "mods/mwconsole/selection/panel.lua",
       "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwconsole\\selection\\panel.lua",
-      "SHA256": "886c1440ee5c166d158548eb161143d5cefcdce0cb334a1db2584f4ad1597b85",
-      "Length": 8804,
-      "SourceModified": "2026-11-25T19:03:23"
+      "SHA256": "40a11199ab4881a09783ae7af8f4db8c22ae4d0ef3076aa34865be54a5d5a686",
+      "Length": 8992,
+      "SourceModified": "2026-11-26T20:53:23"
     },
     {
       "Path": "mods/mwconsole/toggles.lua",
@@ -750,6 +750,20 @@
       "SHA256": "4e7071b785a102043015fd17b1f8d98b8a64d095159849560a8b78c4462cf9a4",
       "Length": 3731,
       "SourceModified": "2026-11-26T14:10:20"
+    },
+    {
+      "Path": "mods/mwexitguard/newgame.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwexitguard\\newgame.lua",
+      "SHA256": "7fd858ec1e14692b1a62ea8e8d1f35d1eef1b0de6a86a958fa4822e8edb07765",
+      "Length": 4976,
+      "SourceModified": "2026-11-26T20:53:23"
+    },
+    {
+      "Path": "mods/mwpluginpatches/patches/ruinesRelicsJournal.lua",
+      "Source": "<Steam Morrowind>\\Data Files\\MWSE\\mods\\mwsuite\\mwpluginpatches\\patches\\ruinesRelicsJournal.lua",
+      "SHA256": "487e9e64a175bad8d721c3f5d849e840d53a9445cc127d2899cff36e170e383a",
+      "Length": 12297,
+      "SourceModified": "2026-11-26T20:53:23"
     }
   ]
 }

@@ -2432,9 +2432,32 @@ def mwmanager_data_files(default):
     return GAME_DATA_FILES or os.environ.get("MWMANAGER_DATA_FILES") or default
 
 
+def mwmanager_game_dir(default):
+    """Morrowind folder implied by --game-data-files, else upstream's default (usually HERE)."""
+    data = mwmanager_data_files(None)
+    if data:
+        return os.path.dirname(os.path.abspath(data))
+    return default
+
+
+def mwmanager_staged_data(staging, game_dir=None, *args, **kwargs):
+    """mwdialog_staged.StagedData pointed at --game-data-files when that is set.
+
+    StagedData takes the Morrowind folder and joins "Data Files" itself; --game-data-files
+    is the Data Files path, so the game folder is its parent. Lookups stay in the staged
+    mods; the remapped Data Files path is only for the documented read-only exceptions
+    (core BSAs, path length).
+    """
+    return MS.StagedData(staging, mwmanager_game_dir(game_dir), *args, **kwargs)
+
+
 def _rebase_data_dir(name):
-    """Recompile upstream's `name` with its Data Files folder taken from mwmanager_data_files(); unchanged (with a
-    note) if its source no longer has the expected line."""
+    """Recompile upstream's `name` so its Data Files root follows --game-data-files.
+
+    Since bed3bbd those functions resolve the root through MS.StagedData(...); older
+    builds assigned data_dir = os.path.join(..., "Data Files"). Unchanged (with a
+    note) if the source has neither entry point.
+    """
     import inspect
     import textwrap
     func = globals()[name]
@@ -2445,6 +2468,8 @@ def _rebase_data_dir(name):
     except (OSError, TypeError):
         return False
     new = code
+    for expr in ("MS.StagedData(", "mwdialog_staged.StagedData("):
+        new = new.replace(expr, "mwmanager_staged_data(")
     for expr in ('os.path.join(game_dir, "Data Files")', 'os.path.join(HERE, "Data Files")'):
         new = new.replace(f"data_dir = {expr}", f"data_dir = mwmanager_data_files({expr})")
     if new == code:
