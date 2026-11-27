@@ -106,7 +106,32 @@ class PluginPathSafetyTests(unittest.TestCase):
             self.assertEqual(operations[0]["source_relative"], "Test.esp")
             self.assertEqual(operations[0]["target_relative"], "Test.esp")
             self.assertIsNone(operations[0]["backup_relative"])
+    def test_deploy_backs_up_an_existing_file_across_drives(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package, data = root / "package", root / "Data Files"
+            (package / "meshes").mkdir(parents=True)
+            (data / "meshes").mkdir(parents=True)
+            source = package / "meshes" / "flora.nif"
+            target = data / "meshes" / "flora.nif"
+            source.write_bytes(b"new-mesh")
+            target.write_bytes(b"old-mesh")
+
+            def refuse_replace(src, dst, *args, **kwargs):
+                exc = OSError(17, "The system cannot move the file to a different disk drive")
+                exc.winerror = 17
+                raise exc
+
+            with mock.patch("os.replace", side_effect=refuse_replace):
+                linked, skipped, operations = plugin_install.deploy_package(package, data, "GH.esp")
+            self.assertEqual(linked, 1)
+            self.assertEqual(target.read_bytes(), b"new-mesh")
+            backup = Path(operations[0]["backup"])
+            self.assertTrue(backup.is_file())
+            self.assertEqual(backup.read_bytes(), b"old-mesh")
+
     def test_archive_analysis_reports_zip_risks_without_extracting(self):
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             archive = root / "risky.zip"

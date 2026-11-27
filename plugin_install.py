@@ -24,6 +24,19 @@ from core_addons import (ARCHIVE_EXTENSIONS, _members, _member_preflight,
                          _quiet_subprocess_options, _seven_zip, stamped_backup_path)
 
 SKIP_DIRS = {"off", "bugreports", "fomod", "extras", "docs", "screenshots"}
+
+
+def _move_file(source: Path, destination: Path) -> None:
+    """Place source at destination, including when the two paths are on different drives."""
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.replace(source, destination)
+    except OSError as exc:
+        if getattr(exc, "winerror", None) != 17 and exc.errno != 18:
+            raise
+        shutil.copy2(source, destination)
+        source.unlink()
+
 from major_master_deploy import BSA_EXTENSIONS, BSA_FOLDERS
 WINDOWS_MAX_PATH = 260  # MAX_PATH includes the terminating NUL; paths must stay below this length.
 PLUGIN_RENAMES = {"anthologysolstheim.esp": "AnthologySolstheimPatched.esp"}
@@ -1024,8 +1037,7 @@ def deploy_package(package: Path, data_dir: Path, plugin_label: str,
                     raise IsADirectoryError(f"A directory blocks deployment of {target}")
                 backup = stamped_backup_path(off_root / rel)
                 if not transaction:
-                    backup.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(target, backup)
+                    _move_file(target, backup)
             elif transaction:
                 backup = stamped_backup_path(off_root / rel)
             copied = os.path.splitdrive(str(source.resolve()))[0].casefold() != \
