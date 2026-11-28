@@ -157,5 +157,41 @@ class FolderWordingTests(unittest.TestCase):
         self.assertIn("designed for Nvidia", out)
 
 
+# Modelled on Watch the Skies (48636): numbered definition lines under "Installation:".
+WTS_PAGE = (
+    "randomised cloud textures - no more exactly same clouds each time\n"
+    "includes a texture pack (6.0.0 now includes a supported and recommended skies.iv pack)\n"
+    "alternative clouds shader\n"
+    "Also note that you can turn that off if you want your sky colour closer to your Weather Adjuster preset.\n"
+    "Installation:\n"
+    "01 Clouds textures - 1k texture pack for all weathers. Incompatible with skies.iv meshes.\n"
+    "02 Weather Adjuster preset - Weather Adjuster presets covering all regions.\n"
+    "04 Clouds shader - A new shader for the clouds, with crisp looking halo. Huge thanks to Dexter and Hrnchamd.\n"
+)
+WTS_LABELS = ["Clouds textures (vanilla)", "Clouds textures - (skies.iv)", "Weather Adjuster preset", "Clouds shader"]
+
+
+class NumberedDefinitionTests(unittest.TestCase):
+    def pick(self, label):
+        return "\n".join(P.best_option_sentences(WTS_PAGE, label, sibling_labels=WTS_LABELS))
+
+    def test_a_numbered_definition_line_wins_and_loses_its_number(self):
+        self.assertEqual(self.pick("Weather Adjuster preset"),
+                         "Weather Adjuster preset - Weather Adjuster presets covering all regions.")
+
+    def test_a_trailing_thanks_sentence_is_dropped(self):
+        text = self.pick("Clouds shader")
+        self.assertTrue(text.startswith("Clouds shader - A new shader"), text)
+        self.assertNotIn("thanks", text.casefold())
+        self.assertNotIn("alternative clouds shader", text)
+
+    def test_variant_qualifiers_pick_the_matching_line(self):
+        vanilla = self.pick("Clouds textures (vanilla)")
+        self.assertTrue(vanilla.startswith("Clouds textures - 1k texture pack"), vanilla)
+        skies = self.pick("Clouds textures - (skies.iv)")
+        self.assertIn("skies.iv pack", skies)
+        self.assertNotIn("Incompatible with skies.iv", skies)
+
+
 if __name__ == "__main__":
     unittest.main()

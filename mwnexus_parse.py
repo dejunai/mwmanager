@@ -222,6 +222,29 @@ _GENERIC_STEMS = frozenset({
 })
 _FOLDER_NUM_PREFIX = re.compile(r"\b\d{1,3}\s+(?=[A-Za-z])")
 _DROP_AND_REPLACE = re.compile(r"\bdrop files(?:\s+and\s+replace)?\s+from\s+", re.I)
+_QUALIFIER = re.compile(r"\s*-?\s*\(([^()]*)\)\s*$")
+_THANKS_SENTENCE = re.compile(r"(?:^|(?<=[.!?])\s+)(?:(?:huge|many|special|big)\s+)?thanks\s+(?:to\s+)?[A-Z][^.!?]{0,70}[.!]", re.I)
+
+
+def base_label(label: str) -> str:
+    """'Clouds textures - (skies.iv)' -> 'Clouds textures': the name without a trailing variant qualifier."""
+    name = clean_label(label)
+    return _QUALIFIER.sub("", name).strip(" -") or name
+
+
+def _lead_pattern(name: str):
+    words = _words(name)
+    if not words:
+        return None
+    # an optional folder number ("04 Clouds shader - ...") may precede the name
+    return re.compile(r"^\W*(?:\d{1,3}\s*[-.:)]?\s+)?" + r"\W+".join(re.escape(w) for w in words)
+                      + r"\s*(?:[-\u2013\u2014:]|\(|is\b|are\b|adds?\b|replaces?\b)", re.I)
+
+
+def strip_thanks_sentences(text: str) -> str:
+    """Drop a short trailing 'Huge thanks to X.' / 'Thanks X!' sentence from a description line."""
+    out = _THANKS_SENTENCE.sub("", text or "").strip()
+    return out or text
 
 
 def _stems_of(label: str) -> list[str]:
@@ -304,8 +327,8 @@ def clean_option_folder_wording(text: str, label: str) -> str:
     name = clean_label(label)
     if not text:
         return text
-    if name:
-        numbered = re.compile(r"\b\d{1,3}\s+(?=" + re.escape(name) + r"\b)", re.I)
+    for candidate in dict.fromkeys(n for n in (name, base_label(label)) if n):
+        numbered = re.compile(r"\b\d{1,3}\s+(?=" + re.escape(candidate) + r"\b)", re.I)
         text = numbered.sub("", text)
     text = _DROP_AND_REPLACE.sub("use ", text)
     text = re.sub(r"\s{2,}", " ", text).strip()
@@ -327,6 +350,13 @@ def best_option_sentences(page_text: str, label: str, extra_terms=(), limit: int
     """
     name = clean_label(label)
     label_stems = _stems_of(label)
+    lead_patterns = [pat for pat in dict.fromkeys(
+        filter(None, (_lead_pattern(name), _lead_pattern(base_label(label))))) if pat]
+    qualifier = _QUALIFIER.search(name)
+    qualifier_words = [w for w in _words(qualifier.group(1))] if qualifier else []
+    qualifier_stems = {stem(w) for w in qualifier_words if len(w) >= 3}
+    qualifier_re = (re.compile(r"\b" + r"\W*".join(map(re.escape, qualifier_words)) + r"\b", re.I)
+                    if qualifier_words else None)
     extra_stems = [stem(w) for t in extra_terms for w in _words(str(t)) if w.casefold() not in _STOP and len(w) >= 3]
     self_key = name.casefold()
     sibling_labels = tuple(
@@ -373,8 +403,14 @@ def best_option_sentences(page_text: str, label: str, extra_terms=(), limit: int
         score = 10.0 * len(set(hits)) / max(1, len(set(label_stems))) + 2.0 * len(set(extra))
         if label_stems and len(set(hits)) == len(set(label_stems)):
             score += 4
-        lead = re.match(r"^\W*" + r"\W+".join(re.escape(w) for w in _words(name)) + r"\s*(?:[-–—:]|\(|is\b|are\b|adds?\b|replaces?\b)",
-                        unit, re.I) if _words(name) else None
+        lead = any(pat.match(unit) for pat in lead_patterns)
+        if lead and qualifier_stems and re.search(
+                r"\b(?:incompatible|not\s+compatible)\s+with\b[^.]*\b(?:" + "|".join(map(re.escape, qualifier_words)) + r")",
+                unit, re.I):
+            lead = False  # "Clouds textures - ... Incompatible with skies.iv" does not describe the skies.iv variant
+            score -= 12
+        if qualifier_re and qualifier_re.search(unit) and not lead and score > 0:
+            score += 6  # names this variant ('skies.iv pack')
         if lead:
             score += 12  # "Replacer - a replacer for ..." definition line
         if re.match(r"^version\s+\d", folded) or in_changelog:
@@ -384,13 +420,14 @@ def best_option_sentences(page_text: str, label: str, extra_terms=(), limit: int
         distinctive = set(label_stems) - sibling_stems
         strong = distinctive - _GENERIC_STEMS
         sib_penalty = 0
-        if sibling_stems and (sibling_stems & unit_stems) and (set(label_stems) & unit_stems):
+        if sibling_stems and (sibling_stems & unit_stems) and (set(label_stems) & unit_stems) and not lead:
             sib_penalty += 3  # a unique sentence beats one that names several options
             if distinctive and not (set(hits) & distinctive):
                 sib_penalty += 10  # names a sibling, not this option's own words
         for sib in sibling_labels:
             sib_name = clean_label(sib)
-            if sib_name and re.match(r"^\W*" + re.escape(sib_name) + r"\s*(?:[-–—:]|\(|is\b|are\b)", unit, re.I):
+            if sib_name and base_label(sib).casefold() != base_label(label).casefold() and re.match(
+                    r"^\W*(?:\d{1,3}\s*[-.:)]?\s+)?" + re.escape(sib_name) + r"\s*(?:[-\u2013\u2014:]|\(|is\b|are\b)", unit, re.I):
                 sib_penalty += 12  # this is the sibling's own definition line
         unique_flag = bool(lead) or bool(set(hits) & strong)
         score -= sib_penalty
@@ -420,7 +457,7 @@ def best_option_sentences(page_text: str, label: str, extra_terms=(), limit: int
     descriptive = [unit for unit in chosen if not is_installer_meta(unit)]
     if descriptive:
         chosen = descriptive
-    cleaned = [clean_option_folder_wording(trim_shared_option_clause(unit, label, sibling_labels), label)
+    cleaned = [strip_thanks_sentences(clean_option_folder_wording(trim_shared_option_clause(unit, label, sibling_labels), label))
                for unit in chosen]
     unique = []
     for unit in cleaned:
