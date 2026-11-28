@@ -492,7 +492,7 @@ class MwseCoreOriginalsStayInTheInstall(unittest.TestCase):
         names = sorted(p.name for p in (suite / "mods").iterdir())
         self.assertEqual(live, sorted(["mwsuite", "mouseBleedFix", "somemod"]))
         self.assertEqual(sorted(p.name for p in (self.mwse / "mods" / "mwsuite").iterdir()),
-                         sorted(names + ["mwmanagermenu", "main.lua", "personalmod"]))
+                         sorted(names + ["mwmanagermenu", "main.lua", "ownmods.json", "personalmod"]))
         menu = ROOT / "reference" / "mwmanager-menu"
         self.assertEqual((menu / "mods" / "mwmanagermenu" / "main.lua").read_bytes(),
                          (self.mwse / "mods" / "mwsuite" / "mwmanagermenu" / "main.lua").read_bytes())
