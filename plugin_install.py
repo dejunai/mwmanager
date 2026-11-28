@@ -29,13 +29,8 @@ SKIP_DIRS = {"off", "bugreports", "fomod", "extras", "docs", "screenshots"}
 def _move_file(source: Path, destination: Path) -> None:
     """Place source at destination, including when the two paths are on different drives."""
     destination.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        os.replace(source, destination)
-    except OSError as exc:
-        if getattr(exc, "winerror", None) != 17 and exc.errno != 18:
-            raise
-        shutil.copy2(source, destination)
-        source.unlink()
+    from workflow_safety import move_file
+    move_file(source, destination)
 
 from major_master_deploy import BSA_EXTENSIONS, BSA_FOLDERS
 WINDOWS_MAX_PATH = 260  # MAX_PATH includes the terminating NUL; paths must stay below this length.
@@ -1477,8 +1472,7 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
                     removed += 1
                     journal_records.append((deployment.get("mod"), deployment.get("label"), target, "remove"))
                 if backup and backup.is_file() and not target.exists():
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(backup, target)
+                    _move_file(backup, target)          # the backup is in staging Off: maybe another drive
                     restored += 1
                     journal_records.append((deployment.get("mod"), deployment.get("label"), target, "replace"))
                     if recovery is None:
@@ -1531,8 +1525,7 @@ def remove_deployments(manager: Path, data_dir: Path, deployment_ids: set[str]) 
         for recovery, target, backup in reversed(recoveries):
             try:
                 if target.exists() and backup and not backup.exists():
-                    backup.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(target, backup)
+                    _move_file(target, backup)
                 if recovery and recovery.exists():
                     os.replace(recovery, target)
             except OSError as exc:

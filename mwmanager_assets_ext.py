@@ -224,7 +224,8 @@ def restore_unused(game_dir, data_dir):
                 if os.path.exists(target):
                     raise FileExistsError("a newer file is there")
                 os.makedirs(os.path.dirname(target), exist_ok=True)
-                os.replace(dest, target)
+                from workflow_safety import move_file
+                move_file(dest, target)       # dest may be in a staged package's Off on another drive
             back += 1
         except OSError as exc:
             failed.append(line)

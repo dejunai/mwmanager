@@ -4095,7 +4095,8 @@ class ManagerGUI(tk.Tk):
                 if run:
                     journal.move_original(data_dir.parent, source, target, run["run"], tag="disabled-plugin")
                 else:
-                    os.replace(source, target)
+                    from workflow_safety import move_file
+                    move_file(source, target)     # disabled_plugins is in MWManager's folder, maybe another drive
                 moved.append((source, target))
         except OSError as exc:
             if run:
@@ -4104,7 +4105,8 @@ class ManagerGUI(tk.Tk):
             for source, target in reversed(moved):
                 try:
                     if target.is_file() and not source.exists():
-                        os.replace(target, source)
+                        from workflow_safety import move_file
+                        move_file(target, source)
                 except OSError as rollback_error:
                     rollback_errors.append(f"{target} -> {source}: {rollback_error}")
             message = str(exc)
@@ -4126,7 +4128,8 @@ class ManagerGUI(tk.Tk):
             for source, target in reversed(moved):
                 try:
                     if target.is_file() and not source.exists():
-                        os.replace(target, source)
+                        from workflow_safety import move_file
+                        move_file(target, source)
                 except OSError as rollback_error:
                     rollback_errors.append(f"{target} -> {source}: {rollback_error}")
             for path, content in previous_state.items():

@@ -18,6 +18,41 @@ import uuid
 from contextlib import closing
 
 
+def is_cross_device(exc: OSError) -> bool:
+    """WinError 17 / EXDEV: a rename cannot move a file to another drive."""
+    import errno
+    return getattr(exc, "winerror", None) == 17 or exc.errno == errno.EXDEV
+
+
+def move_file(source, destination) -> None:
+    """os.replace(source, destination) for a single file, also when the two paths are on different drives
+    (staging on C:, Data Files on G:). Across drives the file is copied and then the source removed; an
+    existing destination is only replaced once the full copy is on its drive."""
+    source, destination = Path(source), Path(destination)
+    try:
+        os.replace(source, destination)
+        return
+    except OSError as exc:
+        if not is_cross_device(exc):
+            raise
+    if destination.exists():
+        temporary = destination.with_name(f".{destination.name}.{uuid.uuid4().hex}.mwmanager-move")
+        try:
+            shutil.copy2(source, temporary)
+            os.replace(temporary, destination)
+        finally:
+            if temporary.exists():
+                temporary.unlink()
+    else:
+        try:
+            shutil.copy2(source, destination)
+        except BaseException:
+            if destination.exists():
+                destination.unlink()
+            raise
+    source.unlink()
+
+
 def digest(path):
     h = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -289,7 +324,7 @@ class DurableTransaction:
                 made.add(target.parent)
             if backup:
                 backup.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(target, backup)
+                move_file(target, backup)     # backups live in staging Off, often another drive
             os.link(source, target)
         return operations
 
@@ -308,7 +343,7 @@ class DurableTransaction:
         target.parent.mkdir(parents=True, exist_ok=True)
         if operation["backup"]:
             backup.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(target, backup)
+            move_file(target, backup)
         shutil.copy2(source, target)
         return operation
 
@@ -328,7 +363,7 @@ class DurableTransaction:
         for operation in operations:
             target = Path(operation["target"])
             target.parent.mkdir(parents=True, exist_ok=True)
-            os.replace(operation["source"], target)
+            move_file(operation["source"], target)
         return operations
 
     def commit(self):
@@ -344,7 +379,7 @@ class DurableTransaction:
                     if source.exists() or not target.is_file() or digest(target) != op["sha256"]:
                         raise RuntimeError(f"Recovery needs review; moved file changed: {target}")
                     source.parent.mkdir(parents=True, exist_ok=True)
-                    os.replace(target, source)
+                    move_file(target, source)
                 elif not source.is_file() or digest(source) != op["sha256"]:
                     raise RuntimeError(f"Recovery needs review; moved file is missing: {source}")
                 continue
@@ -372,7 +407,7 @@ class DurableTransaction:
                 target.unlink()
             if backup and backup.exists():
                 target.parent.mkdir(parents=True, exist_ok=True)
-                os.replace(backup, target)
+                move_file(backup, target)
             elif op.get("original_sha256") and not target.exists():
                 raise RuntimeError(f"Recovery original is missing: {target}")
         for snapshot in reversed(self.state["snapshots"]):

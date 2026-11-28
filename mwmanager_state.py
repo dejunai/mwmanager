@@ -667,7 +667,8 @@ def write_generated(data_dir, game_dir, items, log):
             if hit and hit[0] == 0:                          # an original the unused-asset purge moved aside
                 full = os.path.join(data_dir, rel)
                 os.makedirs(os.path.dirname(full), exist_ok=True)
-                os.replace(hit[1], full)                     # undoes a journaled move; rollback sees it in place
+                from workflow_safety import move_file
+                move_file(hit[1], full)                      # undoes a journaled move (kept copy may be in staging)
                 moved_back.append((hit[1], full))
                 log.append(("Data Files", f"'{rel}' is needed again", f"moved the original back from {hit[1]}"))
                 continue
