@@ -1,6 +1,8 @@
 """mwcompanions: following, warping and follower combat, run under LuaJIT against stubbed MWSE."""
 import os
+import struct
 import subprocess
+import tempfile
 
 import pytest
 
@@ -11,11 +13,25 @@ MODS = os.path.join(ROOT, "lua tools", "MWSE", "mods", "mwsuite")
 ATTEND_ME = os.path.dirname(MODS)
 pytestmark = pytest.mark.skipif(not os.path.isfile(LUAJIT), reason="LuaJIT not available")
 
+# a stand-in for abot's water life: one plugin file with one creature, read the way mwcompanions reads it
+GAME = tempfile.mkdtemp(prefix="mwcompanions-test-")
+os.makedirs(os.path.join(GAME, "Data Files"))
+
+
+def _crea(id_):
+    name = id_.encode() + b"\0"
+    body = b"NAME" + struct.pack("<I", len(name)) + name
+    return b"CREA" + struct.pack("<III", len(body), 0, 0) + body
+
+
+with open(os.path.join(GAME, "Data Files", "abotWaterLife.esm"), "wb") as f:
+    f.write(b"TES3" + struct.pack("<III", 0, 0, 0) + _crea("ab01trout9") + _crea("Dreugh"))
+
 HARNESS = r'''
 handlers, timers, positioned, logs, delayed = {}, {}, {}, {}, {}
 installed = false
 lfs = { fileexists = function() return installed end }
-userConfigs = { ["Easy Escort"] = { ignoreList = { ["ab01bluegill"] = true, ["imperial guard"] = true } } }
+userConfigs = { ["Easy Escort"] = { ignoreList = { ["ab01bluegill"] = true, ["imperial guard"] = true } } }  -- no longer read
 mwse = {
   loadConfig = function(name, defaults)
     if name ~= "mwcompanions" then return userConfigs[name] end
@@ -54,6 +70,8 @@ tes3 = {
   setAIFollow = function(p) p.reference.mobile.package = { type = tes3.aiPackage.follow, targetActor = tes3.mobilePlayer } end,
   isAffectedBy = function(p) return p.reference.soulTrapped == true end,
   makeSafeObjectHandle = function(r) return { valid = function() return not r.unloaded end, getObject = function() return r end } end,
+  installDirectory = [[GAMEDIR]],
+  isModActive = function(name) return name == "abotWaterLife.esm" end,
 }
 tes3.mobilePlayer = { levitate = 0, waterWalking = 0, isSneaking = false, friendlyActors = {} }
 tes3.player = { position = vec(0, 0, 0), facing = 0, orientation = vec(0, 0, 0), cell = town, mobile = tes3.mobilePlayer }
@@ -71,8 +89,10 @@ function actor(id, opts)
   local script
   if opts.companion then script = { id = "s", context = { companion = 0 } } end
   local obj = { id = id, objectType = opts.creature and tes3.objectType.creature or tes3.objectType.npc,
-    isGuard = opts.guard, script = opts.script or script }
-  local ref = { id = id, baseObject = obj, object = obj, data = opts.data or {}, cell = opts.cell or town,
+    script = opts.script or script }
+  -- as in MWSE: isGuard is on the actor's instance (ref.object, mobile.object), never on the base record
+  local inst = setmetatable({ isGuard = opts.guard }, { __index = obj })
+  local ref = { id = id, baseObject = obj, object = inst, data = opts.data or {}, cell = opts.cell or town,
     position = opts.position or vec(100, 0, 0), attachments = { variables = { script = script and {} or nil } } }
   if script then
     if opts.creature then
@@ -92,6 +112,7 @@ function actor(id, opts)
   mob.aiPlanner = { getActivePackage = function() return mob.package end }
   function mob:stopCombat() self.inCombat = false; self.stopped = true end
   function mob:startCombat(t) self.inCombat = true; self.fighting = t end
+  mob.object = inst
   ref.mobile = mob
   tes3.refs[id] = ref
   return mob
@@ -104,14 +125,18 @@ function check(ok, message) if not ok then error(message, 2) end end
 
 
 def run(body):
-    script = HARNESS.replace("MODS", MODS).replace("ATTENDME_PATH", ATTEND_ME) + body + '\nprint("ok")\n'
+    script = (HARNESS.replace("MODS", MODS).replace("ATTENDME_PATH", ATTEND_ME).replace("GAMEDIR", GAME)
+              + body + '\nprint("ok")\n')
     out = subprocess.run([LUAJIT, "-"], input=script, capture_output=True, text=True, cwd=ROOT)
     assert out.returncode == 0 and out.stdout.strip().endswith("ok"), out.stdout + out.stderr
 
 
 def test_who_is_a_follower():
     run(r'''
-check(config.blacklist["ab01bluegill"] and config.blacklist["imperial guard"], "the suite's blacklist is imported")
+check(not config.blacklist["ab01bluegill"], "Easy Escort's old ignore list is no longer taken over")
+check(config.excludedPlugins["abotWaterLife.esm"] and config.excludedPlugins["abotWhereAreAllBirdsGoing.esp"],
+      "abot's water life and birds are excluded plugins to begin with")
+config.blacklist["imperial guard"] = true
 check(core.followerKind(actor("hired", { package = "follow" })) == 1, "follow package on the player: follower")
 check(core.followerKind(actor("julan", { package = "follow", companion = 1 })) == 2, "with companion = 1: companion")
 check(core.followerKind(actor("waiting", { package = "wander", companion = 1 })) == 0, "told to wait: not followed up")
@@ -120,9 +145,27 @@ check(core.followerKind(actor("pilgrim", { package = "escort" })) == 0, "escort 
 check(core.isEscort(tes3.refs.pilgrim.mobile), "but is an escort")
 check(core.followerKind(actor("other", { package = "follow", target = {} })) == 0, "following someone else")
 check(core.followerKind(actor("watch", { package = "follow", guard = true })) == 0, "guards on a temporary follow")
+local magged = actor("magged", { package = "follow" })     -- More Attentive Guards' interop names its follower
+package.loaded["celediel.MoreAttentiveGuards.interop"] = { getGuardFollower = function() return magged end }
+check(core.followerKind(magged) == 0, "the guard More Attentive Guards has following a sneaking player")
+package.loaded["celediel.MoreAttentiveGuards.interop"] = { getGuardFollower = function() return nil end }
+check(core.followerKind(magged) == 1, "once it lets go (no follower), the same NPC is judged as any other")
+package.loaded["celediel.MoreAttentiveGuards.interop"] = nil
 check(core.followerKind(actor("imperial guard", { package = "follow" })) == 0, "blacklisted id")
-check(core.followerKind(actor("ab01trout9", { package = "follow", creature = true })) == 0, "abot water life")
-check(core.followerKind(actor("ab01guguarpackmount", { package = "follow", creature = true })) == 1, "the pack guar follows")
+check(core.followerKind(actor("ab01trout9", { package = "follow", creature = true })) == 0,
+      "a creature the excluded plugin defines (read from the file)")
+check(core.followerKind(actor("dreugh", { package = "follow", creature = true })) == 0, "ids match in any case")
+check(core.followerKind(actor("ab01guguarpackmount", { package = "follow", creature = true })) == 1,
+      "a creature no excluded plugin defines follows (abotGuars.esp's pack guar)")
+config.whitelist["ab01trout9"] = true
+check(core.followerKind(actor("ab01trout9", { package = "follow", creature = true })) == 1, "the whitelist wins")
+config.whitelist["ab01trout9"] = nil
+config.excludedPlugins["abotWaterLife.esm"] = nil
+handlers["mwcompanions:changed"]()
+check(core.followerKind(actor("ab01trout9", { package = "follow", creature = true })) == 1,
+      "a plugin taken off the list: its creatures follow again once the menu closes")
+config.excludedPlugins["abotWaterLife.esm"] = true
+handlers["mwcompanions:changed"]()
 local fish = actor("fish", { package = "follow", creature = true, companion = 1 })
 check(core.followerKind(fish) == 1, "a creature's companion local is never read (crash)")
 local seat = actor("rider", { package = "follow", companion = 1, data = { rfuzzo_noscript = true } })
@@ -325,8 +368,10 @@ def test_overlap_warning():
     run(r'''
 userConfigs.abotSmart_Companions = { autoWarp = 2, followersResiliency = 0 }
 config.enabled = true; config.warp = true; config.resilient = true
+local function warnings() local n = 0 for _, l in ipairs(logs) do if l:find("Warning", 1, true) then n = n + 1 end end return n end
+logs = {}
 handlers.initialized()
-check(#logs == 0, "orphaned configuration must not produce a warning")
+check(warnings() == 0, "orphaned configuration must not produce a warning")
 installed = true
 handlers.initialized()
 local text = table.concat(logs, "\n")
@@ -335,7 +380,7 @@ check(not text:find("Attend Me teleport", 1, true), "Attend Me teleport is coord
 check(not text:find("resilient", 1, true), "no warning for an option that is off")
 logs = {}; userConfigs.abotSmart_Companions.autoWarp = 0
 handlers.initialized()
-check(#logs == 0, "disabled installed options must not warn")
+check(warnings() == 0, "disabled installed options must not warn")
 ''')
 
 
@@ -416,13 +461,13 @@ check(hired.weaponReady, "only companions")
 
 def test_mcm_exclusions_page():
     run(r'''
-local registeredPage
+local registeredPage, pages = nil, {}
 mwse.mcm = {
   createTemplate = function(p)
     return {
       createSideBarPage = function() return { createYesNoButton = function() end, createCategory = function() return { createYesNoButton = function() end, createSlider = function() end } end } end,
       createPage = function() local c = { createInfo = function() end, createHyperlink = function() end }; c.createCategory = function() return c end; return c end,
-      createExclusionsPage = function(_, p) registeredPage = p; return p end,
+      createExclusionsPage = function(_, p) pages[#pages + 1] = p; if p.label == "Blacklist" then registeredPage = p end; return p end,
       register = function() end,
     }
   end,
@@ -438,6 +483,9 @@ end
 
 require("mwcompanions.mcm")
 check(registeredPage ~= nil, "exclusions page created")
+check(#pages == 3 and pages[1].label == "Excluded Plugins" and pages[3].label == "Whitelist", "three pages")
+check(pages[1].filters[1].type == "Plugin" and pages[1].variable.id == "excludedPlugins", "plugins, by the core page")
+check(pages[3].variable.id == "whitelist" and pages[3].filters[1].label == "Followers", "the whitelist page")
 check(registeredPage.label == "Blacklist", "exclusions page label")
 check(registeredPage.leftListLabel == "Never Followers (Blacklisted)", "left list label")
 check(registeredPage.rightListLabel == "Available Actors", "right list label")

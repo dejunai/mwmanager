@@ -108,10 +108,11 @@ class UnifiedMenu(unittest.TestCase):
         # Unrelated and personal mods keep their own entries.
         self.assertEqual([ln for ln in lines if ln.startswith("registered")],
                          ["registered Other Mod", "registered Standalone Mod", "registered MW Conflict Tools"])
-        # tabs in the suite's order (mwsaveguard is listed before mwcollide), the first one open
-        self.assertIn("tabs 2 mwsaveguard Doubled Objects", lines)
+        # tabs (labelled "Save Guard" and "Doubled Objects") in the suite's order (mwsaveguard is listed before
+        # mwcollide), the first one open; the tooltip names the mod's registered name
+        self.assertIn("tabs 2 Save Guard Doubled Objects", lines)
         self.assertIn("open tab state 4 nil", lines)
-        self.assertIn("tooltip Open settings for mwsaveguard.", lines)
+        self.assertIn("tooltip Open mwsaveguard settings.", lines)
         # opening shows the first mod's own page; switching closes it (its own save) and shows the second;
         # closing the menu closes the page that is open
         flow = [ln for ln in lines if ln.split()[0] in ("create", "close")]

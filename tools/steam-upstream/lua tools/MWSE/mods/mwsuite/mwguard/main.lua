@@ -69,7 +69,7 @@ local function installLogTimestamps()
         end
         return date("[%H:%M:%S] ")
     end
-    print = function(...)
+    rawset(_G, "print", function(...)                 -- on purpose: every mod's print gets the stamp
         local n = select("#", ...)
         local body
         if n <= 1 then
@@ -80,7 +80,7 @@ local function installLogTimestamps()
             body = concat(t, "\t")
         end
         return origPrint(stamp() .. body)
-    end
+    end)
     mwse.log = function(fmt, ...)
         local ok, msg = pcall(format, tostring(fmt), ...)
         return origPrint(stamp() .. (ok and msg or tostring(fmt)))
@@ -387,7 +387,7 @@ origRegister(tes3.event.initialized, function()
         for _ in pairs(stats) do n = n + 1 end
         origLog("[mwguard] active as passive profiler (measuring %d handlers; details in MWSE\\logs\\mwguard.log)", n)
     end
-end, { priority = -100000 })
+end, { priority = -9999 })                 -- last: after every mod's own
 
 -- address-space readout (shown whether or not profiling is on) ----------------------------------
 local HUD_MENU_ID = tes3ui.registerID("mwguard:addressSpaceMenu")
@@ -474,7 +474,7 @@ event.register(tes3.event.modConfigReady, function()
     })
     local memory = page1:createCategory("Memory")
     memory:createOnOffButton({
-        label = "Show address space on screen",
+        label = "Show memory usage on screen",
         description = "Shows a small number in the top-right corner: how full Morrowind's 4 GB memory limit is, in "
             .. "percent. The game crashes near 100%, so save and restart when it gets high. Works even with the "
             .. "profiler and the hang log off.",
@@ -491,12 +491,12 @@ event.register(tes3.event.modConfigReady, function()
         label = "Lua Profiler",
         description = "The Lua profiler measures how much time other Lua mods take every frame and writes the "
             .. "slowest ones to MWSE\\logs\\mwguard.log, so you can find a mod that slows the game down. "
-            .. "It only watches: it never changes or slows down other mods.\n\n"
+            .. "Timing adds some overhead. Use it while investigating a slowdown.\n\n"
             .. "Turn the profiler on and restart the game; turning it off stops the reports right away. "
             .. "While it is off at start-up, no handlers are wrapped.",
     })
     page2:createOnOffButton({
-        label = "Enable Passive Profiler",
+        label = "Enable Lua profiler",
         description = "Turns the performance monitor on. Restart the game after turning it on; turning it off stops "
             .. "the reports right away. While it is off at start-up, no handlers are wrapped.",
         variable = mwse.mcm.createTableVariable({ id = "enabled", table = config }),

@@ -112,10 +112,11 @@ local function after()
     end
 end
 
-event.register("keyDown", function(e) before(slotFor(e.keyCode, false)) end, { priority = 10000 })
-event.register("keyDown", after, { priority = -10000 })
-event.register("mouseButtonDown", function(e) before(slotFor(e.button, true)) end, { priority = 10000 })
-event.register("mouseButtonDown", after, { priority = -10000 })
+-- before and after every other mod's handler: the ends of the band luafix keeps priorities in
+event.register("keyDown", function(e) before(slotFor(e.keyCode, false)) end, { priority = 9999 })
+event.register("keyDown", after, { priority = -9999 })
+event.register("mouseButtonDown", function(e) before(slotFor(e.button, true)) end, { priority = 9999 })
+event.register("mouseButtonDown", after, { priority = -9999 })
 
 event.register("keybindTested", function(e)
     if blockSlot and e.result and e.keybind == tes3.keybind["quick" .. blockSlot] then
@@ -156,7 +157,7 @@ event.register("modConfigReady", function()
     })
     page:createYesNoButton({
         label = "Restore displaced equipment",
-        description = "When you take something off with its quick key, puts back what it replaced, like the shield a "
+        description = "Requires the toggle above. When you use a quick key to take something off, re-equip what it replaced, such as the shield a "
             .. "lantern or two-handed weapon pushed off. Also swaps a quick-keyed light back to your shield when you "
             .. "ready a weapon.",
         variable = mwse.mcm.createTableVariable({ id = "restoreDisplaced", table = config }),

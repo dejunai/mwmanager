@@ -489,3 +489,28 @@ def test_a_missing_video_gets_a_line_in_the_bug_report():
     world = types.SimpleNamespace(masters={}, generated=[], missing_files=[(r"Video\intro.bik", "script s", "A.esp")])
     per = BR.collect(mm, [("A.esp", "A.esp")], report, world)
     assert per["a.esp"]["missing"] == [r"  - Video\intro.bik (needed by script s); the game skips it"]
+
+
+def test_no_vortex_installed_runs_as_no_vortex_but_a_broken_vortex_still_errors(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("APPDATA", str(tmp_path / "Roaming"))
+    monkeypatch.setattr(m.MP, "_marker_fallback", lambda *a, **k: None)
+    m.MP.clear_vortex_settings_cache()
+    args = argparse.Namespace(no_vortex=False, vortex_dir=None, vortex_downloads=None)
+    m._ensure_vortex_paths(args)
+    assert args.no_vortex and "Vortex is not installed" in capsys.readouterr().out
+    (tmp_path / "Roaming" / "Vortex").mkdir(parents=True)      # installed but unreadable: keep the error
+    m.MP.clear_vortex_settings_cache()
+    with pytest.raises(m.MP.VortexPathError):
+        m._ensure_vortex_paths(argparse.Namespace(no_vortex=False, vortex_dir=None, vortex_downloads=None))
+
+
+def test_undo_all_runs_the_three_undo_steps_in_order_passing_yes_dry_run_and_ini(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(m, "main", lambda argv: calls.append(argv) or (1 if "--reenable" in argv else 0))
+    args = m.parse_check_argv(["DF", "--undo-all", "--yes", "--dry-run", "--ini", "M.ini"])
+    assert args.undo_all and m.run_undo_all(args) == 0           # --reenable with nothing to do is not a failure
+    assert [c[-1] for c in calls] == ["--restore-all", "--redundant-undo", "--reenable"]
+    assert all(c[:5] == ["DF", "--ini", "M.ini", "--yes", "--dry-run"] for c in calls)
+    assert "undo-all (dry run): --restore-all done, --redundant-undo done, --reenable done" in capsys.readouterr().out
+    monkeypatch.setattr(m, "main", lambda argv: 2 if "--restore-all" in argv else 0)
+    assert m.run_undo_all(m.parse_check_argv(["DF", "--undo-all"])) == 2        # a failed step: exit 2

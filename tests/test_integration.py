@@ -884,7 +884,11 @@ class TidySteps(unittest.TestCase):
         start = self.files()
         rc, out = self.run_tidy("--apply", "--yes")
         self.assertEqual(rc, 2, out)
-        self.assertIn("REFUSED", out)
+        # the friendly refusal: says the plan changed, that nothing was changed, and what to do next
+        lowered = " ".join(out.lower().split())
+        self.assertIn("the plan has changed", lowered, out)
+        self.assertIn("nothing was changed", lowered, out)
+        self.assertIn("review the new plan", lowered, out)
         self.assertEqual(self.files(), start)
 
     def test_options_cannot_skip_the_review(self):

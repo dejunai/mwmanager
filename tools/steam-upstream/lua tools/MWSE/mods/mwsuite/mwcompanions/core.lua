@@ -54,10 +54,19 @@ function core.companionVar(ref)
     return ok2 and value or nil
 end
 
---- guards follow the player for a while when MoreAttentiveGuards has them watch a sneaking player
+--- a guard is never a follower: any guard a follow package puts behind the player, and the one More Attentive
+--- Guards has following a sneaking player. isGuard is a field of the actor's instance (tes3npcInstance, its mobile's
+--- object), not of the base record: ref.baseObject.isGuard is always nil.
+local function instanceIsGuard(ref)
+    local ok, yes = pcall(function()
+        local inst = (ref.mobile and ref.mobile.object) or ref.object
+        return inst ~= nil and inst.isGuard == true
+    end)
+    return ok and yes
+end
+
 function core.isGuard(ref)
-    local obj = ref.baseObject
-    if obj.isGuard then return true end
+    if instanceIsGuard(ref) then return true end
     local mag = package.loaded["celediel.MoreAttentiveGuards.interop"]
     if mag and mag.getGuardFollower then
         local ok, g = pcall(mag.getGuardFollower)
@@ -66,15 +75,105 @@ function core.isGuard(ref)
     return false
 end
 
+-- the creatures the excluded plugins define, read from the plugin files themselves: not obj.sourceMod, which names the
+-- last plugin to change a record (a creature-buff patch of abot's water life would hide them all)
+local pluginCreatures = {}            -- lower-case base id -> plugin file name
+
+local function u32(s, i)
+    local a, b, c, d = s:byte(i, i + 3)
+    return a + b * 256 + c * 65536 + d * 16777216
+end
+
+--- every CREA record's id in one plugin file (lower case), or nil when the file can't be read
+function core.creatureIdsOf(path)
+    local f = io.open(path, "rb")
+    if not f then return nil end
+    local data = f:read("*a")
+    f:close()
+    local ids, pos, n = {}, 1, #data
+    while pos + 15 <= n do
+        local tag, size = data:sub(pos, pos + 3), u32(data, pos + 4)
+        local body, stop = pos + 16, pos + 16 + size
+        if tag == "CREA" then
+            local sp = body
+            while sp + 7 < stop do
+                local st, ss = data:sub(sp, sp + 3), u32(data, sp + 4)
+                if st == "NAME" then
+                    ids[#ids + 1] = data:sub(sp + 8, sp + 7 + ss):gsub("%z.*$", ""):lower()
+                    break
+                end
+                sp = sp + 8 + ss
+            end
+        end
+        pos = stop
+    end
+    return ids
+end
+
+--- rebuild the creature list from config.excludedPlugins (at start-up and when the Mod Config menu closes)
+function core.rebuildPluginLists()
+    pluginCreatures = {}
+    local root = (type(tes3.installDirectory) == "string" and tes3.installDirectory ~= "")
+        and (tes3.installDirectory .. "\\Data Files\\") or "Data Files\\"
+    local plugins, count = 0, 0
+    for name, on in pairs(config.excludedPlugins or {}) do
+        if on and tes3.isModActive(name) then
+            local ids = core.creatureIdsOf(root .. name)
+            if ids then
+                plugins = plugins + 1
+                for _, id in ipairs(ids) do
+                    if not pluginCreatures[id] then count = count + 1 end
+                    pluginCreatures[id] = name
+                end
+            end
+        end
+    end
+    mwse.log("[mwcompanions] %d creature(s) from %d excluded plugin(s) are never followers", count, plugins)
+    return count
+end
+
+-- interop (mwpluginpatches' HUD Companion Health Bar mirror): the lists, read and changed by id ---------------------
+local function dropAnyCase(t, id)
+    for k in pairs(t) do
+        if lower(k) == id then t[k] = nil end
+    end
+end
+
+--- {lower-case id = true} of every actor that is never a follower: the blacklist and the excluded plugins'
+--- creatures, less the whitelist
+function core.neverFollowers()
+    local out = {}
+    for id, on in pairs(config.blacklist) do if on then out[lower(id)] = true end end
+    for id in pairs(pluginCreatures) do out[id] = true end
+    for id, on in pairs(config.whitelist) do if on then out[lower(id)] = nil end end
+    return out
+end
+
+--- id is never a follower (it goes on the blacklist, and off the whitelist)
+function core.exclude(id)
+    id = lower(id)
+    dropAnyCase(config.whitelist, id)
+    config.blacklist[id] = true
+end
+
+--- id may be a follower again: off the blacklist, and on the whitelist when an excluded plugin defines it
+function core.include(id)
+    id = lower(id)
+    dropAnyCase(config.blacklist, id)
+    if pluginCreatures[id] then config.whitelist[id] = true end
+end
+
+function core.saveLists()
+    mwse.saveConfig("mwcompanions", config)
+end
+
+--- never a follower: on the whitelist -> no; on the blacklist, or a creature an excluded plugin defines -> yes
 function core.isBlacklisted(ref)
     local obj = ref.baseObject
     local id = lower(obj.id)
+    if config.whitelist[id] or config.whitelist[obj.id] then return false end   -- the page keeps the id's own case
     if config.blacklist[id] or config.blacklist[obj.id] then return true end
-    -- abot's water life and birds carry follow/escort packages of their own; the pack guar is a real follower
-    if obj.objectType == tes3.objectType.creature and id ~= "ab01guguarpackmount" then
-        if id:sub(1, 4) == "ab01" or (obj.script and lower(obj.script.id):sub(1, 4) == "ab01") then return true end
-    end
-    return false
+    return pluginCreatures[id] ~= nil
 end
 
 --- the active package if it is follow/escort, and whether it targets the player

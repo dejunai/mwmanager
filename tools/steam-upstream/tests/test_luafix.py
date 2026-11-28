@@ -737,7 +737,7 @@ def test_KB7_names_a_friends_and_frens_companions_own_birthsign(eol):
     assert applied == ["KB7"] and repaired.count("\n") == repaired.count(eol)
     assert not [f for f in analyse(repaired, "danae/frens/main.lua").findings if f["rule"] == "KB7"]
     assert lf.verify_patch(source, repaired, applied, None, "danae", "danae/frens/main.lua", CFG, "high")["ok"]
-    luajit = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe")
+    luajit = os.environ.get("MWMANAGER_LUAJIT", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe"))
     if not os.path.isfile(luajit):
         pytest.skip("LuaJIT executable not available for behavioral verification")
     script = r"""
@@ -810,7 +810,7 @@ def test_KB8_tamriel_data_waits_for_the_save_to_load_before_reading_spells(eol):
     assert set(applied) == {"KB8"} and repaired.count("\n") == repaired.count(eol)
     assert not [f for f in analyse(repaired, path).findings if f["rule"] == "KB8"]
     assert lf.verify_patch(source, repaired, applied, None, "tamrieldata", path, CFG, "high")["ok"]
-    luajit = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe")
+    luajit = os.environ.get("MWMANAGER_LUAJIT", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe"))
     if not os.path.isfile(luajit):
         pytest.skip("LuaJIT executable not available for behavioral verification")
     script = r"""
@@ -884,7 +884,7 @@ def test_KB9_sunrays_skip_the_engine_sun_update_until_there_is_weather(eol):
     assert set(applied) == {"KB9"} and repaired.count("\n") == repaired.count(eol)
     assert not [f for f in analyse(repaired, path).findings if f["rule"] == "KB9"]
     assert lf.verify_patch(source, repaired, applied, None, "directionalsunrays", path, CFG, "high")["ok"]
-    luajit = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe")
+    luajit = os.environ.get("MWMANAGER_LUAJIT", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe"))
     if not os.path.isfile(luajit):
         pytest.skip("LuaJIT executable not available for behavioral verification")
     script = r"""
@@ -952,7 +952,7 @@ def test_KB10_robenhood_guards_nil_weather_after_new_game(eol):
     assert set(applied) == {"KB10"} and repaired.count("\n") == repaired.count(eol)
     assert not [f for f in analyse(repaired, path).findings if f["rule"] == "KB10"]
     assert lf.verify_patch(source, repaired, applied, None, "Robe'n'Hood", path, CFG, "high")["ok"]
-    luajit = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe")
+    luajit = os.environ.get("MWMANAGER_LUAJIT", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe"))
     if not os.path.isfile(luajit):
         pytest.skip("LuaJIT executable not available for behavioral verification")
     script = r"""
@@ -1030,7 +1030,7 @@ def test_KB11_nocturnal_moths_guards_nil_weather_and_resets_on_load(eol, tmp_pat
         assert not [f for f in analyse(out, f"nocturnal moths/{rel}").findings if f["rule"] == "KB11"]
         repaired[rel] = out.replace("\r", "")
     assert "KB11" in lf.KNOWN_BUGS_WHOLE
-    luajit = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe")
+    luajit = os.environ.get("MWMANAGER_LUAJIT", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe"))
     if not os.path.isfile(luajit):
         pytest.skip("LuaJIT executable not available for behavioral verification")
     script = r"""
@@ -1099,7 +1099,7 @@ def test_KB12_tamriel_data_weather_guards_nil_weather(eol):
     assert set(applied) == {"KB12"} and repaired.count("\n") == repaired.count(eol)
     assert not [f for f in analyse(repaired, path).findings if f["rule"] == "KB12"]
     assert lf.verify_patch(source, repaired, applied, None, "Tamriel Data", path, CFG, "high")["ok"]
-    luajit = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe")
+    luajit = os.environ.get("MWMANAGER_LUAJIT", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe"))
     if not os.path.isfile(luajit):
         pytest.skip("LuaJIT executable not available for behavioral verification")
     script = r"""
@@ -1183,7 +1183,7 @@ def test_KB13_ui_expansion_clears_searchBlock_and_filter_elements_on_destroy(eol
     assert set(applied) == {"KB13"} and repaired.count("\n") == repaired.count(eol)
     assert not [f for f in analyse(repaired, path).findings if f["rule"] == "KB13"]
     assert lf.verify_patch(source, repaired, applied, None, "UI Expansion", path, CFG, "high")["ok"]
-    luajit = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe")
+    luajit = os.environ.get("MWMANAGER_LUAJIT", os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools", "luajit", "luajit.exe"))
     if not os.path.isfile(luajit):
         pytest.skip("LuaJIT executable not available for behavioral verification")
     script = r"""
@@ -2210,3 +2210,18 @@ def test_P1_data_on_a_non_actor_without_modified():
             "    e.target.data.talked = true\n  end\nend\nevent.register('activate', onAct2)\n"
             "event.register('loaded', function() tes3.player.data.x = 1 end)\n")
     assert "P1" not in rules(analyse(good))
+
+
+def test_backups_are_relative_to_the_shared_folder_not_a_full_path_mirror(tmp_path):
+    data, root = mod_tree(tmp_path, {"main.lua": PUDDLE})
+    twin = tmp_path / "Twin" / "MWSE" / "mods" / "testmod"           # a second mod with the same folders
+    twin.mkdir(parents=True)
+    (twin / "main.lua").write_text(PUDDLE.replace("bigger", "twin"))
+    j, bk = tmp_path / "j.jsonl", tmp_path / "bk"
+    rep = lf.check_paths([str(data), str(tmp_path / "Twin")], CFG, checker=OkChecker(), use_cache=False)
+    w, _refused = lf.apply_report(rep, journal=str(j), backup_root=str(bk), log=lambda s: 0)
+    ops = [json.loads(s) for s in j.read_text().splitlines() if '"backup"' in s]
+    rels = sorted(os.path.relpath(op["backup"], str(bk)).split(os.sep, 1)[1] for op in ops)
+    assert w == 2 and rels == [os.path.join("1 Mod", "testmod", "main.lua"), os.path.join("2 Twin", "testmod", "main.lua")]
+    assert lf.undo(str(j), log=lambda s: 0) == 0 and (root / "main.lua").read_text() == PUDDLE
+    assert (twin / "main.lua").read_text() == PUDDLE.replace("bigger", "twin")

@@ -61,6 +61,7 @@ import time
 from collections import Counter, OrderedDict, defaultdict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mwdialog_paths as MP  # noqa: E402
+import mwdialog_version  # noqa: E402
 from mwdialog_tes3 import check_unchanged, content_id  # noqa: E402
 from mwdialog_cellorder import WHY as CELL_WHY, cell_filter_rules, lost_cell_filter  # noqa: E402
 import mwdialog_text as MT  # noqa: E402
@@ -113,7 +114,8 @@ from mwdialog_state import (  # noqa: E402,F401
 from mwdialog_cellmods import (  # noqa: E402,F401
     COLLIDE_ANY_RADIUS, COLLIDE_DATA, COLLIDE_RADIUS, COLLIDE_SKIP_TAGS, COLLIDE_STRUCTURE_RE, INVISIBLE_RE, _OBJECT_INFO,
     object_info, RELOCATE_MIN_NEW, report_rearranged, REWORK_FRACTION, REWORK_MIN_DELETED, STRANDED_DATA, STRANDED_DISTANCE,
-    STRANDED_KEEP_TAGS, STRANDED_MOVE_TAGS, doubled_objects, write_collide_data, write_float_data, write_stranded_data)
+    STRANDED_KEEP_TAGS, STRANDED_MOVE_TAGS, doubled_objects, write_collide_data, write_float_data, write_stranded_data,
+    PERFORMERS_DATA, write_performer_data)
 from mwdialog_datatree import (  # noqa: E402,F401
     asset_health_module, asset_owner_folder, collect_sound_files, DataTree, GENERATED_RECORD, generated_rels, hard_link_names,
     IGNORED_MAP_RE, longpaths_module, mastercheck_module, ModelAssets, _real_dir, sound_names_under, VortexRepo)
@@ -2950,7 +2952,7 @@ def resolve(args, report):
         plugin_names, preserve_order = list(args.plugins), True
     elif args.openmw_cfg:
         plugin_names, bsa_names, preserve_order = [], [], True
-        with open(args.openmw_cfg, "r", encoding="utf-8", errors="replace") as f:
+        with open(args.openmw_cfg, "r", encoding="utf-8-sig", errors="replace") as f:
             for line in f:
                 s = line.strip()
                 if "=" not in s or s.startswith("#"):
@@ -3153,6 +3155,9 @@ def launch_game(args):
                 print("    " + p, file=sys.stderr)
             print("\n  (--play-anyway starts the game regardless)", file=sys.stderr)
             return 3
+    rc = check_plugins_for_play(args, order)
+    if rc:
+        return rc
     ini = default_ini(args)
     if order and os.path.isfile(ini):
         if [n.lower() for n in ini_game_files(ini)] != [n.lower() for n in order]:
@@ -3217,6 +3222,48 @@ def launch_game(args):
         return 2
     print(f"Started {args.exe} in {game_dir} (SteamAppId {args.steam_appid}, no Launcher).")
     return 0
+
+
+def check_plugins_for_play(args, order):
+    """--play: the active plugins against the ones our patches were last built for (mwdialog_hashes.record_plugins:
+    names and sizes). Mods added, removed or updated since, with no --fix run: the patches and the MWSE suite's data
+    belong to the old set. Refused (exit 5) unless --play-anyway, which starts the game with a warning. 0: go on."""
+    if MH.WROTE:                              # --fix --play, --full --play: the patches were built just now, for these
+        MH.record_plugins(args.data_dir, order or [])
+        return 0
+    added, removed, updated = MH.plugins_changed(args.data_dir, order or [])
+    if not (added or removed or updated):
+        return 0
+    groups = [(added, "added"), (removed, "removed"), (updated, "updated (a different file)")]
+    if getattr(args, "play_anyway", False):
+        counts = ", ".join(f"{len(xs)} {what.split(' ')[0]}" for xs, what in groups if xs)
+        print(f"--play-anyway: your mods changed since the patches were built ({counts}). Starting the game anyway, "
+              f"which is a seriously bad idea: run --fix before you play on.", file=sys.stderr)
+        return 0
+    bar = "=" * 72
+    lines = [bar, "--play: NOT starting the game. Your mods changed since mwdialog_check last built its patches:"]
+    for xs, what in groups:
+        if xs:
+            lines.append(f"  {what} ({len(xs)}): " + ", ".join(xs[:6]) + (f" ... and {len(xs) - 6} more" if len(xs) > 6 else ""))
+    lines += ["The patches (Multipatch, Cell Fixes, the merged plugin...) and the MWSE suite's data were made for",
+              "the mods you had then. Run mwdialog_check --fix (or --full) to rebuild them, then --play again.",
+              "--play-anyway starts the game regardless, but that is a seriously bad idea: what the patches change",
+              "no longer matches your mods (lost or doubled objects, broken quests, crashes), and a save made like",
+              "that can stay broken.", bar]
+    for ln in lines:
+        print(ln, file=sys.stderr)
+    # in a console (Play Morrowind.bat) the choice is a keystroke: nobody should need a command prompt for it.
+    # --yes does not answer it: starting on the wrong patches is never a default
+    if sys.stdin is not None and sys.stdin.isatty():
+        try:
+            answer = input("Start the game anyway (a seriously bad idea)? [y/N] ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            answer = ""
+        if answer in ("y", "yes"):
+            print("--play: starting the game anyway, on patches made for other mods. Run --fix before you play on.",
+                  file=sys.stderr)
+            return 0
+    return MH.REFUSED_PLUGINS
 
 
 SAY_SOUND_RE = re.compile(r'\b(?:say|playsound|playsoundvp|playsound3d|playsound3dvp|playloopsound3d|'
@@ -4731,16 +4778,39 @@ def run_merge(args, plugins, bsas, data_dirs):
 
 AUTO_MERGE_NAME = "mwdialog_check AutoMerge.esp"
 AUTO_MERGE_BLACKLIST = "mwdialog_auto-merge.blacklist.txt"   # user-edited: one plugin per line, never auto-merged
+AUTO_MERGE_BLACKLIST_DEFAULT = ("XE Sky Variations.esp",)     # written when the file is missing
+
+
+def auto_merge_blacklist_starter_text():
+    """The file written when mwdialog_auto-merge.blacklist.txt is missing."""
+    lines = [
+        "; mwdialog_auto-merge.blacklist.txt: plugins --auto-merge never merges. One plugin name per line.",
+        "; Created when the file is missing; an existing file is never overwritten or added to.",
+    ]
+    return "\n".join(lines + list(AUTO_MERGE_BLACKLIST_DEFAULT)) + "\n"
 
 
 def read_auto_merge_blacklist(game_dir):
-    """Lowercased plugin names from the auto-merge blacklist (blank lines and ; or # comments skipped)."""
+    """Lowercased plugin names from the auto-merge blacklist (blank lines and ; or # comments skipped).
+    If the file is missing it is created with AUTO_MERGE_BLACKLIST_DEFAULT; an existing file is never
+    overwritten or added to."""
+    path = MP.state_path(game_dir, AUTO_MERGE_BLACKLIST)
+    if not os.path.exists(path):
+        try:
+            folder = os.path.dirname(os.path.abspath(path))
+            if folder:
+                os.makedirs(folder, exist_ok=True)
+            with open(path, "x", encoding="utf-8") as f:
+                f.write(auto_merge_blacklist_starter_text())
+        except FileExistsError:
+            pass
+        except OSError:
+            return {s.lower() for s in AUTO_MERGE_BLACKLIST_DEFAULT}
     try:
-        with open(MP.state_path(game_dir, AUTO_MERGE_BLACKLIST), "r", encoding="utf-8-sig") as f:
+        with open(path, "r", encoding="utf-8-sig") as f:
             return {s.lower() for s in (ln.strip() for ln in f) if s and not s.startswith((";", "#"))}
     except OSError:
         return set()
-
 
 def run_auto_merge(args, plugins, bsas, data_dirs):
     if preserve_saves(args) == "strict" and not args.dry_run:
@@ -5385,6 +5455,7 @@ def write_suite_data(args, plugins, order, ref_hist, land_v, labels, name_of, de
                                                                         ours_names=[n for n, _p in ours_hist])),
                      ("the distant land overrides", lambda: write_ghost_statics(
                          os.path.dirname(os.path.abspath(args.data_dir)), args.data_dir, plugins)),
+                     (PERFORMERS_DATA, lambda: write_performer_data(args, order, ref_hist, labels)),
                      (STRANDED_DATA, lambda: write_stranded_data(args, order, lost))):
         try:
             fn()
@@ -5822,6 +5893,10 @@ def run_cell_conflicts(args, plugins, collect=False, incompatible_only=False, au
                              ours=ours_l, ours_names=[n for n, _p in ours_hist])
         except (OSError, ValueError) as e:
             print(f"  (could not write mwfloatfix_data.json: {e})", file=sys.stderr)
+        try:
+            write_performer_data(args, order, ref_hist, labels)
+        except (OSError, ValueError) as e:
+            print(f"  (could not write {PERFORMERS_DATA}: {e})", file=sys.stderr)
         print("  Working through distant land (which hidden objects to leave out of it), please be patient...",
               file=sys.stderr, flush=True)
         try:
@@ -8617,6 +8692,27 @@ def _run_redundant(args):
     return 1
 
 
+UNDO_ALL_STEPS = (("--restore-all", "plugins back to their originals"),
+                  ("--redundant-undo", "plugins turned off as redundant back on"),
+                  ("--reenable", "plugins turned off as doubled back on"))
+
+
+def run_undo_all(args):
+    """--undo-all: --restore-all, then --redundant-undo, then --reenable, each as its own run (with --yes,
+    --dry-run and --ini passed on). Every step runs; a step with nothing to do is not a failure. Exit 2 when
+    a step failed, else 0."""
+    common = [args.data_dir] + (["--ini", args.ini] if args.ini else []) \
+        + (["--yes"] if args.yes else []) + (["--dry-run"] if args.dry_run else [])
+    results = []
+    for n, (switch, what) in enumerate(UNDO_ALL_STEPS, 1):
+        print(f"\n--- undo-all {n}/{len(UNDO_ALL_STEPS)}: {switch} ({what})")
+        results.append((switch, main(common + [switch])))
+    failed = [s for s, rc in results if rc and rc >= 2]
+    print(f"\nundo-all{' (dry run)' if args.dry_run else ''}: "
+          + ", ".join(f"{s} {'failed' if rc and rc >= 2 else 'done'}" for s, rc in results))
+    return 2 if failed else 0
+
+
 def run_redundant_undo(args):
     """--redundant-undo [NAME...]: turn back on what --redundant turned off (all of it, and forget the
     keep-both choices, with no name)."""
@@ -9905,6 +10001,55 @@ def full_conflict_step(args, common):
     return ("cell conflicts (your remembered answers)", ["--cell-conflicts", "--use-answers"] + common)
 
 
+def ess_saves(game_dir):
+    """Paths of .ess saved games in the game's Saves folder (not subfolders)."""
+    folder = os.path.join(game_dir, "Saves")
+    if not os.path.isdir(folder):
+        return []
+    out = []
+    try:
+        names = os.listdir(folder)
+    except OSError:
+        return []
+    for name in names:
+        if name.lower().endswith(".ess"):
+            path = os.path.join(folder, name)
+            if os.path.isfile(path):
+                out.append(path)
+    return out
+
+
+def confirm_full_if_saves(args, game_dir):
+    """Bare --full (not --dry-run, no --preserve-saves): if .ess saves exist, ask [y/N].
+    --yes skips the question. No console and no --yes: refuse with exit 2. 0 to continue."""
+    if getattr(args, "dry_run", False) or preserve_saves(args):
+        return 0
+    found = ess_saves(game_dir)
+    if not found:
+        return 0
+    n = len(found)
+    found_txt = (f"{n} saved game (.ess) was found in the Saves folder" if n == 1
+                 else f"{n} saved games (.ess) were found in the Saves folder")
+    explain = ("--full rewrites plugins and the load order. " + found_txt + ". "
+               "If you are in the middle of a playthrough, use --preserve-saves=strict "
+               "(or --full --dry-run first).")
+    if getattr(args, "yes", False):
+        return 0
+    if sys.stdin is None or not sys.stdin.isatty():
+        print(explain + " There is no console to confirm. Re-run with --preserve-saves=strict, "
+              "or with --yes to confirm. Nothing was changed.", file=sys.stderr)
+        return 2
+    try:
+        answer = input(explain + " Continue with --full? [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        answer = ""
+    if answer not in ("y", "yes"):
+        print("--full: cancelled. Nothing was changed.")
+        return 2
+    return 0
+
+
 def run_full(args):
     """--full, from scratch:
         turn back on what earlier runs turned off (and drop their conflict rules and asset stand-ins),
@@ -9920,6 +10065,9 @@ def run_full(args):
     It doesn't start at all while a plugin's master is missing from Data Files."""
     data_dir = os.path.abspath(args.data_dir)
     game_dir = os.path.dirname(data_dir)
+    rc = confirm_full_if_saves(args, game_dir)
+    if rc:
+        return rc
     set_title("mwdialog_check --full - checking masters")
     missing = full_missing_masters(args, game_dir)
     if missing:
@@ -10100,9 +10248,19 @@ def _ensure_vortex_paths(args):
                       and (want_staging or bool(getattr(args, "vortex_downloads", None))))
     if want_staging:
         cli = getattr(args, "vortex_dir", None)
-        args.vortex_dir = MP.resolve_staging(cli=cli, required=True)
-        src = "--vortex-dir/--staging" if cli else "Vortex settings"
-        print(f"Vortex staging: {args.vortex_dir}  (from {src})")
+        try:
+            args.vortex_dir = MP.resolve_staging(cli=cli, required=True)
+        except MP.VortexPathError:
+            # Vortex not installed at all (manual installs, other managers): run as --no-vortex instead of failing
+            if cli or os.path.isdir(MP.vortex_appdata() or ""):
+                raise
+            args.no_vortex = True
+            if MAIN_DEPTH <= 1:
+                print("Vortex is not installed: scanning Data Files only (as --no-vortex).")
+            want_downloads = want_downloads and bool(getattr(args, "vortex_downloads", None))
+        else:
+            src = "--vortex-dir/--staging" if cli else "Vortex settings"
+            print(f"Vortex staging: {args.vortex_dir}  (from {src})")
     if want_downloads:
         cli = getattr(args, "vortex_downloads", None)
         args.vortex_downloads = MP.resolve_downloads(cli=cli, required=True)
@@ -10174,6 +10332,7 @@ def parse_check_argv(argv=None, parser=None):
 def check_parser():
     """The mwdialog_check CLI parser (flags only; argv is normalized separately)."""
     ap = MT.parser(description="Scan a Morrowind Data Files folder for dialogue errors.")
+    ap.add_argument("--version", action="version", version=mwdialog_version.version_label("mwdialog_check"))
     ap.add_argument("data_dir", nargs="?", help='path to the "Data Files" folder (default: Data Files of the Morrowind '
                                                  'folder holding Morrowind.ini: the working folder or its parent, or '
                                                  'the parent of this script\'s folder)')
@@ -10235,7 +10394,7 @@ def check_parser():
                          "stop and open mwdialog_report.txt; else --auto-merge, --sort, --all, sort again, then "
                          "--fix --multipatch (pathgrids run once, after --clean and that sort); if any "
                          "ERROR is left, stop and open the report; else offer the interactive --cell-conflicts. "
-                         "--yes: no questions; --add-all-esp: add every plugin first; --play: start the game at the end")
+                         "--yes: no questions; --add-all-esp: add every plugin first; --play: start the game at the end. A bare --full (not --dry-run, no --preserve-saves) that finds .ess saves in Saves asks [y/N] first; --yes skips it; with no console and no --yes it refuses and changes nothing")
     tc.add_argument("--header", nargs="+", metavar="FILE",
                     help="show a plugin's Author and Description, or set them with --set-author/--set-description")
     tc.add_argument("--set-author", metavar="TEXT", help="with --header: new Author ('+text' appends)")
@@ -10388,7 +10547,7 @@ def check_parser():
                     help="keep a game in progress working (the bare flag means basic): skip --soundfix "
                          "(it adds script variables), the topic renames, any rebuild of Cell Fixes that would "
                          "bring back an object it deletes, and setting aside an earlier version's Performers "
-                         "patch. --preserve-saves strict or --preserve-saves=strict also keeps the active "
+                         "patch. --preserve-saves=strict (or --preserve-saves strict) also keeps the active "
                          "plugins, the auto-merge and those patches exactly as they are, and skips the "
                          "reference clean-ups and persistence flips (--full then has no reset, unmerge or "
                          "redundant step); what it holds back is reported")
@@ -10418,6 +10577,9 @@ def check_parser():
                     help="with --fix: don't add stand-in gold coins for objects that scripts name but no mod defines")
     fx.add_argument("--restore-all", action="store_true",
                     help="undo everything: put every plugin back to its oldest .bak (the original), back up what it replaces, and exit")
+    fx.add_argument("--undo-all", action="store_true",
+                    help="undo the plugin fixes in one go: --restore-all, then --redundant-undo, then --reenable "
+                         "(--yes, --dry-run and --ini are passed on)")
     fx.add_argument("--clean-up", action="store_true",
                     help="delete the .bak backups between each installed or parked plugin's oldest and "
                          "newest; delete every backup of a plugin no longer installed or parked; when that "
@@ -10433,6 +10595,8 @@ def _main(argv=None):
     global ENC
     ap = check_parser()
     args = parse_check_argv(argv, ap)
+    if MAIN_DEPTH == 1:
+        print(mwdialog_version.version_label("mwdialog_check"))
     if args.no_reduce_textures or args.no_reduce_splash:
         asset_health_module().keep_full_size(sys.modules[__name__], args.no_reduce_textures, args.no_reduce_splash)
     if args.data_dir is None:
@@ -10490,6 +10654,9 @@ def _main(argv=None):
             return 2
         for line in MH.rebaseline(args.data_dir, dry=args.dry_run):
             print(line)
+        if not args.dry_run:                      # the plugins as they are now are accepted too
+            MH.record_plugins(args.data_dir, read_load_order(args) or [])
+            print("  plugin list recorded: --play checks the active plugins against it")
         if not args.play:
             return 0
     if args.full:
@@ -10503,7 +10670,7 @@ def _main(argv=None):
     if getattr(args, "repair_sounds", False):
         return run_repair_sounds(args)
     if not REPAIRING_INI and os.path.isdir(args.data_dir) and not (args.add_all_esp and args.sort) \
-            and not (args.header or args.restore or args.restore_all or args.restore_dates):
+            and not (args.header or args.restore or args.restore_all or args.undo_all or args.restore_dates):
         cut = truncated_game_files(args)
         if cut:
             last, full, count = cut
@@ -10535,7 +10702,7 @@ def _main(argv=None):
                     print(f"(The repair's own checks ended with code {rc}; carrying on.)")
                 print("\n" + "=" * 70 + "\nLoad order repaired; now running what was asked.\n" + "=" * 70)
     if not REPAIRING_INI and os.path.isdir(args.data_dir) and not args.sort \
-            and not (args.header or args.restore or args.restore_all or args.restore_dates or args.add_all_esp):
+            and not (args.header or args.restore or args.restore_all or args.undo_all or args.restore_dates or args.add_all_esp):
         split = split_exact_groups(args)
         if split:
             print("=" * 70)
@@ -10570,7 +10737,7 @@ def _main(argv=None):
                 print("\n" + "=" * 70 + "\nLoad order re-sorted; now running what was asked.\n" + "=" * 70)
     if args.play:
         actions = (args.sort, args.add_all_esp, args.clean, args.fix, args.multipatch, args.patch_esm,
-                   args.header, args.trace, args.restore, args.restore_all, args.restore_dates, args.csv,
+                   args.header, args.trace, args.restore, args.restore_all, args.undo_all, args.restore_dates, args.csv,
                    args.clean_up, args.clean_up_undo, args.merge, args.auto_merge, args.merge_plan, args.unmerge is not None, args.cell_conflicts, args.reenable is not None, args.remove_generated,
                    args.redundant, args.redundant_auto, args.redundant_undo is not None, args.restore_textures,
                    args.update_rules)
@@ -10603,6 +10770,8 @@ def _main(argv=None):
         rc = run_clean_up(args)
         if rc or not (args.sort or args.clean or args.fix or args.multipatch):
             return rc
+    if args.undo_all:
+        return run_undo_all(args)
     if args.reenable is not None:
         return run_reenable(args)
     if args.redundant_undo is not None:
@@ -10614,7 +10783,7 @@ def _main(argv=None):
     if args.restore_textures:
         return run_restore_textures(args)
     if args.restore_all:
-        return restore_all(args.data_dir, args.yes, args.fix_log)
+        return restore_all(args.data_dir, args.yes, args.fix_log, dry_run=args.dry_run)
     if args.restore:
         return restore_backups(args.restore, args.data_dir)
 
@@ -10970,6 +11139,9 @@ def apply_load_order_to_ini(args):
 
 def main(argv=None):
     MT.install()
+    raw = sys.argv[1:] if argv is None else list(argv)
+    if '--version' in raw:
+        parse_check_argv(raw)  # argparse --version prints and exits; no lock needed
     if not MP.acquire_run_lock():
         print(MP.RUN_LOCKED_MESSAGE, file=sys.stderr)
         return 1
@@ -10994,6 +11166,13 @@ def main(argv=None):
                 print(f"\nThe run stopped early: Morrowind.ini's [Game Files] was NOT updated from "
                       f"{LOAD_ORDER_FILE}.", file=sys.stderr)
             LOAD_ORDER_WRITTEN.clear()
+            # a run that built our patches records the plugins they were built for (--play checks them)
+            if finished and MH.WROTE and TOP_ARGS is not None and not getattr(TOP_ARGS, "dry_run", False):
+                try:
+                    MH.record_plugins(TOP_ARGS.data_dir, read_load_order(TOP_ARGS) or [])
+                except (OSError, UnicodeError, ValueError) as e:
+                    print(f"\nCould not record the plugin list for --play: {e}", file=sys.stderr)
+            MH.WROTE.clear()
             MP.release_game_locks()
             if "mwdialog_assets" in sys.modules:
                 sys.modules["mwdialog_assets"].broken_models_notice()

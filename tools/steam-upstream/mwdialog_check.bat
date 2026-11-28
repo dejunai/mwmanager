@@ -21,6 +21,7 @@ rem    mwdialog_check.bat --fix                    (asks before writing)
 rem    mwdialog_check.bat --only MyMod.esp --fix   (one plugin)
 rem    mwdialog_check.bat --restore MyMod.esp      (undo: put the .bak back)
 rem    mwdialog_check.bat --restore-all            (undo everything: all plugins to originals)
+rem    mwdialog_check.bat --undo-all               (--restore-all, then turn back on what was turned off)
 rem    mwdialog_check.bat --fix --no-placeholders  (no stand-in coins for missing script objects)
 rem    mwdialog_check.bat --min-severity INFO      (also show harmless notes)
 rem
@@ -96,7 +97,7 @@ rem                                                 to Off\cleanup under the bac
 rem    mwdialog_check.bat --clean-up-undo          (put back the backups the last --clean-up moved to Off)
 rem    mwdialog_check.bat --preserve-saves        (keep a game in progress; the bare flag means basic,
 rem                                                 and a following Data Files path is still the folder)
-rem    mwdialog_check.bat --preserve-saves strict
+rem    mwdialog_check.bat --preserve-saves=strict
 rem    mwdialog_check.bat --merge "Merged.esp" "Extras\some-folder" --dry-run   (preview a merge)
 rem    mwdialog_check.bat --merge "Merged.esp" a.esp b.esp ...   (merge; inputs for uninstalled mods are left out)
 rem    mwdialog_check.bat --auto-merge --dry-run   (find small script-free plugins that can be merged)
@@ -129,8 +130,10 @@ rem      today's date)                          -> runs --sort --yes
 rem    With --dry-run it only reports these.
 rem ------------------------------------------------------------------
 setlocal
-rem the Morrowind folder: this folder's parent when it holds Morrowind.ini (Morrowind\conflict-tools\), else this one
+rem the Morrowind folder: this folder's parent when it holds Morrowind.exe or Morrowind.ini
+rem (Morrowind\conflict-tools\), else this one
 set "GAME=%~dp0"
+if exist "%~dp0..\Morrowind.exe" for %%I in ("%~dp0..") do set "GAME=%%~fI\"
 if exist "%~dp0..\Morrowind.ini" for %%I in ("%~dp0..") do set "GAME=%%~fI\"
 cd /d "%GAME%"
 

@@ -10,18 +10,25 @@ mwse = {
 }
 local handlers = {}
 event = { register = function(name, fn, options) handlers[#handlers + 1] = { name, fn, options and options.priority or 0 } end }
-tes3ui = { createTooltipMenu = function()
-    return {
-        createLabel = function(_, p) note("tooltip", p.text) end,
-        updateLayout = function() end,
-    }
-end }
+-- the bits of the game's UI tables the menu reads (tab state, heading colour, label fonts)
+tes3 = { uiState = { active = 4, normal = 1 }, palette = { headerColor = "headerColor" } }
+tes3ui = {
+    createTooltipMenu = function()
+        return {
+            createLabel = function(_, p) note("tooltip", p.text) return {} end,
+            updateLayout = function() end,
+        }
+    end,
+    getPalette = function(name) return { name } end,
+    registerID = function(name) return name end,
+}
 function table.size(t) local n = 0 for _ in pairs(t) do n = n + 1 end return n end
 
 -- a UI element that records what is built in it
 local function element(kind, text)
     local e = { kind = kind, text = text, children = {}, widget = {} }
     function e:createBlock() local c = element("block") self.children[#self.children + 1] = c return c end
+    function e:createLabel(p) local c = element("label", p.text) self.children[#self.children + 1] = c return c end
     function e:createButton(p) local c = element("button", p.text) self.children[#self.children + 1] = c return c end
     function e:destroyChildren() self.children = {} end
     function e:register(name, fn) self[name] = fn if name == "mouseClick" then self.click = fn end end

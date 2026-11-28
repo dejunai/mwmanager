@@ -17,17 +17,31 @@ pytestmark = pytest.mark.skipif(not os.path.isfile(LUAJIT), reason="LuaJIT not a
 
 SCRIPT = r"""
 local handlers, stopped, speaker = {}, 0, nil
+local function flt(opts) return opts and opts.filter end
 event = {
-  register = function(name, fn) handlers[name] = handlers[name] or {}; table.insert(handlers[name], fn) end,
-  unregister = function(name, fn)
-    for i = #(handlers[name] or {}), 1, -1 do if handlers[name][i] == fn then table.remove(handlers[name], i) end end
+  register = function(name, fn, opts)
+    handlers[name] = handlers[name] or {}; table.insert(handlers[name], { fn = fn, filter = flt(opts) })
+  end,
+  unregister = function(name, fn, opts)
+    for i = #(handlers[name] or {}), 1, -1 do
+      local h = handlers[name][i]
+      if h.fn == fn and h.filter == flt(opts) then table.remove(handlers[name], i) end
+    end
+  end,
+  isRegistered = function(name, fn, opts)
+    for _, h in ipairs(handlers[name] or {}) do if h.fn == fn and h.filter == flt(opts) then return true end end
+    return false
   end,
 }
-local function fire(name, e)
+local function fire(name, e)          -- a scriptExecute handler sees only its filter's script
+  e = e or {}
   local copy = {}
-  for i, fn in ipairs(handlers[name] or {}) do copy[i] = fn end
-  for _, fn in ipairs(copy) do fn(e or {}) end
+  for i, h in ipairs(handlers[name] or {}) do copy[i] = h end
+  for _, h in ipairs(copy) do
+    if name ~= "scriptExecute" or h.filter == e.script then h.fn(e) end
+  end
 end
+local function count(name) return #(handlers[name] or {}) end
 local armor = { { id = "AM_Lute", mesh = "m\\Misc_de_lute_01.nif", slot = 8 },
                 { id = "detd_am_lute_armor", mesh = "m\\misc_de_lute_01.nif", slot = 8 },
                 { id = "steel_shield", mesh = "a\\resolute_shield.nif", slot = 8 },
@@ -44,12 +58,16 @@ tes3 = { objectType = { npc = 1, armor = 2 }, armorSlot = { shield = 8 },
          removeSound = function() stopped = stopped + 1 end }
 tes3ui = { getServiceActor = function() return speaker end, findMenu = function() end }
 timer = { delayOneFrame = function() end }
-mwse = { loadConfig = function(_, d) d.enabled = ENABLED; d.log = false; return d end, saveConfig = function() end }
+local INN = { isInterior = true, id = "Balmora, Eight Plates", editorName = "Balmora, Eight Plates" }
+local DATA = { cells = { ["balmora, eight plates"] = { { id = "someone" } } } }
+mwse = { log = function() end, saveConfig = function() end, loadConfig = function(name, d)
+  if name == "mwperformers_data" then return DATA end
+  d.enabled = ENABLED; d.log = false; return d end }
 dofile([[MOD]])
 local function check(ok, what) if not ok then error(what, 2) end end
-local function npc(script, context)
+local function npc(script, context, cell)
   local base = { objectType = 1, id = "someone", mesh = "base_anim.nif", script = script and { id = script } }
-  return { reference = { object = { id = base.id, baseObject = base, objectType = 1 }, context = context } }
+  return { reference = { object = { id = base.id, baseObject = base, objectType = 1 }, context = context, cell = cell or INN } }
 end
 
 fire("initialized")
@@ -66,30 +84,25 @@ check(not sheathing.blocked.steel_shield and not sheathing.blocked.lute_helm, "o
 
 local bard = { state = 0, positiononce = 1, reposition = 0 }
 speaker = npc("DM_Bard_script", bard)
+local ref, script = speaker.reference, speaker.reference.object.baseObject.script
+local function runs(r) local e = { reference = r, script = script }; fire("scriptExecute", e); return not e.block end
 fire("uiActivated")
 check(bard.state == 1 and stopped == 1, "the song stops and the script skips its frame")
-for _ = 1, 3 do
-  bard.state = 0                              -- what the script does when it skips
-  fire("enterFrame")
-  check(bard.state == 1, "it skips every frame of the dialogue")
-end
+check(count("enterFrame") == 0, "no frame handler")
+for _ = 1, 3 do check(not runs(ref), "his script is skipped through the dialogue") end
+check(runs({}), "the same script on another NPC still runs")
 fire("uiActivated")                           -- back from barter
-check(#handlers.enterFrame == 1, "one frame handler, however often the dialogue shows")
+check(count("scriptExecute") == 1, "one script handler, however often the dialogue shows")
 fire("menuExit")
-bard.state = 0
-fire("enterFrame")
-check(bard.state == 0 and #handlers.enterFrame == 0, "he sings again afterwards, and no frame handler is left")
+check(runs(ref) and count("scriptExecute") == 0, "he sings again afterwards, and no script handler is left")
 
 fire("uiActivated")
-bard.state = 0
 fire("loaded")
-fire("enterFrame")
-check(bard.state == 0, "loading a save ends it")
+check(runs(ref) and count("scriptExecute") == 0, "loading a save ends it")
 
 local quest = { state = 5 }
 speaker = npc("my_bard_quest", quest)
 fire("uiActivated")
-fire("enterFrame")
 check(quest.state == 5, "another script's own 'state' is never written")
 fire("menuExit")
 
@@ -97,6 +110,10 @@ stopped = 0
 speaker = npc("guard_script", { state = 0, positiononce = 1 })
 fire("uiActivated")
 check(stopped == 0, "someone who doesn't perform is left alone")
+local elsewhere = { state = 0, positiononce = 1 }
+speaker = npc("DM_Bard_script", elsewhere, { isInterior = true, id = "Some Other Inn", editorName = "Some Other Inn" })
+fire("uiActivated")
+check(stopped == 0 and elsewhere.state == 0, "a bard in an interior the list doesn't name is left alone")
 print("ok")
 """
 
@@ -123,6 +140,10 @@ event = {
   unregister = function(name, fn, opts)
     if key(opts) then if filtered[name] then filtered[name][key(opts)] = nil end return end
     for i = #(handlers[name] or {}), 1, -1 do if handlers[name][i] == fn then table.remove(handlers[name], i) end end
+  end,
+  isRegistered = function(name, fn)
+    for _, h in ipairs(handlers[name] or {}) do if h == fn then return true end end
+    return false
   end,
 }
 local function fire(name, e)
@@ -167,7 +188,10 @@ tes3 = { objectType = { npc = 1, armor = 2 }, armorSlot = { shield = 8 },
 tes3ui = { getServiceActor = function() end, findMenu = function() end }
 include = function() end
 local cfg
-mwse = { loadConfig = function(_, d) d.enabled = true; d.log = false; cfg = d; return d end, saveConfig = function() end }
+local DATA = { cells = { ["balmora, eight plates"] = { { id = "raflod" }, { id = "am_lutist" }, { id = "bob_singer" } } } }
+mwse = { log = function() end, saveConfig = function() end, loadConfig = function(name, d)
+  if name == "mwperformers_data" then return DATA end
+  d.enabled = true; d.log = false; cfg = d; return d end }
 local picks = { 2, 1, 3 }
 math.random = function(m) local p = table.remove(picks, 1) assert(p <= m) return p end
 dofile([[MOD]])
@@ -235,6 +259,10 @@ event = {
   unregister = function(name, fn)
     for i = #(handlers[name] or {}), 1, -1 do if handlers[name][i].fn == fn then table.remove(handlers[name], i) end end
   end,
+  isRegistered = function(name, fn)
+    for _, h in ipairs(handlers[name] or {}) do if h.fn == fn then return true end end
+    return false
+  end,
 }
 local function fire(name, e)
   local list = {}
@@ -268,14 +296,16 @@ include = function() end
 MWLOG = {}
 local seen = {}                              -- another mod's handler (Animated Dialogue's), registered before ours
 event.register("uiActivated", function() seen[#seen + 1] = calls[1] end)
-mwse = { loadConfig = function(_, d) d.enabled = true; d.log = false; d.dialogueAnimation = DIALOGUE_ANIMATION; CFG = d; return d end, saveConfig = function() end, log = function(fmt, ...) MWLOG[#MWLOG + 1] = string.format(fmt, ...) end }
+local INN = { isInterior = true, id = "Balmora, Eight Plates", editorName = "Balmora, Eight Plates" }
+local DATA = { cells = { ["balmora, eight plates"] = { { id = "bard" } } } }
+mwse = { loadConfig = function(name, d) if name == "mwperformers_data" then return DATA end d.enabled = true; d.log = false; d.dialogueAnimation = DIALOGUE_ANIMATION; CFG = d; return d end, saveConfig = function() end, log = function(fmt, ...) MWLOG[#MWLOG + 1] = string.format(fmt, ...) end }
 dofile([[MOD]])
 local function check(ok, what) if not ok then error(what .. " / " .. table.concat(calls, ", "), 2) end end
 local function last() return calls[#calls] end
 
 local function performer(mesh, script, groups, override, extra)
   local base = { objectType = 1, id = "bard", mesh = mesh, script = script and { id = script } }
-  local ref = { object = { id = "bard", baseObject = base, objectType = 1 }, context = { state = 0, positiononce = 1 },
+  local ref = { object = { id = "bard", baseObject = base, objectType = 1 }, context = { state = 0, positiononce = 1 }, cell = INN,
                 sceneNode = {}, animationData = { currentAnimGroups = groups, hasOverrideAnimations = override,
                   actorNode = { update = function(_, o) calls[#calls + 1] = "update" .. (o.time and (" t=" .. o.time) or "") end } },
                 mobile = {} }
@@ -465,6 +495,19 @@ timer.start = function() error("no timer") end
 dialogueEnded()
 check(calls[4] == "load:own", "no timer to wait with: he is not left plain")
 timer.start = realStart
+
+-- 10. one song after the dialogue: his script stays held until his animation is back. The restore (loadAnimation)
+-- rebuilds him and the engine forgets the song he sings (SayDone turns true while it plays on): a script already
+-- running again started a second song over it (2026-11-27, Raflod the Braggart)
+reset()
+local function held() return #(handlers.scriptExecute or {}) end
+speaker = performer("am\anim_lute.nif", "DM_Bard_script", { 0, 0, 255 }, true)
+fire("uiActivated")
+check(held() == 1, "his script is held in the dialogue")
+fire("menuExit")
+check(held() == 1 and live() == 1, "still held while he stands plain: a song now would overlap the restore")
+fireTimers()
+check(calls[#calls - 1] == "load:own" and held() == 0, "released only once his animation is back")
 print("ok")
 """
 
@@ -474,11 +517,61 @@ def test_performing_animation_stops_in_dialogue_and_comes_back(on):
     script = ANIM_SCRIPT.replace("DIALOGUE_ANIMATION", on).replace("[[MOD]]", "[[" + MOD + "]]")
     if on == "false":
         script = script.split("fire(\"initialized\")")[0] + """fire("initialized")
-speaker = { reference = { object = { id = "bard", baseObject = { objectType = 1, id = "bard", mesh = "am\\\\anim_lute.nif" }, objectType = 1 },
+speaker = { reference = { cell = { isInterior = true, id = "Balmora, Eight Plates" }, object = { id = "bard", baseObject = { objectType = 1, id = "bard", mesh = "am\\\\anim_lute.nif" }, objectType = 1 },
   context = { state = 0, positiononce = 1 }, sceneNode = {}, animationData = { currentAnimGroups = { 0, 0, 255 }, hasOverrideAnimations = true } } }
+speaker.reference.object.baseObject.script = { id = "DM_Bard_script" }
 fire("uiActivated"); fire("menuExit")
 if #calls ~= 0 then error("switched off: no animation touched / " .. table.concat(calls, ", ")) end
+if #(handlers.scriptExecute or {}) ~= 0 then error("no animation to wait for: his script runs again when the menu closes") end
 print("ok")
 """
     out = subprocess.run([LUAJIT, "-"], input=script, capture_output=True, text=True, timeout=60)
     assert out.returncode == 0 and out.stdout.strip().endswith("ok"), out.stderr + out.stdout
+
+
+KNOWN_SCRIPT = r"""
+local handlers, logged, lines = {}, {}, {}
+event = { register = function(name, fn) handlers[name] = handlers[name] or {}; table.insert(handlers[name], fn) end,
+          unregister = function() end, isRegistered = function() return false end }
+local function fire(name, e) for _, fn in ipairs(handlers[name] or {}) do fn(e or {}) end end
+local inn = { isInterior = true, id = "Balmora, Eight Plates", editorName = "Balmora, Eight Plates" }
+local refs = { { object = { id = "raflod", name = "Raflod", baseObject = { objectType = 1, id = "raflod", mesh = "base_anim.nif",
+                 script = { id = "DM_Bard_script" } }, objectType = 1 }, cell = inn, position = { x = 0, y = 0, z = 0 } } }
+function inn:iterateReferences() local i = 0 return function() i = i + 1 return refs[i] end end
+tes3 = { objectType = { npc = 1, armor = 2 }, armorSlot = { shield = 8 }, event = setmetatable({}, { __index = function(_, k) return k end }),
+         getActiveCells = function() return { inn } end, iterateObjects = function() return function() end end,
+         player = { data = {} } }
+timer = { delayOneFrame = function(f) f() end }
+include = function() end
+lfs = { mkdir = function() end }
+io.open = function() return { write = function(_, ...) for _, s in ipairs({ ... }) do lines[#lines + 1] = s end end,
+                              flush = function() end } end
+mwse = { log = function(fmt, ...) logged[#logged + 1] = string.format(fmt, ...) end, saveConfig = function() end,
+         loadConfig = function(name, d)
+           if name == "mwperformers_data" then return DATA end
+           d.enabled = true; d.log = true; return d end }
+dofile([[MOD]])
+fire("loaded")
+fire("cellChanged")
+print("logged=" .. table.concat(logged, " | "))
+print("lines=" .. table.concat(lines, ""))
+"""
+
+
+def _known(data):
+    script = KNOWN_SCRIPT.replace("DATA end", data + " end").replace("[[MOD]]", "[[" + MOD + "]]")
+    out = subprocess.run([LUAJIT, "-"], input=script, capture_output=True, text=True, timeout=60)
+    assert out.returncode == 0, out.stderr + out.stdout
+    return out.stdout
+
+
+def test_without_the_list_no_one_is_handled_and_mwse_log_says_so_once():
+    out = _known("nil")
+    assert out.count("mwperformers_data.json is missing: no performers are handled") == 1
+    assert "lines=\n" in out or out.rstrip().endswith("lines=")              # its own log: nothing decided
+
+
+def test_a_listed_performer_who_is_not_there_is_logged_once():
+    out = _known('{ cells = { ["balmora, eight plates"] = { { id = "raflod" }, { id = "ghost_bard", from = "Bards.esp" } } } }')
+    assert out.count("ghost_bard is listed (placed by Bards.esp) but isn't here") == 1
+    assert "raflod is listed" not in out

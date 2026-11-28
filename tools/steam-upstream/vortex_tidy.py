@@ -98,6 +98,8 @@ For each mod folder in Vortex's Morrowind staging folder (from Vortex's settings
 Mods that install into the game folder instead of Data Files (an .exe, .dll or a "Data Files" folder at
 their root, like MGE XE) are left alone, and so is every mod on the blacklist: the Morrowind Code Patch and
 NIFZER0EDIT built in, plus the folder names in vortex_tidy_blacklist.txt (one per line, wildcards allowed).
+If that file is missing it is created with the built-in patterns and *Breezify*; an existing file is never
+overwritten or added to.
 
   * MWSE Lua mods (MWSE\\mods\\...\\*.lua) are checked by mwdialog_luafix.py for bad habits that pass a syntax
     check (absurd priorities, polling every frame, one-shot handlers that never unregister, unguarded ref.data,
@@ -120,7 +122,8 @@ NIFZER0EDIT built in, plus the folder names in vortex_tidy_blacklist.txt (one pe
     either way is left as it is, which the plan says.
 
 It only shows the plan unless you pass --apply. Every move is written to a journal, and --undo puts
-everything back. Purge in Vortex before applying, and Deploy afterwards, so the game folder matches.
+everything back. Deploy in Vortex afterwards, so the game folder matches (Purging before applying is good
+practice, not needed: Vortex removes the moved files on that Deploy).
 Asset repairs are undone the same way: before a mod's files are repaired, every file the repairs can change
 (the file, a same-named file beside it, the mod's plugins and bug reports) is copied to
 <backups folder>\\tidy\\<run>\\assets\\<mod folder>\\ and journaled with its SHA-256; --undo puts each
@@ -160,6 +163,7 @@ import mwdialog_backup as MB                     # noqa: E402
 import mwdialog_planfile as PF                   # noqa: E402
 import mwdialog_offlayout as OL                  # noqa: E402
 import mwdialog_paths as MP                      # noqa: E402
+import mwdialog_version                            # noqa: E402
 import mwdialog_report as MR                     # noqa: E402
 import mwdialog_staged as MS                     # noqa: E402
 import mwdialog_text as MT                       # noqa: E402
@@ -218,31 +222,46 @@ DOC_EXT = {".txt", ".md", ".pdf", ".rtf", ".doc", ".docx", ".odt", ".html", ".ht
 DOC_DIR_NAMES = {"doc", "docs", "documentation", "readme", "readmes", "manual", "manuals", "info"}
 GAME_ROOT_EXT = {".exe", ".dll", ".asi"}          # the mod installs into the game folder: leave it alone
 # mods never touched: the defaults below plus one pattern per line in vortex_tidy_blacklist.txt
-# (in the game folder; wildcards allowed, matched against the mod's folder name, case doesn't matter)
+# (beside the tools; wildcards allowed, matched against the mod's folder name, case doesn't matter)
 BLACKLIST = ["Morrowind Code Patch*", "MCP beta*", "NIFZER0EDIT*"]
+BLACKLIST_EXTRA = ["*Breezify*"]          # generated into the starter file, not hardcoded
 BLACKLIST_FILE = MP.state_path(HERE, "vortex_tidy_blacklist.txt")
 
 
+def blacklist_starter_text():
+    """The file written when vortex_tidy_blacklist.txt is missing: the built-in patterns and *Breezify*."""
+    lines = [
+        "; vortex_tidy blacklist: mods it never touches. One mod folder name per line; * and ? work.",
+        "; Created when the file is missing; an existing file is never overwritten or added to.",
+    ]
+    return "\n".join(lines + BLACKLIST + BLACKLIST_EXTRA) + "\n"
+
+
 def blacklist(create=True):
-    """The blacklist patterns. create: write the commented starter file when there is none (not in a plan-only
-    run, which changes nothing)."""
+    """The blacklist patterns. If vortex_tidy_blacklist.txt is missing and create is true, it is written with
+    the built-in patterns and *Breezify*; an existing file is never overwritten or added to."""
     pats = list(BLACKLIST)
     if not os.path.exists(BLACKLIST_FILE):
         if not create:
-            return pats
+            return pats + list(BLACKLIST_EXTRA)
         try:
-            with open(BLACKLIST_FILE, "w", encoding="utf-8") as f:
-                f.write("; vortex_tidy blacklist: mods it never touches. One mod folder name per line; * and ? work.\n"
-                        "; Morrowind Code Patch and NIFZER0EDIT are built in. Add tools and other odd layouts here.\n")
-        except OSError:
+            folder = os.path.dirname(os.path.abspath(BLACKLIST_FILE))
+            if folder:
+                os.makedirs(folder, exist_ok=True)
+            with open(BLACKLIST_FILE, "x", encoding="utf-8") as f:
+                f.write(blacklist_starter_text())
+        except FileExistsError:
             pass
-    else:
-        for line in open(BLACKLIST_FILE, encoding="utf-8", errors="replace"):
+        except OSError:
+            return pats + list(BLACKLIST_EXTRA)
+    try:
+        for line in open(BLACKLIST_FILE, encoding="utf-8-sig", errors="replace"):
             line = line.strip()
             if line and not line.startswith((";", "#")):
                 pats.append(line)
+    except OSError:
+        pass
     return pats
-
 VORTEX_FILES = {"__folder_managed_by_vortex"}
 
 # Vortex folder names: "Name-12345-1-2-1612345678", "Name-12345-1-2", "Name-12345",
@@ -637,7 +656,6 @@ PREVIEW_CHECK = {}     # converted-to-be mod folder -> {"digest", "identity", "l
 BLOCKED_PLAN = []      # warning texts: mods omw2mwse's dry run judged blocked (they get the usual Off\\ move)
 CONVERT_MODES = ("normal", "hardcode")          # omw2mwse's own --convert-omwscripts modes
 CONVERT_DEFAULT = "normal"                      # what ships: end users get this unless they pass --convert-omwscripts=hardcode
-CONVERT_DEV_HARDCODE = True                     # --remove before shipping: developer-only, forces omw2mwse into hardcode mode
 _CONVERT_UNSET = object()                       # argparse: --convert-omwscripts was not given
 CONVERT_ACTION = "convert with omw2mwse"
 CONVERTER = {"mode": None, "cmd": None, "env": None, "why": "", "python": ""}   # set by main(): the mode, how to run it
@@ -810,12 +828,10 @@ def converter_python_problem(cmd, where="", requires=None):
 
 def convert_mode(chosen=_CONVERT_UNSET):
     """The omw2mwse mode tidy will run: `chosen` when it is one of CONVERT_MODES or None
-    (--no-convert-omwscripts); when nothing was chosen, CONVERT_DEFAULT, except CONVERT_DEV_HARDCODE
-    forces hardcode."""
+    (--no-convert-omwscripts); when nothing was chosen, CONVERT_DEFAULT."""
     if chosen is not _CONVERT_UNSET:
         return chosen
-    # read by name: ready_to_ship.py has the marked line removed before shipping, and then this is CONVERT_DEFAULT
-    return "hardcode" if globals().get("CONVERT_DEV_HARDCODE", False) else CONVERT_DEFAULT
+    return CONVERT_DEFAULT
 
 
 def setup_converter(mode):
@@ -1983,7 +1999,7 @@ def run_plan(args):
     del BLOCKED_PLAN[:]
     CONVERTER["missed"] = 0
     _TEX_INDEX.clear()
-    pats = blacklist(create=bool(getattr(args, "apply", False))) + (args.skip or [])
+    pats = blacklist() + (args.skip or [])
     for d in mods:
         hit = next((pt for pt in pats if fnmatch.fnmatch(d.lower(), pt.lower())), None)
         if hit:
@@ -2054,8 +2070,9 @@ def run_plan(args):
         head.append(f"  - WARNING: {CONVERTER['python']}, so it is not used: "
                     f"{CONVERTER['missed']} OpenMW-only mod(s) get their whole package moved to Off\\<plugin>\\OpenMW\\ instead")
     elif CONVERTER.get("missed"):                    # one line: the converter isn't there
-        head.append(f"  - WARNING: omw2mwse (the OpenMW converter) was not found on PATH or beside these tools: "
-                    f"{CONVERTER['missed']} OpenMW-only mod(s) get their whole package moved to Off\\<plugin>\\OpenMW\\ instead")
+        head.append(f"  - NOTE: {CONVERTER['missed']} OpenMW-only mod(s) get their whole package moved to "
+                    f"Off\\<plugin>\\OpenMW\\: they need the optional OpenMW-to-MWSE converter, still in "
+                    f"development and not installed. Every run looks at them again.")
     pend = pending_intent_line()
     if pend:
         head.append(f"  - {pend}")
@@ -2167,7 +2184,7 @@ def apply(moves, staging, progress=None, head_extra=None):
             except OSError as e:
                 print(f"  could not move {src}: {e}", file=sys.stderr)
                 failed.append((src, dst, why))
-    print(f"Moved {done} item(s). Journal: {JOURNAL} (--undo puts them back). Now Deploy in Vortex.")
+    print(f"Moved {done} item(s). Journal: {JOURNAL} (--undo puts them back). Now Deploy in Vortex: it takes the moved files out of the game.")
     return failed
 
 
@@ -2972,7 +2989,7 @@ def lua_check(args):
                   and d.lower() != "off")
     if args.only:
         mods = [d for d in mods if any(fnmatch.fnmatch(d.lower(), pat.lower()) for pat in args.only)]
-    pats = blacklist(create=bool(args.apply)) + (args.skip or [])
+    pats = blacklist() + (args.skip or [])
     cfg = lf.load_config(game_dir, data_dir)
     checker = lf.find_checker(getattr(args, "luajit", None), game_dir)
     print("\n" + "=" * 70 + "\nLUA CHECK (each mod's MWSE Lua files)\n" + "=" * 70)
@@ -3766,7 +3783,7 @@ def assets_check(args):
                   and d.lower() != "off")
     if args.only:
         mods = [d for d in mods if any(fnmatch.fnmatch(d.lower(), pat.lower()) for pat in args.only)]
-    pats = blacklist(create=bool(args.apply)) + (args.skip or [])
+    pats = blacklist() + (args.skip or [])
     data_dir = MS.StagedData(args.staging, game_dir)          # staged files only before deploy (mwdialog_staged)
     if not os.path.isdir(data_dir.data_dir):
         print(f"\n(note: no Data Files folder next to vortex_tidy.py ({data_dir.data_dir}): an animation's model in "
@@ -4046,12 +4063,14 @@ def main():
 def _main():
     MT.install()
     ap = MT.parser(description="Tidy the mods in Vortex's Morrowind staging folder.")
+    ap.add_argument("--version", action="version", version=mwdialog_version.version_label("vortex_tidy"))
     ap.add_argument("--staging", default=None, metavar="DIR",
                     help="Vortex Morrowind staging folder (default: Vortex's own setting)")
     ap.add_argument("--only", nargs="+", metavar="PATTERN", help="only these mod folders (wildcards allowed)")
     ap.add_argument("--skip", nargs="+", metavar="PATTERN",
                     help="leave these mod folders alone this time too (to always skip one, add it to "
-                         "vortex_tidy_blacklist.txt)")
+                         "vortex_tidy_blacklist.txt; that file is created with the built-in patterns "
+                         "and *Breezify* if it is missing, and an existing file is never overwritten)")
     ap.add_argument("--apply", action="store_true", help="make the changes (without it, only the plan is shown)")
     ap.add_argument("--yes", action="store_true", help="with --apply: don't ask first")
     ap.add_argument("--undo", action="store_true",
@@ -4076,9 +4095,10 @@ def _main():
                          "coin (the default, so the gap is easy to spot)")
     ap.add_argument("--convert-omwscripts", nargs="?", const=CONVERT_DEFAULT, default=_CONVERT_UNSET,
                     choices=CONVERT_MODES, metavar="MODE",
-                    help="OpenMW-only mods (OpenMW scripts, no MWSE Lua) are converted for MWSE by omw2mwse, found "
-                         "on PATH or beside these tools, in this mode: normal (the default) or hardcode (hard-coded "
-                         "values become MCM settings; runs with --accept-hardcode-conversions). "
+                    help="OpenMW-only mods (OpenMW scripts, no MWSE Lua) are converted for MWSE if/when the optional, "
+                         "very experimental OpenMW converter (in development, not included) is found on PATH or "
+                         "beside these tools, in this mode: normal (the default) or hardcode (hard-coded "
+                         "values become MCM settings). "
                          "Pass --convert-omwscripts=hardcode to pick hardcode. Mods with MWSE Lua are never "
                          "converted: their OpenMW files go to Off\\<plugin>\\OpenMW\\. An OpenMW-only mod that is "
                          "not converted gets its whole package moved to Off\\<plugin name>\\OpenMW\\")
@@ -4108,6 +4128,7 @@ def _main():
             ap.error("--after-mwse-update stands alone (it only re-applies MWSE core patches)")
         outcome, _why, rc = tidy_after_mwse_update(args.after_mwse_update, args.mwse_version_before)
         return 0 if rc is None else rc
+    print(mwdialog_version.version_label("vortex_tidy"))
     if args.mwse_version_before:
         ap.error("--mwse-version-before goes with --after-mwse-update")
     setup_converter(convert_mode(args.convert_omwscripts))
@@ -4189,12 +4210,40 @@ def fresh_plan(args):
     return text, parts, moves, lres, ares
 
 
+BROKEN_KINDS = {"dummy", "broken", "brokenout", "actorbox", "orphan", "unused"}   # set aside, not repaired
+
+
+def summary_lines(args, moves, lres, ares, done=None):
+    """The few lines tidy ends with, long after each section's own output has scrolled away: one count per kind
+    of fix, planned (done None) or done (done: {"moves": applied moves, "lua": patched paths, "assets": (mod,
+    plan line) set, "convert": converted mods})."""
+    plan = done is None
+    moved = [m for m in (moves if plan else done["moves"]) if m[1]]   # an emptied folder's removal isn't a fix
+    acts = [a for ent in ares["mods"].values() for a in asset_action_lines(ent)] if ares and plan \
+        else [a for _d, a in (done or {}).get("assets", ())]
+    broken = sum(1 for a in acts if a.startswith("repair ") and a.split()[1] in BROKEN_KINDS)
+    lua = lres["n_ok"] if lres and plan else len((done or {}).get("lua", ()))
+    rows = [("Files to move" if plan else "Files moved", len(moved)),
+            ("Assets to repair" if plan else "Assets repaired", len(acts) - broken),
+            ("Broken assets to set aside" if plan else "Broken assets set aside", broken),
+            ("Lua scripts to patch" if plan else "Lua scripts patched", lua)]
+    conv = CONVERT if plan else done["convert"]
+    if conv:
+        rows.append(("OpenMW mods to convert" if plan else "OpenMW mods converted", len(conv)))
+    if REVIEW:
+        rows.append(("Mods that need a look", len(REVIEW)))
+    w = max(len(k) for k, _n in rows)
+    return ["", f"vortex_tidy summary ({'plan' if plan else 'done'}):"] + [f"  {k + ':':<{w + 1}} {n:>6,}"
+                                                                          for k, n in rows]
+
+
 def plan_main(args):
     text, _parts, moves, lres, ares = fresh_plan(args)
     PF.write_atomic(PLAN, text)
+    print("\n".join(summary_lines(args, moves, lres, ares)))
     print(f"\nFull plan: {PLAN}")
     if moves or REVIEW or CONVERT or (lres and lres["n_ok"]) or assets_pending(ares):
-        print("\nNothing changed. Purge in Vortex, review the plan, run again with --apply, then Deploy.")
+        print("\nNothing changed. Review the plan, run again with --apply, then Deploy in Vortex.")
     else:
         print("\nNothing to fix.")
     return 0
@@ -4220,9 +4269,10 @@ def apply_main(args):
     text, parts, moves, lres, ares = fresh_plan(args)
     added, removed = PF.compare(reviewed, text, parts)
     if added or removed:
-        PF.refuse_mismatch(PLAN, text, added, removed, "vortex_tidy.py" + (" --lua-only" if args.lua_only else ""))
+        print("\n".join(summary_lines(args, moves, lres, ares)))     # what the new plan holds
         if any(CHECK_LABEL in str(a) for a in list(added) + list(removed)):
-            print(f"{CHECK_REFUSED}: review the new plan before --apply.")
+            print(f"\n{CHECK_REFUSED}.")
+        PF.refuse_mismatch(PLAN, text, added, removed, "vortex_tidy.py" + (" --lua-only" if args.lua_only else ""))
         return 2
     print("\nThe plan matches the one you reviewed.")
     audit = os.path.join(AUDIT_ROOT, time.strftime("%Y%m%d-%H%M%S"))
@@ -4240,7 +4290,7 @@ def apply_main(args):
         if moves or gone or conv:
             what = f"{sum(1 for m in moves if m[1])} move(s)" + (f" and delete {len(gone)} mod(s)" if gone else "") \
                 + (f" and convert {len(conv)} OpenMW-only mod(s) with omw2mwse ({CONVERTER['mode']})" if conv else "")
-            if not args.yes and input(f"\nApply {what}? Purge in Vortex first. [y/N] ").strip().lower() not in \
+            if not args.yes and input(f"\nApply {what}? [y/N] ").strip().lower() not in \
                     ("y", "yes"):
                 print("Nothing changed.")
                 return 0
@@ -4262,6 +4312,12 @@ def apply_main(args):
         st["finished"] = True
     finally:
         left = _finish_plan(args, st, reviewed, audit)
+    left_conv = set(st["convert_left"] or ())
+    print("\n".join(summary_lines(args, moves, lres, ares, done={
+        "moves": [st["moves"][i] for i in st["progress"]], "lua": (lres or {}).get("done") or [],
+        "assets": (ares or {}).get("done") or set(), "convert": [m for m in st["convert"] if m not in left_conv]})))
+    if left:
+        print(f"  Not everything was done: what is left is in {PLAN}")
     return 0 if not left else 1
 
 
