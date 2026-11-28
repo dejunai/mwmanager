@@ -530,8 +530,22 @@ def plan_mod(mod_dir):
         key = os.path.normcase(os.path.abspath(dst))
         if os.path.exists(dst) or key in taken:
             return
+        if os.path.normcase(os.path.dirname(os.path.abspath(dst))) == os.path.normcase(os.path.abspath(mod_dir)) \
+                and os.path.basename(dst).casefold() in parked_choices():
+            return                         # the options window left this plugin out (Extras\\<mod>\\unused-at-install)
         taken.add(key)
         moves.append((src, dst, LINK_PREFIX + why))
+
+    def parked_choices(cache={}):
+        if "names" not in cache:
+            names = set()
+            extras_dir = os.path.join(mod_dir, existing(mod_dir, "Extras"))
+            if os.path.isdir(extras_dir):
+                for base, dirs, files in os.walk(extras_dir):
+                    if os.path.basename(base).casefold() == "unused-at-install":
+                        names.update(f.casefold() for f in files)
+            cache["names"] = names
+        return cache["names"]
 
     # Migrate the earlier LuaRepair layout and remove the source-tree wrappers
     # from backup paths. Preserve each original under the owning ESM's folder.

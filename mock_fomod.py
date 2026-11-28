@@ -1039,10 +1039,162 @@ def _installed_plugins(data_files: Path, prior: set[str] = frozenset()) -> set[s
     return found
 
 
+def _cached_page_text(mod_dir: Path) -> str:
+    """The mod page MWManager's browser cached before; no network."""
+    mod_id = _nexus_mod_id(mod_dir)
+    if not mod_id:
+        return ""
+    try:
+        import mwnexus_browser
+        page = mwnexus_browser.cached_page(mod_id)
+    except Exception:
+        return ""
+    return str(page.get("text", "")) if isinstance(page, dict) else ""
+
+
+def _choice_record(parent: dict, rel: str, source: Path, *, group_key: str, group_label: str, selection_type: str,
+                   number: float, recommended: bool, warning: str, texts, optional: bool, evidence: str) -> dict:
+    """One plugin split out of a folder option as its own choice; linked into the root only when chosen."""
+    import option_variants as V
+    name = Path(source).name
+    about = V.about_sentences(Path(source).stem, texts, optional=optional, skip=warning)
+    docs = "\n".join(dict.fromkeys(([warning] if warning else []) + about))
+    masters = _plugin_masters(Path(source))
+    targets = masters - BASE_GAME_MASTERS
+    return {"key": f"plugin-choice:{group_key}:{rel}".casefold(), "group_key": group_key,
+            "group_label": group_label, "selection_type": selection_type, "path": Path(source), "number": number,
+            "label": name, "required": False, "targets": sorted(targets), "compatible": [],
+            "missing_masters": [], "docs": docs, "payload_files": {rel: Path(source)}, "plugin_choice": True,
+            "link_when_chosen": True, "recommended": recommended, "always_optional": not recommended,
+            "warning": warning, "mod_dir": parent["mod_dir"], "badges": [], "outputs": {rel.casefold()},
+            "evidence": evidence}
+
+
+def _split_variant_and_optional_choices(mod_dir: Path, records: list[dict], shared_docs: str) -> list[dict]:
+    """Rule-based option shaping (option_variants): exclusive plugin variants in one folder become one choice,
+    an optional plugin in a required payload becomes its own tickable choice, and an option the docs or the page
+    warn against gets that sentence first and starts unticked."""
+    import option_variants as V
+    page = _cached_page_text(mod_dir)
+    plugin_names = {Path(src).name.casefold() for r in records for src in _payload_files(r).values()
+                    if Path(src).suffix.casefold() in {".esp", ".esm"}}
+    sole = len(plugin_names) == 1
+    out = []
+    for record in records:
+        if record.get("plugin_choice"):
+            out.append(record)
+            continue
+        payload = _payload_files(record)
+        plugins = [(rel, Path(src)) for rel, src in payload.items()
+                   if Path(src).suffix.casefold() in {".esp", ".esm"} and not _is_grass_plugin(Path(src))]
+        texts = [t for t in (record.get("docs", ""), shared_docs, page) if t]
+        joined = "\n".join(texts)
+        taken: set[str] = set()
+        split = []
+        groups = V.variant_groups([src for _, src in plugins], joined) if len(plugins) > 1 else []
+        for index, group in enumerate(groups):
+            keys = {os.path.normcase(str(p)) for p in group}
+            members = sorted(((rel, src) for rel, src in plugins if os.path.normcase(str(src)) in keys),
+                             key=lambda item: V.natural_key(item[1].stem))
+            warned = {rel: V.warning_for(src.stem, texts) for rel, src in members}
+            clean = [src for rel, src in members if not warned[rel]] or [src for _, src in members]
+            default = V.recommended_variant(clean, texts) if record.get("required") else None
+            group_key = f"variants:{record['key']}:{index}".casefold()
+            for rel, src in members:
+                split.append(_choice_record(
+                    record, rel, src, group_key=group_key, group_label=f"{record['label']} — one variant",
+                    selection_type="SelectExactlyOne" if record.get("required") else "SelectAtMostOne",
+                    number=record["number"], recommended=default is not None and src == default,
+                    warning=warned[rel], texts=texts, optional=False,
+                    evidence="same name with a different variant tail, and the docs or the plugin records "
+                             "show they replace each other"))
+                taken.add(rel)
+        if record.get("required") and sole:
+            for rel, src in plugins:
+                if rel in taken or not V.is_optional_plugin(src, texts, root=mod_dir):
+                    continue
+                warning = V.warning_for(src.stem, texts, optional=True)
+                split.append(_choice_record(
+                    record, rel, src, group_key=f"optional-plugin:{rel}".casefold(), group_label="Optional plugin",
+                    selection_type="SelectAny", number=record["number"], recommended=not warning,
+                    warning=warning, texts=texts, optional=True,
+                    evidence="its name or the docs call it optional" + ("; the docs or page warn against it"
+                                                                         if warning else "")))
+                taken.add(rel)
+        elif not record.get("informational_utility"):
+            warning = V.warning_for(record.get("label", ""), texts)
+            if warning:
+                record["warning"] = warning
+                record["recommended"] = False
+                record["always_optional"] = True
+                docs = str(record.get("docs", ""))
+                if not docs.lstrip().startswith(warning):
+                    record["docs"] = warning + ("\n" + docs if docs.strip() else "")
+        if taken:
+            rest = {rel: src for rel, src in payload.items() if rel not in taken}
+            record["payload_files"] = rest
+            if not rest:
+                out.extend(split)
+                continue
+        out.append(record)
+        out.extend(split)
+    return out
+
+
+def _apply_linked_choice(mod_dir: Path, item: dict, chosen: bool) -> int:
+    """A split-out plugin choice: linked into the root when chosen. When not, its root copy and any copy Tidy would
+    still flatten into the root (Data Files\\, the root) are parked under Extras\\<mod>\\unused-at-install, which
+    also tells Tidy not to link a 00 folder's copy back in."""
+    import filecmp
+    changed = 0
+    extras = mod_dir / "Extras"
+    mod_folder = next((p for p in extras.iterdir() if p.is_dir() and p.name.casefold() == mod_dir.name.casefold()),
+                      None) if extras.is_dir() else None
+    parked_dir = (mod_folder or extras / mod_dir.name) / "unused-at-install"
+    for rel, source in item["payload_files"].items():
+        source, destination = Path(source), mod_dir / Path(rel).name
+        parked = parked_dir / source.name
+        if chosen:
+            if not source.exists() and parked.exists():
+                source = parked                       # an earlier answer parked the only copy
+            if not destination.exists() and source.exists():
+                try:
+                    os.link(source, destination)
+                except OSError:
+                    shutil.copy2(source, destination)
+                changed += 1
+            if parked.exists() and destination.exists() and parked != source \
+                    and filecmp.cmp(parked, destination, shallow=False):
+                parked.unlink()
+            continue
+
+        def park(path: Path) -> None:
+            parked_dir.mkdir(parents=True, exist_ok=True)
+            if parked.exists() and filecmp.cmp(parked, path, shallow=False):
+                path.unlink()
+            else:
+                target = parked if not parked.exists() else parked.with_name(
+                    f"{parked.stem}.mwmanager-{int(time.time())}{parked.suffix}")
+                shutil.move(str(path), str(target))
+
+        same_path = os.path.normcase(str(destination)) == os.path.normcase(str(source))
+        if destination.exists() and (same_path or not source.exists()
+                                     or filecmp.cmp(source, destination, shallow=False)):
+            park(destination)
+            changed += 1
+        if not same_path and source.exists():
+            inside = [part.casefold() for part in source.relative_to(mod_dir).parts[:-1]] \
+                if source.is_relative_to(mod_dir) else ["extras"]
+            if not inside or inside[0] not in {"extras", "off"}:
+                park(source)
+                changed += 1
+    return changed
+
+
 def _discover(mod_dir: Path, installed: set[str]) -> list[dict]:
     option_dirs = _option_dirs(mod_dir)
     if not option_dirs:
-        return []
+        return _core_variant_choices(mod_dir, _read_docs([mod_dir / "Docs", mod_dir / "docs", mod_dir]))
     base_plugins = [p for p in mod_dir.iterdir() if p.is_file() and p.suffix.casefold() in PLUGIN_EXTS]
     base_masters = set().union(*(_plugin_masters(p) for p in base_plugins)) if base_plugins else set()
     base_plugin_stems = {re.sub(r"[^a-z0-9]+", " ", p.stem.casefold()).strip() for p in base_plugins}
@@ -1138,6 +1290,8 @@ def _discover(mod_dir: Path, installed: set[str]) -> list[dict]:
             else:
                 record["group_label"] = "Legacy optional folder — best-effort choice"
             records.append(record)
+    records = _split_variant_and_optional_choices(mod_dir, records, shared_docs)
+    records.extend(_core_variant_choices(mod_dir, shared_docs))
     return sorted(records, key=lambda x: (x["number"], x["label"].casefold(), x["key"].casefold()))
 
 
@@ -1232,6 +1386,81 @@ def _lone_plugin_wrapper(mod_dir: Path) -> str | None:
     return folders[0].name
 
 
+def _package_plugins(mod_dir: Path) -> list[Path]:
+    """The package's ESP/ESM files that could deploy (not parked under Off or kept under Extras)."""
+    return [p for p in _safe_rglob(mod_dir) if p.is_file() and p.suffix.casefold() in {".esp", ".esm"}
+            and not ({part.casefold() for part in p.relative_to(mod_dir).parts[:-1]} & {"off", "extras"})]
+
+
+def _optional_plugin_choice(mod_dir: Path, rel: str, source: Path) -> dict | None:
+    """A nested plugin named optional, or the package's only plugin the docs or page call optional: its own
+    "Optional plugin" choice, ticked unless the docs or page warn against it (the warning is shown first)."""
+    import option_variants as V
+    texts = [t for t in (_read_docs([mod_dir / "Docs", mod_dir / "docs", mod_dir, source.parent]),
+                         _cached_page_text(mod_dir)) if t]
+    if len(_package_plugins(mod_dir)) != 1:
+        return None                       # several plugins: the usual nested/plugin choices apply
+    if not V.is_optional_plugin(source, texts, root=mod_dir):
+        return None
+    warning = V.warning_for(source.stem, texts, optional=True)
+    record = _choice_record({"mod_dir": mod_dir}, rel, source, group_key=f"optional-plugin:{rel}".casefold(),
+                            group_label="Optional plugin", selection_type="SelectAny", number=650,
+                            recommended=not warning, warning=warning, texts=texts, optional=True,
+                            evidence="its name or the docs call it optional"
+                                     + ("; the docs or page warn against it" if warning else ""))
+    record["key"] = "plugin-choice:" + rel.casefold()
+    if Path(rel).parent != Path(".") and source.parent.name.casefold() != "data files":
+        record["label"] = source.parent.name          # the folder's name, as for other nested plugins
+    return record
+
+
+def _core_variant_choices(mod_dir: Path, shared_docs: str) -> list[dict]:
+    """Exclusive variants inside a 00 folder Tidy already linked into the root ("00 Full Mod\\X - Necro Colors.esp" /
+    "X - Original Colors.esp"): one choice; only the chosen one stays in the root."""
+    import option_variants as V
+    extras = next((p for p in mod_dir.iterdir() if p.is_dir() and p.name.casefold() == "extras"), None) \
+        if mod_dir.is_dir() else None
+    if extras is None:
+        return []
+    page = _cached_page_text(mod_dir)
+    records = []
+    for folder in sorted((p for p in _safe_rglob(extras) if p.is_dir() and _is_core_folder(p.name)),
+                         key=lambda p: str(p).casefold()):
+        plugins = [p for p in folder.iterdir() if p.is_file() and p.suffix.casefold() in {".esp", ".esm"}
+                   and (mod_dir / p.name).exists()]
+        if len(plugins) < 2:
+            continue
+        texts = [t for t in (_read_docs([folder]), shared_docs, page) if t]
+        for index, group in enumerate(V.variant_groups(plugins, "\n".join(texts))):
+            warned = {p: V.warning_for(p.stem, texts) for p in group}
+            default = V.recommended_variant([p for p in group if not warned[p]] or group, texts)
+            match = OPTION_RE.match(folder.name)
+            label = match.group(2).strip() if match else folder.name
+            group_key = f"variants:{folder.relative_to(mod_dir)}:{index}".casefold()
+            for source in group:
+                records.append(_choice_record(
+                    {"mod_dir": mod_dir}, source.name, source, group_key=group_key,
+                    group_label=f"{label} — one variant", selection_type="SelectExactlyOne", number=0,
+                    recommended=source == default, warning=warned[source], texts=texts, optional=False,
+                    evidence="same name with a different variant tail, and the docs or the plugin records show "
+                             "they replace each other"))
+    return records
+
+
+def _sole_optional_root_choice(mod_dir: Path, entry: tuple[str, Path]) -> list[dict]:
+    """The package's only plugin, at the root, named or described as optional: a tickable choice (on unless the
+    docs or the page warn against it). Unticked, it is parked under Extras like other root plugin choices."""
+    rel, source = entry
+    if Path(rel).parent != Path("."):
+        return []                         # a Data Files plugin: the nested review below offers it
+    record = _optional_plugin_choice(mod_dir, rel, source)
+    if not record:
+        return []
+    record.pop("link_when_chosen", None)
+    record["number"] = 500
+    return [record]
+
+
 def _discover_plugin_choices(mod_dir: Path, installed: set[str],
                              represented: set[Path] | None = None) -> list[dict]:
     """Review sibling ESP/ESM files, using header and documentation clues for exclusivity."""
@@ -1276,6 +1505,10 @@ def _discover_plugin_choices(mod_dir: Path, installed: set[str],
         if represented and path.resolve() in represented:
             continue
         rel = str(relative)
+        optional = _optional_plugin_choice(mod_dir, rel, path)
+        if optional:
+            nested_records.append(optional)
+            continue
         masters = _plugin_masters(path)
         targets = masters - BASE_GAME_MASTERS
         nested_records.append({"key": "nested-plugin:" + rel.casefold(),
@@ -1306,6 +1539,8 @@ def _discover_plugin_choices(mod_dir: Path, installed: set[str],
         for path in extras_root.glob("*/unused-at-install/*.esp"):
             rel = path.name
             candidates.setdefault(rel.casefold(), (rel, path))
+    if len(candidates) == 1:
+        return nested_records + _sole_optional_root_choice(mod_dir, next(iter(candidates.values())))
     if len(candidates) < 2:
         return nested_records
 
@@ -1321,6 +1556,10 @@ def _discover_plugin_choices(mod_dir: Path, installed: set[str],
                         for i, left in enumerate(stems) for right in stems[i + 1:])
     patch_like = any(PATCH_LIKE_RE.search(Path(rel).stem.casefold()) for rel, _ in entries)
     exclusive = explicit or (same_nontrivial_masters and similar_names and not patch_like)
+    if not exclusive:
+        import option_variants as V
+        exclusive = any(len(group) == len(entries)
+                        for group in V.variant_groups([path for _, path in entries], docs))
     evidence = ("package documentation says these plugin choices are alternatives"
                 if explicit else "plugin headers share the same non-game master list and filenames look like variants"
                 if exclusive else "no strong exclusivity signal; choices are allowed together")
@@ -1347,6 +1586,9 @@ def _apply_plugin_choices(mod_dir: Path, records: list[dict], chosen: set[str]) 
     changed = 0
     for item in records:
         if not item.get("plugin_choice"):
+            continue
+        if item.get("link_when_chosen"):
+            changed += _apply_linked_choice(mod_dir, item, item["key"] in chosen)
             continue
         for rel, source in item["payload_files"].items():
             destination = mod_dir / rel
@@ -1882,11 +2124,20 @@ def _option_description(record: dict, mod_dir: Path, page_text: str = "",
         chosen = [line for score, line in sorted(ranked, key=lambda item: (-item[0], len(item[1]))) if score]
         return "\n".join(dict.fromkeys(chosen[:5]))
 
+    from mwnexus_parse import strip_code_lines
+    warning = str(record.get("warning") or "")
+
+    def first(text: str) -> str:
+        text = strip_code_lines(text).strip()
+        if warning and not text.startswith(warning):
+            text = warning + ("\n" + text.replace(warning, "").strip() if text.replace(warning, "").strip() else "")
+        return text
+
     # readme text was already matched to this option, in reading order: shown as it is, never re-ranked
     if record.get("docs", "").strip():
-        return record["docs"].strip()
+        return first(record["docs"])
     if not page_text:
-        return ""
+        return first("")
     # Mod-page text: stemmed, definition-aware matching on the folder's own name
     # ("01 Replacer" -> "Replacer - a replacer for some of the worst offenders ..."),
     # so payload file names and changelog lines do not drown out the real sentence.
@@ -1908,14 +2159,16 @@ def _option_description(record: dict, mod_dir: Path, page_text: str = "",
         chosen = best_option_sentences(page_text, name, extra_terms=record.get("targets", []),
                                            sibling_labels=sibling_labels)
         if chosen:
-            return refine("\n".join(chosen))
-    return ""
+            return first(refine("\n".join(chosen)))
+    return first("")
 
 
 def _is_hidden_required_option(item: dict) -> bool:
     """Recognize payload that is part of the mod's required base installation."""
     if item.get("informational_utility"):
         return False
+    if str(item.get("group_key", "")).startswith(("variants:", "optional-plugin:")):
+        return False                      # a choice of its own (option_variants), never base payload
     # A paired OpenMW/MWSE installer choice is resolved automatically: OpenMW is
     # hidden for this game and the MWSE payload is selected without a dialog.
     if item.get("preset_technology") == "mwse":
@@ -2020,6 +2273,8 @@ def _sole_data_files_choices(records: list[dict]) -> set[str]:
         if len(items) != 1:
             continue
         item = items[0]
+        if str(item.get("group_key", "")).startswith(("optional-plugin:", "variants:")):
+            continue                      # a choice of its own (option_variants), never packaging
         label = re.sub(r"[\\/]+$", "", str(item.get("label") or "")).strip().casefold()
         path = item.get("path")
         path_names = set()
