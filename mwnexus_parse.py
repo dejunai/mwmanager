@@ -241,6 +241,24 @@ def _lead_pattern(name: str):
                       + r"\s*(?:[-\u2013\u2014:]|\(|is\b|are\b|adds?\b|replaces?\b)", re.I)
 
 
+# A line of Lua, INI or other config code pasted into a description ("closeInspectionTweaks = true, -- ...",
+# "local x = 1", "end", "[General]" key lines): never prose about an option.
+_CODE_LINE = re.compile(
+    r"""^\s*(?:"""
+    r"""(?:local\s+)?[A-Za-z_][\w.:\[\]"']*\s*=\s*(?:true|false|nil|-?\d[\d.]*|"[^"]*"|'[^']*'|\{.*|[A-Za-z_][\w.]*\(.*)"""
+    r"""\s*[,;]?\s*(?:--.*|//.*|\#.*)?"""
+    r"""|(?:local|function|elseif|require)\b[^.!?]*[(){}=].*|end\s*[)}]?\s*"""
+    r"""|[{}()\[\];,]+\s*(?:--.*)?"""
+    r"""|--.*"""
+    r""")\s*$""")
+
+
+def strip_code_lines(text: str) -> str:
+    """Drop code-like lines (and a code tail after a sentence's last full stop is left alone)."""
+    kept = [line for line in str(text or "").splitlines() if not _CODE_LINE.match(line)]
+    return "\n".join(kept)
+
+
 def strip_thanks_sentences(text: str) -> str:
     """Drop a short trailing 'Huge thanks to X.' / 'Thanks X!' sentence from a description line."""
     out = _THANKS_SENTENCE.sub("", text or "").strip()
@@ -348,6 +366,7 @@ def best_option_sentences(page_text: str, label: str, extra_terms=(), limit: int
     that names the option. A sentence that also names a sibling option is trimmed to
     this option's conjunct when the two names are joined by 'and'. A label passed in sibling_labels is ignored when it is this option. Sentences that only share a generic stem (sound, music, replacer) are not treated as unique to the option.
     """
+    page_text = strip_code_lines(page_text)
     name = clean_label(label)
     label_stems = _stems_of(label)
     lead_patterns = [pat for pat in dict.fromkeys(
