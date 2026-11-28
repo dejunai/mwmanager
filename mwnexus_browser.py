@@ -1,6 +1,8 @@
 """Persistent, interactive Nexus browser for MWManager's FOMOD helper.
 
-The browser is a visible WebView2 window in a small child process. Its profile
+The browser is a WebView2 window in a small child process. MWManager's own page reads
+(capture_page_background) run hidden: no window appears and focus never moves; the window
+is shown only when the user opens the browser (open_page) or a download needs them. Its profile
 is private to MWManager and persistent, so users can sign in, complete a
 CAPTCHA and download files without exposing or copying cookies into the Python
 application. Page text is handed back to MWManager over an atomic local-file
@@ -15,6 +17,7 @@ import re
 import secrets
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from urllib.parse import urlparse
@@ -52,6 +55,32 @@ def _valid_browser_url(url: str) -> bool:
     return parsed.scheme == "https" and parsed.hostname in {
         "www.nexusmods.com", "nexusmods.com", "github.com", "www.github.com",
     }
+
+
+class NexusCheckNeeded(RuntimeError):
+    """Nexus showed its security check (a CAPTCHA) instead of the page: only the user can pass it, once, in the
+    visible MWManager browser."""
+
+
+class _HiddenChallenge(RuntimeError):
+    """Browser side: the hidden reader met a security check that did not clear by itself."""
+
+
+CHECK_NEEDED_STATUS = ("Nexus needs a quick check: open the Nexus page in the MWManager browser once and complete "
+                       "it, then retry.")
+BACKGROUND_INTERVAL = 2.0      # seconds between hidden page reads (rate limit)
+BACKGROUND_TIMEOUT = 75.0      # seconds one hidden read may take, browser start-up included
+CHECK_RETRY_AFTER = 15 * 60.0  # once Nexus asked for its check, hidden reads pause this long or until open_page
+HIDDEN_CHALLENGE_WAIT = 20.0   # a saved clearance passes Nexus's check unattended within this
+HIDDEN_IDLE_CLOSE = 300.0      # a browser nobody can see closes after this long without work
+_BACKGROUND_LOCK = threading.Lock()
+_BACKGROUND = {"last": 0.0, "check_needed_at": 0.0}
+
+
+def check_needed() -> bool:
+    """True while hidden reads are paused because Nexus asked for its security check."""
+    at = _BACKGROUND["check_needed_at"]
+    return bool(at) and time.monotonic() - at < CHECK_RETRY_AFTER
 
 
 def _pid_running(pid: int) -> bool:
@@ -431,6 +460,7 @@ def open_page(url: str, download_dir=None) -> None:
             "MWManager's embedded browser is not installed yet. Install the packages listed in "
             "requirements-nexus-browser.txt, then reopen MWManager."
         )
+    _BACKGROUND["check_needed_at"] = 0.0   # the user opened the browser: Nexus's check can be passed there
     root = _root()
     command = {"id": secrets.token_hex(12), "action": "open", "url": url,
                "download_dir": str(Path(download_dir).resolve()) if download_dir else ""}
@@ -454,11 +484,16 @@ def _capture_ready(page: dict, elapsed: float) -> bool:
             or elapsed > 15)
 
 
-def capture_page(mod_id: str, url: str | None = None) -> dict:
-    """Request readable DOM text, optionally navigating to the matching page atomically."""
+def _checked_mod_id(mod_id) -> str:
     mod_id = str(mod_id).strip()
     if not mod_id.isdigit() or int(mod_id) <= 0:
         raise ValueError("A valid Nexus mod ID is required.")
+    return mod_id
+
+
+def capture_page(mod_id: str, url: str | None = None) -> dict:
+    """Request readable DOM text from the browser the user has open, optionally navigating to the matching page."""
+    mod_id = _checked_mod_id(mod_id)
     if url is not None and not _valid_nexus_url(url):
         raise ValueError("Only an approved Nexus HTTPS page can be captured.")
     root = _root()
@@ -474,19 +509,80 @@ def capture_page(mod_id: str, url: str | None = None) -> dict:
     if url is not None:
         command["url"] = url
     _write_json(root / "command.json", command)
+    return _await_capture(root, request_id, pid)
+
+
+def _wait_for_browser_pid(limit: float) -> int:
+    deadline = time.monotonic() + limit
+    while True:
+        pid = _tracked_browser_pid()
+        if pid or time.monotonic() >= deadline:
+            return pid
+        time.sleep(0.1)
+
+
+def capture_page_background(mod_id: str, url: str, timeout: float = BACKGROUND_TIMEOUT, force: bool = False) -> dict:
+    """Read a Nexus page in MWManager's browser without showing anything.
+
+    The browser keeps the user's saved Nexus clearance, so it loads pages a plain HTTP request is refused (403).
+    When it is not running it starts hidden; when the user has it open, the read happens in a second hidden window
+    so their page is left alone. One read at a time, at most one every BACKGROUND_INTERVAL seconds, each bounded by
+    `timeout`. If Nexus shows a real CAPTCHA, nothing pops up: NexusCheckNeeded (CHECK_NEEDED_STATUS) is raised and
+    further hidden reads pause until the user opens the browser (`force` tries anyway).
+    """
+    mod_id = _checked_mod_id(mod_id)
+    if not _valid_nexus_url(url):
+        raise ValueError("Only an approved Nexus HTTPS page can be captured.")
+    if check_needed() and not force:
+        raise NexusCheckNeeded(CHECK_NEEDED_STATUS)
+    if importlib.util.find_spec("webview") is None:
+        raise RuntimeError("MWManager's embedded browser is not installed (requirements-nexus-browser.txt).")
+    started = time.monotonic()
+    if not _BACKGROUND_LOCK.acquire(timeout=max(0.0, timeout)):
+        raise RuntimeError("Another hidden Nexus page read did not finish in time.")
+    try:
+        pause = _BACKGROUND["last"] + BACKGROUND_INTERVAL - time.monotonic()
+        if pause > 0:
+            time.sleep(pause)
+        root = _root()
+        pid = _tracked_browser_pid()
+        if not pid:
+            _launch_if_needed(url, {"id": secrets.token_hex(12), "action": "open", "url": url, "hidden": True})
+            pid = _wait_for_browser_pid(15.0)
+            if not pid:
+                raise RuntimeError(_startup_error() or "The hidden MWManager browser did not start.")
+        request_id = secrets.token_hex(16)
+        _write_json(root / "command.json", {"id": request_id, "action": "capture", "mod_id": mod_id,
+                                            "url": url, "background": True})
+        remaining = max(10.0, timeout - (time.monotonic() - started))
+        try:
+            page = _await_capture(root, request_id, pid, first_reply=min(30.0, remaining), limit=remaining)
+        except NexusCheckNeeded as exc:
+            _BACKGROUND["check_needed_at"] = time.monotonic()
+            raise NexusCheckNeeded(CHECK_NEEDED_STATUS) from exc
+        _BACKGROUND["check_needed_at"] = 0.0
+        return page
+    finally:
+        _BACKGROUND["last"] = time.monotonic()
+        _BACKGROUND_LOCK.release()
+
+
+def _await_capture(root: Path, request_id: str, pid: int, first_reply: float = 15.0, limit: float = 75.0) -> dict:
     response_file = root / "response.json"
     # The browser answers with {"state": "working"} heartbeats while it waits for
     # Nexus to render the description, then with the final page or an error.
     started = time.monotonic()
-    deadline = started + 15  # until the first heartbeat
+    deadline = started + first_reply  # until the first heartbeat
     while time.monotonic() < deadline:
         response = _read_json(response_file)
         if response.get("id") == request_id:
             if response.get("state") == "working":
-                deadline = max(deadline, min(started + 75, time.monotonic() + 15))
+                deadline = max(deadline, min(started + limit, time.monotonic() + 15))
                 time.sleep(0.2)
                 continue
             if response.get("error"):
+                if response.get("challenge"):
+                    raise NexusCheckNeeded(str(response["error"]))
                 raise RuntimeError(str(response["error"]))
             page = response.get("page") or {}
             if not isinstance(page, dict):
@@ -494,7 +590,7 @@ def capture_page(mod_id: str, url: str | None = None) -> dict:
             from mwnexus_parse import page_text_from_capture
             text = page_text_from_capture(page)
             if _challenge_page(str(page.get("title", "")), str(page.get("text", ""))):
-                raise RuntimeError(
+                raise NexusCheckNeeded(
                     "Nexus is still showing its security check. Complete it in the MWManager browser, "
                     "then click Read page from browser again."
                 )
@@ -525,6 +621,131 @@ def cached_page(mod_id: str) -> dict | None:
         return value if value.get("text") else None
     except (OSError, ValueError, TypeError):
         return None
+
+
+GWL_EXSTYLE, WS_EX_TOOLWINDOW, WS_EX_APPWINDOW, WS_EX_NOACTIVATE = -20, 0x80, 0x40000, 0x8000000
+
+
+def quiet_style(style: int, quiet: bool) -> int:
+    """Extended window style for hidden work (never activated, no taskbar button) or for the user's window."""
+    if quiet:
+        return (style | WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
+    return (style | WS_EX_APPWINDOW) & ~(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW)
+
+
+def _set_quiet(window, quiet: bool) -> None:
+    """Apply quiet_style to a pywebview window's form. Style bits only: the window handle (and the WebView2 inside
+    it) stays the same, unlike WinForms' ShowInTaskbar, which recreates the handle."""
+    import ctypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetWindowLongW.argtypes = (ctypes.c_void_p, ctypes.c_int)
+    user32.GetWindowLongW.restype = ctypes.c_long
+    user32.SetWindowLongW.argtypes = (ctypes.c_void_p, ctypes.c_int, ctypes.c_long)
+    window.focus = not quiet          # pywebview re-adds WS_EX_NOACTIVATE on activation while focus is False
+    hwnd = ctypes.c_void_p(int(window.native.Handle.ToInt64()))
+    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE) & 0xFFFFFFFF
+    new = quiet_style(style, quiet)
+    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ctypes.c_long(new - (1 << 32) if new >= 1 << 31 else new).value)
+
+
+READER_TITLE = "MWManager - Nexus reader"
+
+
+def blocks_activation(hwnd: int, title: str, main_hwnd: int, main_quiet: bool) -> bool:
+    """Whether the activation guard refuses this window: the hidden reader always, the main window while it only
+    does MWManager's hidden work. The user's own windows and dialogs are never refused."""
+    return title == READER_TITLE or (main_quiet and bool(main_hwnd) and hwnd == main_hwnd)
+
+
+def _install_activation_guard(should_block):
+    """A CBT hook on the browser's GUI thread (this process only) that refuses activation for `should_block(hwnd)`
+    windows. pywebview shows a hidden window once at opacity 0 to set it up; WS_EX_NOACTIVATE alone did not stop
+    that Show() from taking the foreground for a moment (measured live), the hook does. Keep the return value."""
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    hook_proc = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+    user32.SetWindowsHookExW.argtypes = (ctypes.c_int, hook_proc, wintypes.HINSTANCE, wintypes.DWORD)
+    user32.SetWindowsHookExW.restype = wintypes.HHOOK
+    user32.CallNextHookEx.argtypes = (wintypes.HHOOK, ctypes.c_int, wintypes.WPARAM, wintypes.LPARAM)
+    user32.CallNextHookEx.restype = ctypes.c_ssize_t
+    wh_cbt, hcbt_activate = 5, 5
+
+    def proc(code, wparam, lparam):
+        try:
+            if code == hcbt_activate and should_block(int(wparam)):
+                return 1
+        except Exception:
+            pass
+        return user32.CallNextHookEx(None, code, wparam, lparam)
+
+    callback = hook_proc(proc)
+    hook = user32.SetWindowsHookExW(wh_cbt, callback, None, kernel32.GetCurrentThreadId())
+    return hook, callback
+
+
+def _window_title(hwnd: int) -> str:
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    user32.GetWindowTextW.argtypes = (wintypes.HWND, wintypes.LPWSTR, ctypes.c_int)
+    buffer = ctypes.create_unicode_buffer(256)
+    user32.GetWindowTextW(hwnd, buffer, 256)
+    return buffer.value
+
+
+def _navigate(target, url: str) -> None:
+    """load_url, except to the page the window already shows: WebView2 ignores a Source equal to its current one,
+    so no load ever completes and pywebview's next evaluate_js waits forever (a second hidden read of one page
+    timed out live). The page is already there, so it is read as it is."""
+    browser = getattr(getattr(target, "native", None), "browser", None)
+    current = str(getattr(browser, "url", "") or "")
+    if current and current.rstrip("/") == str(url).rstrip("/"):
+        return
+    target.load_url(url)
+
+
+def _add_navigation_bar(window) -> None:
+    """Back and Forward buttons in a strip above the page (outside it, so page reads never see them), each enabled
+    only while WebView2 has history that way. Alt+Left / Alt+Right keep working as in Edge."""
+    from System import Func, Object
+    from System.Windows.Forms import DockStyle, ToolStrip, ToolStripButton, ToolStripGripStyle
+    form = window.native
+    control = form.browser.webview
+
+    def build():
+        bar = ToolStrip()
+        bar.Dock = DockStyle.Top
+        bar.GripStyle = ToolStripGripStyle.Hidden
+        back = ToolStripButton("\u2190 Back")
+        forward = ToolStripButton("Forward \u2192")
+        back.ToolTipText = "Previous page (Alt+Left)"
+        forward.ToolTipText = "Next page (Alt+Right)"
+
+        def refresh(*_args):
+            back.Enabled = bool(control.CanGoBack)
+            forward.Enabled = bool(control.CanGoForward)
+
+        def go_back(*_args):
+            if control.CanGoBack:
+                control.GoBack()
+
+        def go_forward(*_args):
+            if control.CanGoForward:
+                control.GoForward()
+
+        back.Click += go_back
+        forward.Click += go_forward
+        bar.Items.Add(back)
+        bar.Items.Add(forward)
+        form.Controls.Add(bar)
+        control.BringToFront()        # WinForms docks back to front: the page fills what the strip leaves
+        control.CoreWebView2.HistoryChanged += refresh
+        refresh()
+        return None
+
+    form.Invoke(Func[Object](build))
 
 
 def _run_embedded_browser() -> None:
@@ -574,8 +795,12 @@ def _run_embedded_browser() -> None:
 
     api = BrowserApi()
     initial = _read_json(command_file)
-    # a first "download" command still has to run once the window exists; "open" is done by loading its URL
-    last_command = "" if initial.get("action") == "download" else str(initial.get("id", ""))
+    # a first "download" or "capture" command still has to run once the window exists; "open" is done by loading
+    # its URL
+    last_command = "" if initial.get("action") in ("download", "capture") else str(initial.get("id", ""))
+    # started for MWManager's own work (a hidden read or a download): no window until the user asks for one
+    start_hidden = initial.get("action") == "download" or bool(initial.get("hidden") or initial.get("background"))
+    view = {"visible": not start_hidden, "reader": None, "busy": 0, "activity": time.monotonic(), "nav": False}
     url = initial.get("url", "https://www.nexusmods.com/morrowind/")
     if not _valid_browser_url(url):
         url = "https://www.nexusmods.com/morrowind/"
@@ -607,20 +832,51 @@ def _run_embedded_browser() -> None:
     window = webview.create_window(
         "MWManager — Prerequisite Browser", url=url, js_api=api,
         width=1180, height=820, min_size=(760, 520), confirm_close=False,
-        hidden=initial.get("action") == "download",
+        hidden=start_hidden, focus=not start_hidden,
     )
     api._window = window
+    view["quiet"] = start_hidden and os.name == "nt"
+
+    def guard_activation():
+        # GUI thread, before the first Show(): from here on hidden windows cannot take the foreground
+        view["main_hwnd"] = int(window.native.Handle.ToInt64())
+        view["guard"] = _install_activation_guard(lambda hwnd: blocks_activation(
+            hwnd, _window_title(hwnd), view["main_hwnd"], view["quiet"]))
+
+    if os.name == "nt":
+        window.events.before_show += guard_activation
+    if view["quiet"]:
+        def quiet_from_the_start():
+            # GUI thread, between creating the form and pywebview's hidden Show()/Hide() (drawn at opacity 0).
+            # Setting Opacity rewrites the extended style, so the quiet bits go on again in Load, which WinForms
+            # raises inside Show() just before the window appears: never activated, no taskbar button.
+            _set_quiet(window, True)
+            window.native.Load += lambda _sender, _args: _set_quiet(window, True)
+
+        window.events.before_show += quiet_from_the_start
+
+    def add_navigation():
+        if view["nav"] or os.name != "nt":
+            return
+        view["nav"] = True
+        try:
+            _add_navigation_bar(window)
+        except Exception as exc:  # the browser still works without the buttons
+            _write_json(root / "navigation-error.json", {"error": str(exc), "time": time.time()})
+
+    window.events.loaded += add_navigation
 
     import threading
     from mwnexus_parse import CAPTURE_JS, decode_script_result, is_challenge
 
-    def run_script(script: str, timeout: float):
+    def run_script(script: str, timeout: float, target=None):
         """evaluate_js on a helper thread so a stalled page never wedges the mailbox loop."""
         box = {}
+        target = target or window
 
         def worker():
             try:
-                box["value"] = window.evaluate_js(script)
+                box["value"] = target.evaluate_js(script)
             except Exception as exc:  # JavascriptException, WebViewException
                 box["error"] = exc
 
@@ -633,36 +889,76 @@ def _run_embedded_browser() -> None:
             return None, str(box["error"])
         return decode_script_result(box.get("value")), ""
 
-    def capture(command_id: str, mod_id: str):
+    def capture(command_id: str, mod_id: str, target=None, background: bool = False):
+        target = target or window
         expected = re.compile(r"/mods/" + re.escape(mod_id) + r"(?:/|$)")
         started = time.monotonic()
         deadline = started + 45
-        page, detail = None, ""
+        page, detail, challenge_since = None, "", 0.0
         while time.monotonic() < deadline and not closed["value"]:
             _write_json(root / "response.json", {"id": command_id, "state": "working"})
-            page, detail = run_script(CAPTURE_JS, 12)
+            page, detail = run_script(CAPTURE_JS, 12, target)
             if page:
                 parsed = urlparse(str(page.get("url", "")))
                 if parsed.hostname not in {"www.nexusmods.com", "nexusmods.com"} \
                         or not expected.search(parsed.path.rstrip("/") + "/"):
+                    if background and time.monotonic() - started < 15:
+                        page = None          # the hidden reader is still leaving its previous page
+                        time.sleep(1.0)
+                        continue
                     raise RuntimeError(
                         "Open the matching Nexus mod page in the MWManager browser before reading it."
                     )
                 if is_challenge(str(page.get("title", "")), str(page.get("text", ""))):
-                    raise RuntimeError(
-                        "Nexus is still showing its security check. Complete it in the MWManager "
-                        "browser, then click Read page from browser again."
-                    )
+                    if not background:
+                        raise RuntimeError(
+                            "Nexus is still showing its security check. Complete it in the MWManager "
+                            "browser, then click Read page from browser again."
+                        )
+                    # a saved clearance passes the check by itself within seconds; a real CAPTCHA does not
+                    challenge_since = challenge_since or time.monotonic()
+                    if time.monotonic() - challenge_since > HIDDEN_CHALLENGE_WAIT:
+                        raise _HiddenChallenge("Nexus showed its security check to the hidden reader ("
+                                               + str(page.get("title", "")).strip() + ").")
+                    page = None
+                    time.sleep(1.0)
+                    continue
                 # Files pages have no description body; their populated file list is the readiness signal.
                 if _capture_ready(page, time.monotonic() - started):
                     return page
             time.sleep(1.0)
         if page:
             return page
+        if challenge_since:
+            raise _HiddenChallenge("Nexus kept showing its security check to the hidden reader.")
         raise RuntimeError(
             "The MWManager browser could not read the page (" + (detail or "no result") + "). "
             "Wait for Nexus to finish loading, then retry."
         )
+
+    def show_main():
+        view["visible"] = True
+        if view["quiet"]:
+            view["quiet"] = False
+            from System import Func, Object
+            window.native.Invoke(Func[Object](lambda: _set_quiet(window, False)))
+        window.show()
+
+    def hide_main():
+        view["visible"] = False
+        window.hide()
+
+    def reader_window(url: str):
+        """Where a hidden read happens: the main window while nobody can see it, else a second hidden window, so a
+        page the user is looking at is never navigated away. Returns (window, already loading url)."""
+        if not view["visible"]:
+            return window, False
+        if view["reader"] is None:
+            view["reader"] = webview.create_window(READER_TITLE, url=url, hidden=True,
+                                                   focus=False, width=1180, height=820)
+            view["reader"].events.loaded.wait(30)
+            return view["reader"], True
+        return view["reader"], False
 
     def trusted_click(x, y) -> bool:
         """Click viewport point (x, y) through WebView2's DevTools protocol: a trusted click, like the user's.
@@ -692,8 +988,8 @@ def _run_embedded_browser() -> None:
             return (set(downloads["finished"]) | set(downloads["failed"])) - known
 
         known = set(downloads["finished"]) | set(downloads["failed"])
-        window.hide()
-        window.load_url(url)
+        hide_main()
+        _navigate(window, url)
         started, shown = time.monotonic(), False
         say(message="Opening the Nexus file page…")
         clicked_at, fallback_done, last_target = 0.0, False, {}
@@ -710,16 +1006,16 @@ def _run_embedded_browser() -> None:
             blocked = bool(page) and is_challenge(str(page.get("title", "")), str(page.get("text", "")))
             stuck = time.monotonic() - started > 30          # no download button found: login or a changed page
             if (blocked or stuck) and not shown:
-                window.show()
+                show_main()
                 shown = True
             elif shown and page and not blocked and page.get("clicked"):
-                window.hide()                                 # the proper page is back: carry on unseen
+                hide_main()                                   # the proper page is back: carry on unseen
                 shown = False
             say(message="Nexus needs you in the MWManager browser: complete the security check or sign in, "
                         "then click Start download (Slow download on older pages) if it does not start." if shown else
                         "Waiting for Nexus to start the download…")
             time.sleep(1.0)
-        window.hide()
+        hide_main()
         while not closed["value"] and downloads["active"]:
             for target in sorted(downloads["active"]):
                 got, total = downloads["progress"].get(target, [0, 0])
@@ -732,6 +1028,14 @@ def _run_embedded_browser() -> None:
         else:
             say(error="The download failed or was cancelled in the MWManager browser.")
 
+    def busy_download(command_id: str, url: str):
+        view["busy"] += 1
+        try:
+            download(command_id, url)
+        finally:
+            view["busy"] -= 1
+            view["activity"] = time.monotonic()
+
     def service_requests():
         nonlocal last_command
         while not closed["value"]:
@@ -740,6 +1044,7 @@ def _run_embedded_browser() -> None:
                 command_id = str(command.get("id", ""))
                 if command_id and command_id != last_command:
                     last_command = command_id
+                    view["activity"] = time.monotonic()
                     if command.get("action") == "open":
                         new_url = str(command.get("url", ""))
                         new_folder = str(command.get("download_dir", "")).strip()
@@ -747,7 +1052,9 @@ def _run_embedded_browser() -> None:
                             download_folder["path"] = Path(new_folder)
                             download_folder["path"].mkdir(parents=True, exist_ok=True)
                         if _valid_browser_url(new_url):
-                            window.load_url(new_url)
+                            _navigate(window, new_url)
+                            if not command.get("hidden"):
+                                show_main()          # the user asked for the browser: show it
                     elif command.get("action") == "close":
                         # Graceful close: pywebview tears WebView2 down normally, so the
                         # persistent profile (cookies, security-check clearance) is flushed.
@@ -763,24 +1070,46 @@ def _run_embedded_browser() -> None:
                         else:
                             download_folder["path"] = Path(folder)
                             download_folder["path"].mkdir(parents=True, exist_ok=True)
-                            threading.Thread(target=download, args=(command_id, target_url), daemon=True).start()
+                            threading.Thread(target=busy_download, args=(command_id, target_url), daemon=True).start()
                     elif command.get("action") == "capture":
+                        background = bool(command.get("background"))
+                        view["busy"] += 1
                         try:
                             capture_url = str(command.get("url", ""))
-                            if capture_url:
-                                if not _valid_nexus_url(capture_url):
-                                    raise ValueError("Refused an invalid Nexus capture URL.")
-                                window.load_url(capture_url)
-                            page = capture(command_id, str(command.get("mod_id", "")))
+                            if capture_url and not _valid_nexus_url(capture_url):
+                                raise ValueError("Refused an invalid Nexus capture URL.")
+                            target, loading = (reader_window(capture_url) if background and capture_url
+                                               else (window, False))
+                            if capture_url and not loading:
+                                _navigate(target, capture_url)
+                            page = capture(command_id, str(command.get("mod_id", "")), target, background)
                             _write_json(root / "response.json", {"id": command_id, "page": page})
+                        except _HiddenChallenge as exc:
+                            _write_json(root / "response.json",
+                                        {"id": command_id, "error": str(exc), "challenge": True})
                         except Exception as exc:
                             _write_json(root / "response.json", {"id": command_id, "error": str(exc)})
+                        finally:
+                            view["busy"] -= 1
+                            view["activity"] = time.monotonic()
+                if (not view["visible"] and not view["busy"] and not downloads["active"]
+                        and time.monotonic() - view["activity"] > HIDDEN_IDLE_CLOSE):
+                    # only MWManager's hidden work used this browser and it is done: do not linger unseen
+                    closed["value"] = True
+                    window.destroy()
+                    return
             except Exception:
                 pass
             time.sleep(0.25)
 
     def on_closed():
         closed["value"] = True
+        reader, view["reader"] = view["reader"], None
+        if reader is not None:
+            try:
+                reader.destroy()
+            except Exception:
+                pass
         try:
             pid_file.unlink(missing_ok=True)
         except OSError:

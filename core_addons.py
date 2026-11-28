@@ -1522,6 +1522,30 @@ def _files_page_version(text: str) -> str | None:
     return match.group(1) if match else None
 
 
+def _hidden_files_pages(blocked: list, versions: dict, progress_callback) -> list:
+    """Read refused Files pages in MWManager's hidden browser (the user's saved Nexus clearance, no window).
+    Returns the pages still unread; once Nexus asks for its check, the rest go to the visible browser flow."""
+    try:
+        import mwnexus_browser
+    except ImportError:
+        return blocked
+    left = []
+    for index, (master, mod_id, url, error) in enumerate(blocked):
+        try:
+            page = mwnexus_browser.capture_page_background(str(mod_id), url)
+            version = _files_page_version(page.get("text", ""))
+            if not version:
+                raise RuntimeError("displayed version not found")
+        except mwnexus_browser.NexusCheckNeeded:
+            return left + list(blocked[index:])
+        except (OSError, RuntimeError, ValueError) as exc:
+            left.append((master, mod_id, url, f"{error}; hidden browser: {exc}"))
+            continue
+        versions[master] = version
+        progress_callback(f"Nexus Files page: {master} version {version}")
+    return left
+
+
 def _scrape_nexus_versions(found: set[str], progress_callback, timeout: float, ids=None) -> dict[str, str]:
     """Best-effort Files-page versions; use the visible browser only when Nexus blocks ordinary requests."""
     from mwnexus_parse import html_to_text, is_challenge
@@ -1544,6 +1568,8 @@ def _scrape_nexus_versions(found: set[str], progress_callback, timeout: float, i
         except Exception as exc:
             blocked.append((master, mod_id, url, str(exc)))
 
+    if blocked:
+        blocked = _hidden_files_pages(blocked, versions, progress_callback)
     ask = getattr(progress_callback, "ask_yes_no", None)
     if not blocked or not ask:
         return versions

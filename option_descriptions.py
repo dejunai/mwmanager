@@ -104,6 +104,23 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
+def _hidden_read(mod_id: str, url: str, log, refused: str) -> tuple[str, float | None, str]:
+    """Nexus refused the plain request: read the page in MWManager's hidden browser (the user's saved clearance, no
+    window) and cache it. A CAPTCHA there gives the one actionable status; the detail goes to the log."""
+    import mock_fomod
+    import mwnexus_browser
+    try:
+        page = mock_fomod._capture_with_browser(mwnexus_browser, mod_id, url)
+        mwnexus_browser.cache_page(mod_id, page)
+        return str(page.get("text", "")), time.time(), ""
+    except mwnexus_browser.NexusCheckNeeded as exc:
+        log(f"  {mod_id}: {refused}; hidden browser read: {exc}")
+        return "", None, mwnexus_browser.CHECK_NEEDED_STATUS
+    except (RuntimeError, ValueError, OSError) as exc:
+        log(f"  {mod_id}: {refused}; hidden browser read failed: {exc}")
+        return "", None, f"{refused}; hidden browser read failed: {exc}"
+
+
 def page_text(mod_id: str, fetch: str, refresh_days: float, log=print) -> tuple[str, float | None, str]:
     """(text, cached_at, problem) for a mod page, from the browser cache or a new read."""
     import mwnexus_browser
@@ -133,9 +150,11 @@ def page_text(mod_id: str, fetch: str, refresh_days: float, log=print) -> tuple[
         title = (re.search(r"(?is)<title>(.*?)</title>", markup) or [None, ""])[1]
         text = html_to_text(markup)
         if is_challenge(title, text):
-            return "", None, "Nexus answered with a security check (complete it in the MWManager browser)"
+            return _hidden_read(mod_id, url, log, "Nexus answered with a security check")
         return text, time.time(), ""
     except urllib.error.HTTPError as exc:
+        if exc.code == 403:
+            return _hidden_read(mod_id, url, log, "HTTP 403")
         return "", None, f"HTTP {exc.code}"
     except (urllib.error.URLError, OSError, ValueError) as exc:
         return "", None, f"fetch failed: {exc}"

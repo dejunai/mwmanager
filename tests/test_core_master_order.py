@@ -120,6 +120,8 @@ class PriorityList(unittest.TestCase):
         progress = Progress()
         page = {"text": "Patch for Purists\nVersion\n5.0.7\nMain files\nPatch archive"}
         with mock.patch.object(core_addons.urllib.request, "urlopen", side_effect=OSError("blocked")), \
+                mock.patch.object(mwnexus_browser, "capture_page_background",
+                                  side_effect=mwnexus_browser.NexusCheckNeeded("check")), \
                 mock.patch.object(mwnexus_browser, "open_page"), \
                 mock.patch.object(mwnexus_browser, "capture_page", return_value=page), \
                 mock.patch.object(mwnexus_browser, "close_browser"):

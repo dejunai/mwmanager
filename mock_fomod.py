@@ -1695,9 +1695,13 @@ def _nexus_mod_id(mod_dir: Path) -> str:
     return match.group(1) if match else ""
 
 
-def _capture_with_browser(browser, mod_id: str, url: str | None, wait: float = 30.0) -> dict:
-    """The rendered mod page from the MWManager browser, loading `url` there; the browser is started when it isn't
-    running (opening the page), and the capture waits for it to come up."""
+def _capture_with_browser(browser, mod_id: str, url: str | None, wait: float = 30.0, *,
+                          background: bool = True, force: bool = False) -> dict:
+    """The rendered mod page from the MWManager browser. Normally read hidden (capture_page_background: no window,
+    no focus change; `force` tries even after Nexus asked for its check). Without a hidden reader the page is loaded
+    in the browser, which is started when it isn't running, and the capture waits for it to come up."""
+    if background and url and hasattr(browser, "capture_page_background"):
+        return browser.capture_page_background(mod_id, url, force=force)
     deadline, opened = time.monotonic() + wait, False
     while True:
         try:
@@ -1709,6 +1713,37 @@ def _capture_with_browser(browser, mod_id: str, url: str | None, wait: float = 3
                 browser.open_page(url)
                 opened = True
             time.sleep(1)
+
+
+def _check_needed_status() -> str:
+    try:
+        import mwnexus_browser
+    except ImportError:
+        return ""
+    return str(getattr(mwnexus_browser, "CHECK_NEEDED_STATUS", ""))
+
+
+def _hidden_browser_text(mod_dir: Path, cache_key: str) -> str:
+    """Nexus refused the plain request (HTTP 403 or its security page): read the page in MWManager's hidden browser,
+    which carries the user's saved Nexus clearance, and cache it. No window is shown. When Nexus wants its check
+    again, the one status line says so and the details go to the log."""
+    mod_id, url = _nexus_mod_id(mod_dir), _nexus_page_url(mod_dir)
+    try:
+        import mwnexus_browser
+    except ImportError:
+        return ""
+    if not mod_id or not url or not mwnexus_browser._valid_nexus_url(url):
+        return ""
+    try:
+        page = _capture_with_browser(mwnexus_browser, mod_id, url)
+        mwnexus_browser.cache_page(mod_id, page)
+    except (RuntimeError, ValueError, OSError) as exc:
+        print(f"Hidden Nexus browser read of {url} failed: {exc!r}", flush=True)
+        if isinstance(exc, mwnexus_browser.NexusCheckNeeded):
+            _NEXUS_FETCH_ERRORS[cache_key] = mwnexus_browser.CHECK_NEEDED_STATUS
+        return ""
+    _NEXUS_FETCH_ERRORS.pop(cache_key, None)
+    return str(page.get("text", ""))
 
 
 def _nexus_page_text(mod_dir: Path, *, refresh=False) -> str:
@@ -1770,7 +1805,10 @@ def _nexus_page_text(mod_dir: Path, *, refresh=False) -> str:
                 "Nexus returned a bot-protection/CAPTCHA page. Open page on Nexus, complete the "
                 "challenge in the MWManager browser, then click Read page from browser."
             )
-            return ""
+            found = _hidden_browser_text(mod_dir, cache_key)
+            if found:
+                _NEXUS_TEXT_CACHE[cache_key] = found
+            return found
         result = (text.description + "\n" + body_text if text.description else body_text)
         result = re.sub(r"[ \t]+", " ", result)
         result = re.sub(r"\n\s*\n+", "\n", result).strip()[:30000]
@@ -1781,9 +1819,10 @@ def _nexus_page_text(mod_dir: Path, *, refresh=False) -> str:
                 "open page on Nexus, complete any challenge in the MWManager browser, then click "
                 "Read page from browser."
             )
+            result = _hidden_browser_text(mod_dir, cache_key)
         else:
             _NEXUS_FETCH_ERRORS[cache_key] = f"Nexus returned HTTP {exc.code} {exc.reason}."
-        result = ""
+            result = ""
     except urllib.error.URLError as exc:
         reason = getattr(exc, "reason", exc)
         _NEXUS_FETCH_ERRORS[cache_key] = f"Could not connect to Nexus: {reason}."
@@ -2226,12 +2265,15 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
                     cached = mwnexus_browser.cached_page(mod_id)
                     found = str(cached.get("text", "")) if cached else ""
                 if not found:
-                    page = _capture_with_browser(mwnexus_browser, mod_id, _nexus_page_url(mod_dir))
+                    # hidden: no window; the Read page from browser button (no trigger) retries past a check
+                    page = _capture_with_browser(mwnexus_browser, mod_id, _nexus_page_url(mod_dir),
+                                                 force=trigger_button is None)
                     mwnexus_browser.cache_page(mod_id, page)
                     found = page["text"]
             except Exception as exc:
                 found = ""
                 error = str(exc)
+                print(f"Nexus browser read of mod {mod_id} failed: {exc!r}", flush=True)
             return found, error
 
         def apply_result(found, error):
@@ -2248,6 +2290,8 @@ def _show_selector(mod_name: str, records: list[dict], previous: set[str], force
                 _NEXUS_FETCH_ERRORS.pop(cache_key, None)
                 search_button.configure(text="Search for more info")
                 info_state["status"][key] = "Page read from the MWManager browser and cached for future lookups."
+            elif error and error == _check_needed_status():
+                info_state["status"][key] = error          # one actionable line; the details are in the log
             else:
                 info_state["status"][key] = (
                     f"Browser page was not captured: {error} Open the Nexus page, finish any "
