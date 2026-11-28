@@ -1208,6 +1208,30 @@ def _drop_superseded_choices(mod_dir: Path, records: list[dict], available_plugi
     return kept
 
 
+_WRAPPER_IGNORED = {"docs", "extras", "off", "bugreports", "screenshots", "fomod"}
+
+
+def _lone_plugin_wrapper(mod_dir: Path) -> str | None:
+    """Name of the package's only content folder when it directly holds the package's only ESP/ESM and the root
+    holds no plugin or game folder of its own; None otherwise (several plugins stay separate choices)."""
+    try:
+        entries = [p for p in mod_dir.iterdir() if not p.name.startswith(".")]
+    except OSError:
+        return None
+    if any(p.is_file() and p.suffix.casefold() in {".esp", ".esm"} for p in entries):
+        return None
+    folders = [p for p in entries if p.is_dir() and p.name.casefold() not in _WRAPPER_IGNORED]
+    if len(folders) != 1 or folders[0].name.casefold() in GAME_DIRS | {"data files", "mwse", "mge3", "shaders"}:
+        return None
+    if OPTION_RE.match(folders[0].name) or (mod_dir / "fomod").is_dir():
+        return None
+    plugins = [p for p in _safe_rglob(mod_dir) if p.is_file() and p.suffix.casefold() in {".esp", ".esm"}
+               and not ({part.casefold() for part in p.relative_to(mod_dir).parts[:-1]} & {"off", "extras"})]
+    if len(plugins) != 1 or plugins[0].parent != folders[0]:
+        return None
+    return folders[0].name
+
+
 def _discover_plugin_choices(mod_dir: Path, installed: set[str],
                              represented: set[Path] | None = None) -> list[dict]:
     """Review sibling ESP/ESM files, using header and documentation clues for exclusivity."""
@@ -1227,6 +1251,7 @@ def _discover_plugin_choices(mod_dir: Path, installed: set[str],
     # Every optional nested ESP/ESM gets its own opt-in entry, regardless of folder depth.
     # The base payload folders remain governed by their required 00 package choice.
     nested_records = []
+    lone_wrapper = _lone_plugin_wrapper(mod_dir)
     excluded_parts = {"off", "docs", "screenshots", "bugreports", "openmw", "grass", "fomod", "unused-at-install"}
     required_parts = {"00 core", "00 data files", "00 - core", "00 - data files"}
     for path in sorted(_safe_rglob(mod_dir), key=lambda item: str(item).casefold()):
@@ -1237,6 +1262,10 @@ def _discover_plugin_choices(mod_dir: Path, installed: set[str],
             continue
         # A lone "Data Files" wrapper is packaging, not a choice: its masters are the package itself.
         if path.suffix.casefold() == ".esm" and [part.casefold() for part in relative.parts[:-1]] == ["data files"]:
+            continue
+        # The package's only plugin inside its only content folder ("Mod PTR\\Mod PTR.ESP"): packaging, not a
+        # choice. Tidy flattens that wrapper into the root after the options, so the plugin installs with the mod.
+        if lone_wrapper and len(relative.parts) == 2 and relative.parts[0] == lone_wrapper:
             continue
         normalized_parts = {re.sub(r"[_-]+", " ", part).strip().casefold() for part in relative.parts[:-1]}
         if any(part.casefold() in excluded_parts for part in relative.parts[:-1]):

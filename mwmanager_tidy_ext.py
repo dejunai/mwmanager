@@ -47,6 +47,9 @@ def misnamed_reason(folder):
     return f"{PACKING_MARK}the author packed '{folder}', which the game never reads; renamed to " \
            f"'{MISNAMED_DIRS[folder.casefold()]}'"
 OUR_DIRS = {"docs", "extras", "off", "bugreports"}
+# Folders a lone wrapper around the mod's data may hold that deploy into Data Files: game folders plus the
+# MWSE/MGE support folders (not "fomod", which is installer data, nor "grass", kept apart for review).
+PLUGIN_FILE_EXT = {".esp", ".esm"}
 LINK_PREFIX = "link: "              # a planned 00 Core file: hard-linked into the root, the 00 folder kept in Extras
 STAGING_DIRS = OUR_DIRS | {"screenshots", "grass"}
 OPENMW_DIRS = {"openmw", "scripts", "l10n", "playlists", "animations"}
@@ -661,6 +664,8 @@ def plan_mod(mod_dir):
             move(src, os.path.join(mod_dir, dest_name),
                  "OpenMW-compatible plugin renamed .esp for vanilla Morrowind")
             CONVERTED_ADDONS[e.casefold()] = dest_name
+    WRAPPER_DATA_DIRS = set(GAME_DIRS) | (SUPPORT_DIRS - {"fomod", "grass"})
+
     def lone_data_wrapper(src, e):
         """`e` is the mod's only content folder and holds its game data: in a "Data Files" folder
         ("SM_BCTree_1_0\\Data files\\Meshes") -> "data files", or directly ("Better Telvanni Crystal V2 4k\\Meshes",
@@ -678,8 +683,11 @@ def plan_mod(mod_dir):
                                        or os.path.splitext(c)[1].casefold() in KEEP_FILE_EXT
                                        for c in os.listdir(inner)) else False
         # game folders straight inside the wrapper: only real game folder names count here (a lone folder of
-        # loose files or misnamed folders is still left to the usual rules)
-        return "root" if any(c.casefold() in GAME_DIRS and os.path.isdir(os.path.join(src, c))
+        # loose files or misnamed folders is still left to the usual rules). MWSE/MGE support folders and the
+        # mod's own plugin file count too ("Vampire Masquerade PTR\\MWSE\\...", "Anthology\\X.esm").
+        return "root" if any((c.casefold() in WRAPPER_DATA_DIRS and os.path.isdir(os.path.join(src, c)))
+                             or (os.path.splitext(c)[1].casefold() in PLUGIN_FILE_EXT
+                                 and os.path.isfile(os.path.join(src, c)))
                              for c in os.listdir(src)) else False
 
     for e in sorted(entries):
@@ -827,7 +835,7 @@ def plan_mod(mod_dir):
                 if wrapper == "data files" and parts[0].casefold() == "data files" and len(parts) > 1:
                     move(p, os.path.join(mod_dir, *parts[1:]),
                          f"wrapper folder '{e}': its Data Files flattened into the staging root")
-                elif wrapper == "root" and len(parts) > 1 and parts[0].casefold() in GAME_DIRS:
+                elif wrapper == "root" and len(parts) > 1 and parts[0].casefold() in WRAPPER_DATA_DIRS:
                     move(p, os.path.join(mod_dir, rel), f"wrapper folder '{e}': its game folders moved to the root")
                 elif wrapper == "root" and len(parts) == 1 and os.path.splitext(rel)[1].casefold() in KEEP_FILE_EXT \
                         and not is_doc(p):
